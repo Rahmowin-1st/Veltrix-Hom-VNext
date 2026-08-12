@@ -16,6 +16,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: veltrix-hom-part1-completion
+      - name: Record probed branch HEAD
+        shell: bash
+        run: git rev-parse HEAD
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
