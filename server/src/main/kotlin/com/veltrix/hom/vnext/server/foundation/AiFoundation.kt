@@ -82,7 +82,9 @@ class DeterministicTestModelProvider : ModelProviderAdapter {
             append(";tools=").append(context.toolIds.sorted().joinToString(","))
         }
         val segments = listOf("TEST_ONLY: ", fingerprint, " | ", normalized.take(160))
+        val slowCiProbe = normalized.contains("CI_SLOW_STREAM_MARKER")
         for ((index, segment) in segments.withIndex()) {
+            if (slowCiProbe) Thread.sleep(250) // test-only provider; enables real HTTP cancellation verification
             cancellation.throwIfCancelled()
             yield(AiProviderChunk(segment, final = index == segments.lastIndex))
         }
