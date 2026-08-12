@@ -1,0 +1,45 @@
+name: Fix Part 1 runtime MinIO image
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/fix-runtime-minio-image.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-part1-completion
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pin verified legacy MinIO container digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/part1-runtime-final-gate.yml')
+          s=p.read_text()
+          old="IMAGE='quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z'"
+          new="IMAGE='minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e'"
+          if old not in s:
+              raise SystemExit('expected MinIO image line not found')
+          p.write_text(s.replace(old,new))
+          PY
+          git diff --check
+          git diff -- .github/workflows/part1-runtime-final-gate.yml
+      - name: Commit runtime gate image repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Veltrix Backend CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/workflows/part1-runtime-final-gate.yml
+          git commit -m 'ci: pin available MinIO digest in runtime final gate'
+          git push origin HEAD:veltrix-hom-part1-completion
