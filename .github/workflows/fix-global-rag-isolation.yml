@@ -1,0 +1,45 @@
+name: Fix global RAG isolation
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/fix-global-rag-isolation.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-part1-completion
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enforce explicit source/project boundary for RAG
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('server/src/main/kotlin/com/veltrix/hom/vnext/server/ai/AiOrchestration.kt')
+          s=p.read_text()
+          old='''        val hits = rag.search(\n            accountId = accountId,\n            query = retrievalQuery,\n            sourceIds = effectiveSourceIds,\n            projectId = if (projectId != null && effectiveSourceIds.isEmpty()) projectId else null,\n            limit = 8,\n        )'''
+          new='''        // Global chats must never silently search the account-wide Source Library.\n        // RAG is enabled only by explicit selected sources or by an active Project brain.\n        val hits = if (effectiveSourceIds.isEmpty() && projectId == null) emptyList() else rag.search(\n            accountId = accountId,\n            query = retrievalQuery,\n            sourceIds = effectiveSourceIds,\n            projectId = if (projectId != null && effectiveSourceIds.isEmpty()) projectId else null,\n            limit = 8,\n        )'''
+          if s.count(old) != 1:
+              raise SystemExit(f'expected one RAG orchestration block, found {s.count(old)}')
+          p.write_text(s.replace(old,new))
+          PY
+          git diff --check
+          git diff -- server/src/main/kotlin/com/veltrix/hom/vnext/server/ai/AiOrchestration.kt
+      - name: Commit isolation fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Veltrix Backend CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add server/src/main/kotlin/com/veltrix/hom/vnext/server/ai/AiOrchestration.kt
+          git commit -m 'fix: prevent implicit account-wide RAG in global chats'
+          git push origin HEAD:veltrix-hom-part1-completion
