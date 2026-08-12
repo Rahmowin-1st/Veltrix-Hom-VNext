@@ -1,0 +1,45 @@
+name: Add global RAG isolation regression
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/add-global-rag-regression.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-part1-completion
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add integration regression assertion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('server/src/test/kotlin/com/veltrix/hom/vnext/server/Part1CompletionIntegrationTest.kt')
+          s=p.read_text()
+          old='''                assertNull(globalCtx.planned.projectInstruction)\n                assertFalse(globalCtx.planned.memories.any { it.scopeId == project.id })\n                assertTrue(globalCtx.planned.memories.any { it.statement.contains("concise", true) })'''
+          new='''                assertNull(globalCtx.planned.projectInstruction)\n                assertTrue(globalCtx.citations.isEmpty(), "Global chat without selected sources must not inherit account/project Source Library RAG")\n                assertFalse(globalCtx.planned.memories.any { it.scopeId == project.id })\n                assertTrue(globalCtx.planned.memories.any { it.statement.contains("concise", true) })'''
+          if s.count(old) != 1:
+              raise SystemExit(f'expected one global context assertion block, found {s.count(old)}')
+          p.write_text(s.replace(old,new))
+          PY
+          git diff --check
+          git diff -- server/src/test/kotlin/com/veltrix/hom/vnext/server/Part1CompletionIntegrationTest.kt
+      - name: Commit regression test
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Veltrix Backend CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add server/src/test/kotlin/com/veltrix/hom/vnext/server/Part1CompletionIntegrationTest.kt
+          git commit -m 'test: lock global RAG isolation regression'
+          git push origin HEAD:veltrix-hom-part1-completion
