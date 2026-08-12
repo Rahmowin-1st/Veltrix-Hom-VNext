@@ -1,0 +1,36 @@
+name: MinIO CI Diagnostic
+on:
+  push:
+    branches: [ veltrix-hom-part1-completion ]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MINIO_ROOT_USER: veltrixci
+      MINIO_ROOT_PASSWORD: veltrixci-secret-2026
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run and inspect pinned MinIO
+        shell: bash
+        run: |
+          set -u
+          docker pull quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z
+          docker run -d --name veltrix-minio -p 9000:9000 -p 9001:9001 -e MINIO_ROOT_USER="$MINIO_ROOT_USER" -e MINIO_ROOT_PASSWORD="$MINIO_ROOT_PASSWORD" quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z server /data --console-address ':9001'
+          for i in $(seq 1 20); do
+            echo "--- probe $i ---"
+            docker ps -a --filter name=veltrix-minio
+            docker inspect -f 'status={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}' veltrix-minio || true
+            docker logs --tail 80 veltrix-minio || true
+            if curl -v --max-time 3 http://127.0.0.1:9000/minio/health/ready; then
+              echo MINIO_READY=PASS
+              exit 0
+            fi
+            sleep 2
+          done
+          echo MINIO_READY=FAIL
+          docker inspect veltrix-minio || true
+          exit 1
