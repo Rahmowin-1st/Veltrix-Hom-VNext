@@ -119,6 +119,7 @@ class Part1CompletionIntegrationTest {
                 ))
                 assertNull(globalCtx.planned.projectId)
                 assertNull(globalCtx.planned.projectInstruction)
+                assertTrue(globalCtx.citations.isEmpty(), "Global chat without selected sources must not inherit account/project Source Library RAG")
                 assertFalse(globalCtx.planned.memories.any { it.scopeId == project.id })
                 assertTrue(globalCtx.planned.memories.any { it.statement.contains("concise", true) })
 
