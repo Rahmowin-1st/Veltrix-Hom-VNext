@@ -1,0 +1,162 @@
+name: Android 17 SystemUI Isolation Probe
+
+on:
+  push:
+    branches: [veltrix-hom-part1-completion]
+    paths: ['.github/workflows/android17-systemui-isolation-probe.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  V10_RUN_ID: "31594099599"
+  V10_ARTIFACT: veltrix-hom-part1-final-v10-31594099599
+  APK_SHA: 4a70f76e971ed11a58cd125da050bef23b61223aa148e353994b4912d69342da
+  TEST_APK_SHA: a6afe3978740c081edc8b1b1a4de785150cb1e16d8017a3a4e54ff32fe8fcd49
+  IMAGE_PACKAGE: system-images;android-37.0;google_apis;x86_64
+  ANDROID_AVD_HOME: ${{ github.workspace }}/.android-avd
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+
+      - name: Import exact V10 APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/prior-v10 evidence/probe
+          gh run download "$V10_RUN_ID" -n "$V10_ARTIFACT" -D evidence/prior-v10
+          echo "$APK_SHA  evidence/prior-v10/Veltrix-Hom-VNext-Part1-FINAL.apk" | sha256sum -c -
+          echo "$TEST_APK_SHA  evidence/prior-v10/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk" | sha256sum -c -
+          printf 'commit=%s\nproduct_apk_sha=%s\ntest_apk_sha=%s\n' "$GITHUB_SHA" "$APK_SHA" "$TEST_APK_SHA" | tee evidence/probe/provenance.txt
+
+      - uses: android-actions/setup-android@v3
+      - name: Install API37 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --channel=0 'platform-tools' 'emulator' "$IMAGE_PACKAGE"
+          sudo apt-get update >/dev/null
+          sudo apt-get install -y libpulse0 >/dev/null
+          "$ANDROID_HOME/emulator/emulator" -version 2>&1 | tee evidence/probe/emulator-version.txt
+
+      - name: Boot API37 and isolate SystemUI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo chmod 666 /dev/kvm
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd -n veltrix_probe_api37 -k "$IMAGE_PACKAGE" -f
+          C="$ANDROID_AVD_HOME/veltrix_probe_api37.avd/config.ini"
+          grep -q '^hw.ramSize=' "$C" && sed -i 's/^hw.ramSize=.*/hw.ramSize=4096/' "$C" || echo hw.ramSize=4096 >> "$C"
+          grep -q '^hw.cpu.ncore=' "$C" && sed -i 's/^hw.cpu.ncore=.*/hw.cpu.ncore=4/' "$C" || echo hw.cpu.ncore=4 >> "$C"
+          adb kill-server || true
+          adb start-server
+          nohup "$ANDROID_HOME/emulator/emulator" @veltrix_probe_api37 -port 5554 -memory 4096 -cores 4 -no-window -gpu software -noaudio -no-boot-anim -no-snapshot -no-metrics -accel on > evidence/probe/emulator.log 2>&1 &
+          EPID=$!
+          echo "$EPID" > evidence/probe/emulator.pid
+          SERIAL=''
+          for i in $(seq 1 180); do
+            kill -0 "$EPID" 2>/dev/null || break
+            SERIAL=$(adb devices | awk 'NR>1 && $2=="device" {print $1; exit}')
+            [ -n "$SERIAL" ] && break
+            sleep 2
+          done
+          test -n "$SERIAL"
+          export ANDROID_SERIAL="$SERIAL"
+          boot=0
+          for i in $(seq 1 300); do
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then boot=1; break; fi
+            kill -0 "$EPID" 2>/dev/null || break
+            sleep 2
+          done
+          test "$boot" -eq 1
+          adb shell getprop ro.build.version.release | tr -d '\r' | tee evidence/probe/android-release.txt
+          adb shell getprop ro.build.version.sdk | tr -d '\r' | tee evidence/probe/android-api.txt
+          grep -Fx 17 evidence/probe/android-release.txt
+          grep -Fx 37 evidence/probe/android-api.txt
+
+          adb shell pidof system_server | tr -d '\r' | tee evidence/probe/system-server-before.txt
+          adb shell pidof surfaceflinger | tr -d '\r' | tee evidence/probe/surfaceflinger-before.txt
+          adb shell pidof com.android.systemui | tr -d '\r' | tee evidence/probe/systemui-before.txt || true
+          adb shell pm disable-user --user 0 com.android.systemui | tee evidence/probe/systemui-disable.txt
+          sleep 5
+          adb shell pm list packages -d | grep -q '^package:com.android.systemui$'
+          adb shell pidof system_server | tr -d '\r' | tee evidence/probe/system-server-after.txt
+          adb shell pidof surfaceflinger | tr -d '\r' | tee evidence/probe/surfaceflinger-after.txt
+          test "$(cat evidence/probe/system-server-before.txt)" = "$(cat evidence/probe/system-server-after.txt)"
+          test "$(cat evidence/probe/surfaceflinger-before.txt)" = "$(cat evidence/probe/surfaceflinger-after.txt)"
+          echo API37_SYSTEMUI_ISOLATED=PASS | tee evidence/probe/systemui-isolation-gate.txt
+
+      - name: Verify package resolver cold launch and instrumentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=evidence/prior-v10/Veltrix-Hom-VNext-Part1-FINAL.apk
+          TEST_APK=evidence/prior-v10/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk
+          PKG=com.veltrix.hom.vnext.dev
+          ACT=com.veltrix.hom.vnext.MainActivity
+
+          timeout 120s adb install -r -t "$APK" | tee evidence/probe/install-app.txt
+          grep -q Success evidence/probe/install-app.txt
+          timeout 120s adb install -r -t "$TEST_APK" | tee evidence/probe/install-test.txt
+          grep -q Success evidence/probe/install-test.txt
+
+          adb shell pm path "$PKG" | tr -d '\r' | tee evidence/probe/package-path.txt
+          grep -q '^package:' evidence/probe/package-path.txt
+          adb shell dumpsys package "$PKG" > evidence/probe/dumpsys-package.txt
+          grep -q "$ACT" evidence/probe/dumpsys-package.txt
+          adb shell cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" | tr -d '\r' | tee evidence/probe/resolve-activity.txt
+          grep -q "$ACT" evidence/probe/resolve-activity.txt
+          COMPONENT=$(grep "$PKG/" evidence/probe/resolve-activity.txt | tail -1)
+          test -n "$COMPONENT"
+
+          S0=$(adb shell pidof system_server | tr -d '\r')
+          F0=$(adb shell pidof surfaceflinger | tr -d '\r')
+          adb shell am force-stop "$PKG" || true
+          timeout 30s adb shell am start --user 0 -W -n "$COMPONENT" | tee evidence/probe/cold-launch.txt
+          sleep 3
+          S1=$(adb shell pidof system_server | tr -d '\r')
+          F1=$(adb shell pidof surfaceflinger | tr -d '\r')
+          test "$S0" = "$S1"
+          test "$F0" = "$F1"
+          PID=$(adb shell pidof "$PKG" | tr -d '\r')
+          test -n "$PID"
+          adb shell dumpsys activity activities > evidence/probe/activities.txt
+          grep -q "$PKG" evidence/probe/activities.txt
+          echo API37_COLD_LAUNCH_WITH_SYSTEMUI_ISOLATED=PASS | tee evidence/probe/cold-launch-gate.txt
+
+          I=$(adb shell pm list instrumentation | sed -n 's/^instrumentation:\([^ ]*\).*target=com.veltrix.hom.vnext.dev.*/\1/p' | head -1 | tr -d '\r')
+          test -n "$I"
+          timeout 150s adb shell am instrument -w -e class com.veltrix.hom.vnext.ShellInstrumentedTest "$I" | tee evidence/probe/shell-test.txt
+          grep -Fq 'OK (1 test)' evidence/probe/shell-test.txt
+          test "$S0" = "$(adb shell pidof system_server | tr -d '\r')"
+          test "$F0" = "$(adb shell pidof surfaceflinger | tr -d '\r')"
+          echo API37_SHELL_TEST_WITH_SYSTEMUI_ISOLATED=PASS | tee evidence/probe/shell-gate.txt
+          echo SYSTEMUI_ISOLATION_PROBE_ALL=PASS | tee evidence/probe/probe-all.txt
+
+      - name: Collect diagnostics
+        if: always()
+        shell: bash
+        run: |
+          adb shell getprop > evidence/probe/getprop.txt 2>&1 || true
+          adb shell dumpsys package com.veltrix.hom.vnext.dev > evidence/probe/final-package.txt 2>&1 || true
+          adb logcat -d -b all -t 8000 > evidence/probe/logcat.txt 2>&1 || true
+          ps -ef | grep -E '[e]mulator|[q]emu' > evidence/probe/host-processes.txt 2>&1 || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android17-systemui-isolation-probe-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
