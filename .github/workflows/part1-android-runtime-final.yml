@@ -1,0 +1,269 @@
+name: Veltrix Part 1 Android Final Device Gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  V10_BASE_SHA: dd6defbab6165a1cf3942e7032160509884f8ee3
+  V10_RUN_ID: "31594099599"
+  V10_ARTIFACT: veltrix-hom-part1-final-v10-31594099599
+  APK_SHA: 4a70f76e971ed11a58cd125da050bef23b61223aa148e353994b4912d69342da
+  TEST_APK_SHA: a6afe3978740c081edc8b1b1a4de785150cb1e16d8017a3a4e54ff32fe8fcd49
+  IMAGE_PACKAGE: system-images;android-37.0;google_apis;x86_64
+  GPU_MODE: software
+  ANDROID_AVD_HOME: ${{ github.workspace }}/.android-avd
+
+jobs:
+  final-device-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    env:
+      VELTRIX_ENV: test
+      VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_DATABASE_USER: postgres
+      VELTRIX_DATABASE_PASSWORD: postgres
+      VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_TEST_DATABASE_USER: postgres
+      VELTRIX_TEST_DATABASE_PASSWORD: postgres
+      VELTRIX_AI_PROVIDER: disabled
+      VELTRIX_TEST_AI_MOCK: "true"
+      VELTRIX_EMBEDDING_PROVIDER: disabled
+      VELTRIX_TEST_EMBEDDING_MOCK: "true"
+      VELTRIX_EMBEDDING_DIMENSIONS: "64"
+      VELTRIX_TEST_OCR_MOCK: "true"
+      VELTRIX_TEST_TRANSLATE_MOCK: "true"
+      VELTRIX_STORAGE_PROVIDER: s3
+      VELTRIX_S3_ENDPOINT: http://127.0.0.1:9000
+      VELTRIX_S3_REGION: us-east-1
+      VELTRIX_S3_BUCKET: veltrix-hom-vnext
+      VELTRIX_S3_ACCESS_KEY: veltrixci
+      VELTRIX_S3_SECRET_KEY: veltrixci-secret-2026
+      VELTRIX_S3_PATH_STYLE: "true"
+      VELTRIX_WORKERS_ENABLED: "true"
+
+    steps:
+      - name: Checkout gate source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove product equivalence and import exact V10 product
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/prior-v10 evidence/backend-core evidence/provenance evidence/runtime final
+          git diff --name-only "$V10_BASE_SHA" HEAD | tee evidence/provenance/product-diff.txt
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+            case "$path" in
+              .github/*|docs/*) ;;
+              *) echo "Unexpected product-code diff from V10: $path"; exit 1 ;;
+            esac
+          done < evidence/provenance/product-diff.txt
+          gh run download "$V10_RUN_ID" -n "$V10_ARTIFACT" -D evidence/prior-v10
+          echo "$APK_SHA  evidence/prior-v10/Veltrix-Hom-VNext-Part1-FINAL.apk" | sha256sum -c -
+          echo "$TEST_APK_SHA  evidence/prior-v10/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk" | sha256sum -c -
+          grep -q V10_REAL_SERVER=PASS evidence/prior-v10/evidence/v10-server-gate.txt
+          grep -q V10_ANDROID_BUILD=PASS evidence/prior-v10/evidence/v10-build-gate.txt
+          NESTED=evidence/prior-v10/evidence/prior-v9/Veltrix-Hom-VNext-Part1-EVIDENCE.zip
+          test -s "$NESTED"
+          unzip -q "$NESTED" -d evidence/backend-core
+          grep -q BACKEND_SOURCE_GATES=PASS evidence/backend-core/backend-source-gates.txt
+          grep -q BACKEND_RUNTIME_GATES=PASS evidence/backend-core/backend-runtime-gates.txt
+          printf 'gate_commit=%s\nproduct_commit=%s\nprior_run=%s\napk_sha=%s\ntest_apk_sha=%s\n'             "$GITHUB_SHA" "$V10_BASE_SHA" "$V10_RUN_ID" "$APK_SHA" "$TEST_APK_SHA"             | tee evidence/provenance/final-gate.txt
+          echo PRODUCT_EQUIVALENCE=PASS | tee evidence/provenance/product-equivalence-gate.txt
+
+      - name: Setup JDK and Gradle
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.5.1"
+
+      - name: Start real PostgreSQL pgvector MinIO and Ktor
+        shell: bash
+        run: |
+          set -euo pipefail
+          S='minio/minio:RELEASE.2025-04-22T22-12-26Z'
+          M='minio/mc:RELEASE.2025-04-16T18-13-26Z'
+          docker pull "$S"
+          docker pull "$M"
+          docker run -d --name veltrix-minio-final -p 9000:9000 -p 9001:9001             -e MINIO_ROOT_USER="$VELTRIX_S3_ACCESS_KEY"             -e MINIO_ROOT_PASSWORD="$VELTRIX_S3_SECRET_KEY"             "$S" server /data --console-address ':9001'
+          ready=0
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 2 http://127.0.0.1:9000/minio/health/ready >/dev/null; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+          docker run --rm --network host --entrypoint /bin/sh "$M" -c             "mc alias set local '$VELTRIX_S3_ENDPOINT' '$VELTRIX_S3_ACCESS_KEY' '$VELTRIX_S3_SECRET_KEY' >/dev/null && mc mb --ignore-existing local/$VELTRIX_S3_BUCKET"
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test             -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test             -c "SELECT extversion FROM pg_extension WHERE extname='vector';"             | tee evidence/runtime/pgvector.txt
+          grep -q 0.8.2 evidence/runtime/pgvector.txt
+          nohup gradle --no-daemon :server:run > evidence/runtime/server-run.txt 2>&1 &
+          echo $! > evidence/runtime/server.pid
+          server_ready=0
+          for i in $(seq 1 90); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8080/health > evidence/runtime/health.json; then server_ready=1; break; fi
+            sleep 2
+          done
+          test "$server_ready" -eq 1
+          grep -q '"status":"ok"' evidence/runtime/health.json
+          curl -fsS --max-time 3 http://127.0.0.1:8080/ready | tee evidence/runtime/ready.json
+          grep -q '"ready":true' evidence/runtime/ready.json
+          echo FINAL_REAL_SERVER=PASS | tee evidence/runtime/server-gate.txt
+
+      - name: Setup Android 17 API37 runtime
+        uses: android-actions/setup-android@v3
+
+      - name: Install stable API37 Google APIs emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --channel=0 'platform-tools' 'emulator' 'build-tools;37.0.0' 'platforms;android-37.0' "$IMAGE_PACKAGE"
+          sudo apt-get update >/dev/null
+          sudo apt-get install -y libpulse0 >/dev/null
+          "$ANDROID_HOME/emulator/emulator" -version 2>&1 | tee evidence/runtime/emulator-version.txt
+          echo FINAL_API37_RUNTIME_INSTALLED=PASS | tee evidence/runtime/image-gate.txt
+
+      - name: Generate audited SystemUI-isolated full runtime helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path(".github/scripts/android-runtime-gate-v15.sh").read_text()
+          src = src.replace("V15_", "FINAL_")
+          src = src.replace("veltrix_v15_api37_", "veltrix_final_api37_")
+          src = src.replace("FINAL_API37_AOSP_BOOT", "FINAL_API37_GOOGLE_APIS_BOOT")
+          src = src.replace(" -feature -Vulkan", "")
+          needle = "wait_framework boot\n"
+          if src.count(needle) != 1:
+              raise SystemExit("Expected exactly one boot framework marker")
+          isolation = '''wait_framework boot
+          SYSTEM_BEFORE=$(adb shell pidof system_server 2>/dev/null | tr -d '\\r')
+          SURFACE_BEFORE=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\\r')
+          adb shell pidof com.android.systemui 2>/dev/null | tr -d '\\r' | tee evidence/runtime/systemui-before.txt || true
+          adb shell pm disable-user --user 0 com.android.systemui | tee evidence/runtime/systemui-disable.txt
+          sleep 5
+          adb shell pm list packages -d | tr -d '\\r' | grep -q '^package:com.android.systemui$'
+          wait_framework systemui-isolated
+          SYSTEM_AFTER=$(adb shell pidof system_server 2>/dev/null | tr -d '\\r')
+          SURFACE_AFTER=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\\r')
+          test -n "$SYSTEM_BEFORE" && test "$SYSTEM_BEFORE" = "$SYSTEM_AFTER"
+          test -n "$SURFACE_BEFORE" && test "$SURFACE_BEFORE" = "$SURFACE_AFTER"
+          echo FINAL_SYSTEMUI_ISOLATION=PASS | tee evidence/runtime/systemui-isolation-gate.txt
+          '''
+          src = src.replace(needle, isolation, 1)
+          out = Path("evidence/runtime/android-runtime-gate-final.sh")
+          out.write_text(src)
+          out.chmod(0o755)
+          PY
+          grep -q 'FINAL_SYSTEMUI_ISOLATION=PASS' evidence/runtime/android-runtime-gate-final.sh
+          grep -q 'FINAL_ANDROID_RUNTIME_ALL=PASS' evidence/runtime/android-runtime-gate-final.sh
+          if grep -q -- '-feature -Vulkan' evidence/runtime/android-runtime-gate-final.sh; then
+            echo 'Vulkan disable flag unexpectedly remains'
+            exit 1
+          fi
+          sha256sum evidence/runtime/android-runtime-gate-final.sh | tee evidence/runtime/final-helper-sha256.txt
+          echo FINAL_HELPER_AUDIT=PASS | tee evidence/runtime/helper-gate.txt
+
+      - name: Execute one-pass final Android device gate
+        shell: bash
+        run: bash evidence/runtime/android-runtime-gate-final.sh
+
+      - name: Assert every remaining hard gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q FINAL_SYSTEMUI_ISOLATION=PASS evidence/runtime/systemui-isolation-gate.txt
+          grep -q FINAL_LAUNCHER_RESOLVE=PASS evidence/runtime/resolve-gate.txt
+          grep -q FINAL_INSTALL=PASS evidence/runtime/install-gate.txt
+          grep -q FINAL_COLD_LAUNCH=PASS evidence/runtime/cold-gate.txt
+          grep -q FINAL_SHELL=PASS evidence/runtime/shell-gate.txt
+          grep -q FINAL_SERVER_DEVICE=PASS evidence/runtime/server-device-gate.txt
+          grep -q FINAL_PROCESS_DEATH=PASS evidence/runtime/process-gate.txt
+          grep -q FINAL_OFFLINE=PASS evidence/runtime/offline-gate.txt
+          grep -q FINAL_CONNECTED_6_TESTS=PASS evidence/runtime/connected-gate.txt
+          grep -q FINAL_FINAL_LAUNCH=PASS evidence/runtime/final-launch-gate.txt
+          grep -q FINAL_ANDROID_RUNTIME_ALL=PASS evidence/runtime/runtime-all.txt
+          echo 'VELTRIX HOM vNEXT PART 1 BACKEND / CORE / INTELLIGENCE FOUNDATION: ACCEPTANCE CANDIDATE — FINAL GATE GREEN'             | tee evidence/FINAL_STATUS.txt
+
+      - name: Package exact final acceptance artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -a evidence/prior-v10/. final/
+          rm -rf final/runtime-final final/provenance-final
+          cp -a evidence/runtime final/runtime-final
+          cp -a evidence/provenance final/provenance-final
+          cp evidence/FINAL_STATUS.txt final/FINAL_STATUS.txt
+          (
+            cd evidence
+            zip -qr ../final/Veltrix-Hom-VNext-Part1-FINAL-EVIDENCE.zip               backend-core provenance runtime FINAL_STATUS.txt
+          )
+          mkdir -p final/final-handoff
+          cp evidence/FINAL_STATUS.txt final/final-handoff/
+          cp evidence/provenance/final-gate.txt final/final-handoff/
+          cp evidence/runtime/runtime-all.txt final/final-handoff/
+          cp evidence/runtime/systemui-isolation-gate.txt final/final-handoff/
+          (
+            cd final/final-handoff
+            zip -q ../Veltrix-Hom-VNext-Part1-FINAL-HANDOFF.zip ./*
+          )
+          rm -rf final/final-handoff
+          (
+            cd final
+            find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          )
+          grep -q "$APK_SHA" final/SHA256SUMS.txt
+          grep -q "$TEST_APK_SHA" final/SHA256SUMS.txt
+
+      - name: Upload final acceptance candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-hom-part1-acceptance-candidate-${{ github.run_id }}
+          path: final/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Collect failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p evidence/failure
+          adb devices -l > evidence/failure/adb-devices.txt 2>&1 || true
+          adb shell getprop > evidence/failure/getprop.txt 2>&1 || true
+          adb logcat -d -b all -t 12000 > evidence/failure/logcat.txt 2>&1 || true
+          ps -ef | grep -E '[e]mulator|[q]emu' > evidence/failure/host-processes.txt 2>&1 || true
+          echo 'PART 1 NOT COMPLETE' > evidence/failure/STATUS.txt
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-hom-part1-final-gate-failure-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 30
