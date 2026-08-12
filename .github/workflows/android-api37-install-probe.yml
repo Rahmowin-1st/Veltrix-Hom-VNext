@@ -49,6 +49,7 @@ jobs:
           sudo apt-get install -y libpulse0
           adb version | tee evidence/adb-version.txt
           "$ANDROID_HOME/emulator/emulator" -version 2>&1 | tee evidence/emulator-version.txt
+          grep -q 'Android emulator version' evidence/emulator-version.txt
 
       - name: Build and statically inspect exact APK
         shell: bash
@@ -64,7 +65,7 @@ jobs:
           grep -q 'Verification successful' evidence/zipalign-16k.txt
           unzip -l "$APK" | grep '\.so$' | tee evidence/native-libraries.txt || true
 
-      - name: Boot exact API 37 emulator with durable data capacity
+      - name: Boot exact API 37 emulator with stable framework and durable data capacity
         shell: bash
         run: |
           set -euo pipefail
@@ -76,14 +77,16 @@ jobs:
             -k 'system-images;android-37.0;google_apis;x86_64' -f
           AVD_CONFIG="$ANDROID_AVD_HOME/veltrix_install_probe.avd/config.ini"
           grep -q '^hw.ramSize=' "$AVD_CONFIG" && sed -i 's/^hw.ramSize=.*/hw.ramSize=4096/' "$AVD_CONFIG" || echo 'hw.ramSize=4096' >> "$AVD_CONFIG"
-          grep -q '^hw.cpu.ncore=' "$AVD_CONFIG" && sed -i 's/^hw.cpu.ncore=.*/hw.cpu.ncore=2/' "$AVD_CONFIG" || echo 'hw.cpu.ncore=2' >> "$AVD_CONFIG"
+          grep -q '^hw.cpu.ncore=' "$AVD_CONFIG" && sed -i 's/^hw.cpu.ncore=.*/hw.cpu.ncore=4/' "$AVD_CONFIG" || echo 'hw.cpu.ncore=4' >> "$AVD_CONFIG"
           grep -q '^disk.dataPartition.size=' "$AVD_CONFIG" && sed -i 's/^disk.dataPartition.size=.*/disk.dataPartition.size=4G/' "$AVD_CONFIG" || echo 'disk.dataPartition.size=4G' >> "$AVD_CONFIG"
           cat "$AVD_CONFIG" | tee evidence/avd-config.txt
+          free -h | tee evidence/host-memory.txt
+          nproc | tee evidence/host-cpus.txt
           adb kill-server || true
           adb start-server
           nohup "$ANDROID_HOME/emulator/emulator" @veltrix_install_probe \
-            -port 5554 -memory 4096 -cores 2 -partition-size 4096 \
-            -no-window -gpu swiftshader -noaudio -no-boot-anim -no-snapshot -no-metrics -accel on \
+            -port 5554 -memory 4096 -cores 4 -partition-size 4096 \
+            -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -no-metrics -accel on \
             > evidence/emulator.log 2>&1 &
           EMULATOR_PID=$!
           SERIAL=''
@@ -110,13 +113,46 @@ jobs:
           test "$PM_READY" -eq 1
           adb shell getprop ro.build.version.release | tee evidence/android-release.txt
           adb shell getprop ro.build.version.sdk | tee evidence/android-api.txt
+          grep -Fx '37' evidence/android-api.txt
           adb shell getconf PAGE_SIZE | tee evidence/page-size.txt || true
           adb shell df -h /data | tee evidence/data-disk.txt
           AVAILABLE_KB=$(adb shell df -Pk /data | awk 'NR==2 {print $4}' | tr -d '\r')
           printf 'DATA_AVAILABLE_KB=%s\n' "$AVAILABLE_KB" | tee evidence/data-available-kb.txt
           test "$AVAILABLE_KB" -ge 524288
+
+          # Boot-complete can precede the end of framework/launcher initialization.
+          # Require system_server + surfaceflinger + package/activity services to remain
+          # stable for three consecutive samples before attempting package installation.
+          STABLE_SAMPLES=0
+          PREV_SYSTEM=''
+          PREV_SURFACE=''
+          : > evidence/framework-stability.txt
+          for i in $(seq 1 18); do
+            SYSTEM_PID=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
+            SURFACE_PID=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\r' || true)
+            PACKAGE_SERVICE=$(adb shell service check package 2>&1 | tr -d '\r' || true)
+            ACTIVITY_SERVICE=$(adb shell service check activity 2>&1 | tr -d '\r' || true)
+            BOOT=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
+            printf 'sample=%s boot=%s system_server=%s surfaceflinger=%s package=%s activity=%s\n' \
+              "$i" "$BOOT" "$SYSTEM_PID" "$SURFACE_PID" "$PACKAGE_SERVICE" "$ACTIVITY_SERVICE" | tee -a evidence/framework-stability.txt
+            if [ "$BOOT" = '1' ] && [ -n "$SYSTEM_PID" ] && [ -n "$SURFACE_PID" ] \
+              && echo "$PACKAGE_SERVICE" | grep -q 'found' \
+              && echo "$ACTIVITY_SERVICE" | grep -q 'found' \
+              && [ "$SYSTEM_PID" = "$PREV_SYSTEM" ] && [ "$SURFACE_PID" = "$PREV_SURFACE" ]; then
+              STABLE_SAMPLES=$((STABLE_SAMPLES + 1))
+            else
+              STABLE_SAMPLES=0
+            fi
+            PREV_SYSTEM="$SYSTEM_PID"
+            PREV_SURFACE="$SURFACE_PID"
+            [ "$STABLE_SAMPLES" -ge 3 ] && break
+            sleep 10
+          done
+          test "$STABLE_SAMPLES" -ge 3
+          printf 'STABLE_SYSTEM_SERVER_PID=%s\nSTABLE_SURFACEFLINGER_PID=%s\n' "$PREV_SYSTEM" "$PREV_SURFACE" | tee evidence/framework-stable-pids.txt
           adb shell dumpsys package | grep -m1 -E 'Packages:|Package Changes' | tee evidence/package-service.txt || true
           adb devices -l | tee evidence/adb-final.txt
+          echo 'ANDROID_API37_FRAMEWORK_STABILITY_GATE=PASS' | tee evidence/framework-stability-gate.txt
           echo 'ANDROID_API37_DATA_CAPACITY_GATE=PASS' | tee evidence/data-capacity-gate.txt
 
       - name: Install APK through Package Manager
@@ -124,6 +160,9 @@ jobs:
         run: |
           set -uo pipefail
           APK=android/app/build/outputs/apk/debug/app-debug.apk
+          SYSTEM_BEFORE=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
+          SURFACE_BEFORE=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\r' || true)
+          printf 'SYSTEM_SERVER_BEFORE_INSTALL=%s\nSURFACEFLINGER_BEFORE_INSTALL=%s\n' "$SYSTEM_BEFORE" "$SURFACE_BEFORE" | tee evidence/install-framework-pids.txt
           set +e
           adb push "$APK" /data/local/tmp/veltrix-app.apk > evidence/push-app.txt 2>&1
           PUSH_RC=$?
@@ -138,11 +177,15 @@ jobs:
           cat evidence/push-app.txt || true
           cat evidence/install-app.txt
           printf 'APK_INSTALL_RC=%s\n' "$RC" | tee evidence/install-rc.txt
-          if [ "$RC" -ne 0 ]; then
-            adb shell logcat -d -b all -t 1500 > evidence/logcat-install-failure.txt 2>&1 || true
+          SYSTEM_AFTER=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
+          SURFACE_AFTER=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\r' || true)
+          printf 'SYSTEM_SERVER_AFTER_INSTALL=%s\nSURFACEFLINGER_AFTER_INSTALL=%s\n' "$SYSTEM_AFTER" "$SURFACE_AFTER" | tee -a evidence/install-framework-pids.txt
+          if [ "$RC" -ne 0 ] || [ "$SYSTEM_AFTER" != "$SYSTEM_BEFORE" ] || [ "$SURFACE_AFTER" != "$SURFACE_BEFORE" ]; then
+            adb shell logcat -d -b all -t 2500 > evidence/logcat-install-failure.txt 2>&1 || true
             adb shell dumpsys package > evidence/dumpsys-package-failure.txt 2>&1 || true
             adb shell df -h > evidence/df-failure.txt 2>&1 || true
-            exit "$RC"
+            grep -E -i 'surfaceflinger|system_server|Fatal signal|SIGABRT|DEAD_OBJECT|Broken pipe|PackageInstaller' evidence/logcat-install-failure.txt | tail -500 | tee evidence/install-framework-failure-summary.txt || true
+            exit 1
           fi
           grep -q 'Success' evidence/install-app.txt
           adb shell pm path com.veltrix.hom.vnext.dev | tee evidence/installed-package-path.txt
@@ -174,8 +217,10 @@ jobs:
           grep -q 'com.veltrix.hom.vnext.MainActivity' evidence/launch-resolve.txt
           adb logcat -c || true
           SYSTEM_SERVER_BEFORE=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
-          printf 'SYSTEM_SERVER_BEFORE=%s\n' "$SYSTEM_SERVER_BEFORE" | tee evidence/system-server-stability.txt
+          SURFACE_BEFORE=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\r' || true)
+          printf 'SYSTEM_SERVER_BEFORE=%s\nSURFACEFLINGER_BEFORE=%s\n' "$SYSTEM_SERVER_BEFORE" "$SURFACE_BEFORE" | tee evidence/launch-framework-stability.txt
           test -n "$SYSTEM_SERVER_BEFORE"
+          test -n "$SURFACE_BEFORE"
 
           LAUNCH_OK=0
           : > evidence/cold-launch.txt
@@ -196,16 +241,19 @@ jobs:
             ACTIVITY_STATE=$(adb shell dumpsys activity activities 2>&1 || true)
             WINDOW_STATE=$(adb shell dumpsys window windows 2>&1 || true)
             SYSTEM_SERVER_AFTER=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
-            printf 'ADB_STATE=%s\nAPP_PID=%s\nSYSTEM_SERVER_AFTER=%s\n' "$STATE" "$PID" "$SYSTEM_SERVER_AFTER" | tee -a evidence/cold-launch.txt
+            SURFACE_AFTER=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\r' || true)
+            printf 'ADB_STATE=%s\nAPP_PID=%s\nSYSTEM_SERVER_AFTER=%s\nSURFACEFLINGER_AFTER=%s\n' "$STATE" "$PID" "$SYSTEM_SERVER_AFTER" "$SURFACE_AFTER" | tee -a evidence/cold-launch.txt
             printf '%s\n' "$ACTIVITY_STATE" > evidence/dumpsys-activity-attempt-${i}.txt
             printf '%s\n' "$WINDOW_STATE" > evidence/dumpsys-window-attempt-${i}.txt
-            printf 'system_server_before=%s system_server_after=%s\n' "$SYSTEM_SERVER_BEFORE" "$SYSTEM_SERVER_AFTER" | tee -a evidence/system-server-stability.txt
+            printf 'system_server_before=%s system_server_after=%s surface_before=%s surface_after=%s\n' "$SYSTEM_SERVER_BEFORE" "$SYSTEM_SERVER_AFTER" "$SURFACE_BEFORE" "$SURFACE_AFTER" | tee -a evidence/launch-framework-stability.txt
 
             RESUMED=$(printf '%s\n' "$ACTIVITY_STATE" | grep -m1 -E 'mResumedActivity|topResumedActivity|ResumedActivity' || true)
             FOCUSED=$(printf '%s\n' "$WINDOW_STATE" | grep -m1 -E 'mCurrentFocus|mFocusedApp' || true)
             printf 'RESUMED=%s\nFOCUSED=%s\n' "$RESUMED" "$FOCUSED" | tee -a evidence/cold-launch.txt
 
-            if [ "$STATE" = 'device' ] && [ -n "$PID" ] && [ "$SYSTEM_SERVER_AFTER" = "$SYSTEM_SERVER_BEFORE" ]; then
+            if [ "$STATE" = 'device' ] && [ -n "$PID" ] \
+              && [ "$SYSTEM_SERVER_AFTER" = "$SYSTEM_SERVER_BEFORE" ] \
+              && [ "$SURFACE_AFTER" = "$SURFACE_BEFORE" ]; then
               if echo "$RESUMED $FOCUSED" | grep -q "$PACKAGE"; then
                 LAUNCH_OK=1
                 break
@@ -219,7 +267,7 @@ jobs:
           adb shell dumpsys window windows > evidence/dumpsys-window-final.txt 2>&1 || true
           adb shell dumpsys package "$PACKAGE" > evidence/dumpsys-app-package.txt 2>&1 || true
           if [ "$LAUNCH_OK" -ne 1 ]; then
-            grep -E -i 'FATAL EXCEPTION|AndroidRuntime|Process: com.veltrix.hom.vnext|system_server|Watchdog|lowmemory|am_crash|ActivityTaskManager' evidence/logcat-cold-launch.txt | tail -400 | tee evidence/cold-launch-failure-summary.txt || true
+            grep -E -i 'FATAL EXCEPTION|AndroidRuntime|Process: com.veltrix.hom.vnext|system_server|surfaceflinger|Watchdog|lowmemory|am_crash|ActivityTaskManager|SIGABRT|DEAD_OBJECT' evidence/logcat-cold-launch.txt | tail -500 | tee evidence/cold-launch-failure-summary.txt || true
             exit 1
           fi
           echo 'ANDROID_API37_COLD_LAUNCH_PROBE=PASS' | tee -a evidence/result.txt
