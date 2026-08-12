@@ -85,7 +85,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          IMAGE='quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z'
+          IMAGE='minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e'
           docker pull "$IMAGE"
           docker run -d --name veltrix-minio \
             -p 9000:9000 -p 9001:9001 \
