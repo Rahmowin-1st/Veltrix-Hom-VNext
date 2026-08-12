@@ -1,0 +1,133 @@
+name: Android stable device final proof
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/android-device-api35-final-proof.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  device-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      VELTRIX_ENV: test
+      VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_DATABASE_USER: postgres
+      VELTRIX_DATABASE_PASSWORD: postgres
+      VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_TEST_DATABASE_USER: postgres
+      VELTRIX_TEST_DATABASE_PASSWORD: postgres
+      VELTRIX_AI_PROVIDER: disabled
+      VELTRIX_TEST_AI_MOCK: "true"
+      VELTRIX_EMBEDDING_PROVIDER: disabled
+      VELTRIX_TEST_EMBEDDING_MOCK: "true"
+      VELTRIX_EMBEDDING_DIMENSIONS: "64"
+      VELTRIX_STORAGE_PROVIDER: local
+      VELTRIX_WORKERS_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 59112a3d8242223bd5c2e6ab9c12c36edae90fd0
+          fetch-depth: 0
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '59112a3d8242223bd5c2e6ab9c12c36edae90fd0'
+          mkdir -p device-evidence
+          git rev-parse HEAD | tee device-evidence/commit.txt
+          test -z "$(git status --porcelain)"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+      - uses: android-actions/setup-android@v3
+      - name: Install compile SDK 37 and stable API35 image
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64'
+      - name: PostgreSQL and Ktor readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          nohup gradle --no-daemon :server:run > device-evidence/server-run.txt 2>&1 &
+          echo $! > device-evidence/server.pid
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8080/health > device-evidence/health.json; then break; fi
+            sleep 2
+          done
+          cat device-evidence/health.json
+          grep -q '"status":"ok"' device-evidence/health.json
+      - name: Build exact APKs before device boot
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :android:app:assembleDebug :android:app:assembleDebugAndroidTest | tee device-evidence/android-build.txt
+          grep -q 'BUILD SUCCESSFUL' device-evidence/android-build.txt
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee device-evidence/app-apk-sha256.txt
+      - name: Run exact APK and all instrumentation on stable API35 emulator
+        uses: ReactiveCircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-boot-timeout: 600
+          script: |
+            set -euo pipefail
+            adb devices -l | tee device-evidence/adb.txt
+            adb shell getprop ro.build.version.sdk | tee device-evidence/device-api.txt
+            test "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" = '35'
+            APK=android/app/build/outputs/apk/debug/app-debug.apk
+            adb install -r -t "$APK" | tee device-evidence/install.txt
+            grep -q Success device-evidence/install.txt
+            adb shell am force-stop com.veltrix.hom.vnext.dev
+            adb shell am start -W -n com.veltrix.hom.vnext.dev/com.veltrix.hom.vnext.MainActivity | tee device-evidence/cold-launch.txt
+            grep -q 'Status: ok' device-evidence/cold-launch.txt
+            gradle --no-daemon --stacktrace :android:app:connectedDebugAndroidTest | tee device-evidence/connected-tests.txt
+            grep -q 'BUILD SUCCESSFUL' device-evidence/connected-tests.txt
+            adb shell am force-stop com.veltrix.hom.vnext.dev
+            adb shell am start -W -n com.veltrix.hom.vnext.dev/com.veltrix.hom.vnext.MainActivity | tee device-evidence/final-launch.txt
+            grep -q 'Status: ok' device-evidence/final-launch.txt
+      - name: Package exact device proof
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p device-final
+          cp -a device-evidence/. device-final/ 2>/dev/null || true
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          if [ -s "$APK" ]; then cp "$APK" device-final/Veltrix-Hom-VNext-Part1-FINAL.apk; fi
+          if [ -s device-final/Veltrix-Hom-VNext-Part1-FINAL.apk ]; then sha256sum device-final/Veltrix-Hom-VNext-Part1-FINAL.apk | tee device-final/final-apk-sha256.txt; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: veltrix-hom-part1-stable-device-proof-${{ github.run_id }}
+          path: device-final/
+          if-no-files-found: error
+          retention-days: 30
