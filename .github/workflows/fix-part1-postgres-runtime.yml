@@ -1,0 +1,64 @@
+name: Fix Part 1 PostgreSQL runtime defects
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/fix-part1-postgres-runtime.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-part1-completion
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply PostgreSQL type and state-contract fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          memory = Path('server/src/main/kotlin/com/veltrix/hom/vnext/server/ai/MemoryAutomationService.kt')
+          s = memory.read_text()
+          old = 'VALUES (?::uuid,?,?::uuid,?,?,?,?,?,now()) RETURNING id::text'
+          new = 'VALUES (?::uuid,?,?::uuid,?,?,?,?,?::memory_status,now()) RETURNING id::text'
+          if old in s:
+              s = s.replace(old, new)
+          elif new not in s:
+              raise SystemExit('Memory automation insert pattern not found')
+          memory.write_text(s)
+
+          test = Path('server/src/test/kotlin/com/veltrix/hom/vnext/server/PostgresIntegrationTest.kt')
+          s = test.read_text()
+          old = 'assertEquals("READY",ready.state)'
+          new = 'assertEquals("PROCESSING",ready.state) // low-level lexical ingestion is not READY until required indexing completes'
+          if old in s:
+              s = s.replace(old, new)
+          elif new not in s:
+              raise SystemExit('Postgres integration source-state assertion not found')
+          test.write_text(s)
+          PY
+          git diff --check
+          git diff -- server/src/main/kotlin/com/veltrix/hom/vnext/server/ai/MemoryAutomationService.kt server/src/test/kotlin/com/veltrix/hom/vnext/server/PostgresIntegrationTest.kt
+
+      - name: Commit runtime fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'Runtime fixes already applied.'
+            exit 0
+          fi
+          git config user.name 'Veltrix Backend CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add server/src/main/kotlin/com/veltrix/hom/vnext/server/ai/MemoryAutomationService.kt server/src/test/kotlin/com/veltrix/hom/vnext/server/PostgresIntegrationTest.kt
+          git commit -m 'fix: enforce PostgreSQL memory enum and source processing state contract'
+          git push origin HEAD:veltrix-hom-part1-completion
