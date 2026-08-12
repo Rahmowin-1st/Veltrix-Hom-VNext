@@ -18,73 +18,87 @@ jobs:
         with:
           ref: veltrix-hom-part1-completion
 
-      - name: Diagnose and reassemble sealed source
+      - name: Verify transport and salvage payload
         shell: bash
         run: |
           set -u
           mkdir -p recovered/source recovered/diagnostics
-          ls -l ci/source-v2/c*.b64 | tee recovered/diagnostics/chunks.txt
-          : > recovered/diagnostics/chunk-details.txt
+
+          echo '=== MANIFEST VS REPOSITORY CHUNKS ===' | tee recovered/diagnostics/chunk-integrity.txt
+          BAD=0
           for f in ci/source-v2/c*.b64; do
-            printf '%s chars=%s tail=' "$f" "$(wc -c < "$f")" >> recovered/diagnostics/chunk-details.txt
-            tail -c 24 "$f" >> recovered/diagnostics/chunk-details.txt
-            printf ' decoded=' >> recovered/diagnostics/chunk-details.txt
-            if base64 -d "$f" > "/tmp/$(basename "$f").bin" 2>/tmp/b64.err; then
-              wc -c < "/tmp/$(basename "$f").bin" | tr -d '\n' >> recovered/diagnostics/chunk-details.txt
-            else
-              printf 'FAIL:' >> recovered/diagnostics/chunk-details.txt
-              tr '\n' ' ' < /tmp/b64.err >> recovered/diagnostics/chunk-details.txt
-            fi
-            printf '\n' >> recovered/diagnostics/chunk-details.txt
+            n="$(basename "$f" .b64)"
+            expected="$(sed -n "s/^${n}_sha256=//p" ci/source-v2/MANIFEST.txt)"
+            actual="$(sha256sum "$f" | awk '{print $1}')"
+            if [ "$expected" = "$actual" ]; then state=PASS; else state=FAIL; BAD=$((BAD+1)); fi
+            printf '%s %s expected=%s actual=%s chars=%s\n' "$n" "$state" "$expected" "$actual" "$(wc -c < "$f")" | tee -a recovered/diagnostics/chunk-integrity.txt
           done
-          cat recovered/diagnostics/chunk-details.txt
+          echo "bad_chunk_count=$BAD" | tee -a recovered/diagnostics/chunk-integrity.txt
 
-          # Strategy A: concatenate encoded chunks then decode once.
-          cat ci/source-v2/c*.b64 > /tmp/source-a.b64
-          base64 -d /tmp/source-a.b64 > /tmp/source-a.xz 2>recovered/diagnostics/a-base64.err || true
-          echo "strategy_a_size=$(wc -c < /tmp/source-a.xz)" | tee recovered/diagnostics/strategy-a.txt
-          sha256sum /tmp/source-a.xz | tee -a recovered/diagnostics/strategy-a.txt
-          xxd -l 16 /tmp/source-a.xz | tee -a recovered/diagnostics/strategy-a.txt
-          tail -c 32 /tmp/source-a.xz | xxd | tee -a recovered/diagnostics/strategy-a.txt
-          if xz -t /tmp/source-a.xz 2>recovered/diagnostics/a-xz.err; then echo 'strategy_a_xz=PASS' | tee -a recovered/diagnostics/strategy-a.txt; else echo 'strategy_a_xz=FAIL' | tee -a recovered/diagnostics/strategy-a.txt; cat recovered/diagnostics/a-xz.err; fi
+          cat ci/source-v2/c*.b64 > /tmp/source.b64
+          base64 -d /tmp/source.b64 > /tmp/source.xz
+          expected_archive="$(sed -n 's/^archive_sha256=//p' ci/source-v2/MANIFEST.txt)"
+          actual_archive="$(sha256sum /tmp/source.xz | awk '{print $1}')"
+          printf 'expected_archive=%s\nactual_archive=%s\n' "$expected_archive" "$actual_archive" | tee recovered/diagnostics/archive-integrity.txt
+          xz --robot --list /tmp/source.xz > recovered/diagnostics/xz-list.txt 2>recovered/diagnostics/xz-list.err || true
+          xz --list --verbose /tmp/source.xz >> recovered/diagnostics/xz-list-human.txt 2>&1 || true
+          if xz -t /tmp/source.xz; then echo XZ_CHECK=PASS | tee recovered/diagnostics/xz-check.txt; else echo XZ_CHECK=FAIL | tee recovered/diagnostics/xz-check.txt; fi
 
-          # Strategy B: decode every chunk independently, then concatenate bytes.
-          : > /tmp/source-b.xz
-          for f in ci/source-v2/c*.b64; do
-            base64 -d "$f" >> /tmp/source-b.xz 2>>recovered/diagnostics/b-base64.err || true
-          done
-          echo "strategy_b_size=$(wc -c < /tmp/source-b.xz)" | tee recovered/diagnostics/strategy-b.txt
-          sha256sum /tmp/source-b.xz | tee -a recovered/diagnostics/strategy-b.txt
-          xxd -l 16 /tmp/source-b.xz | tee -a recovered/diagnostics/strategy-b.txt
-          tail -c 32 /tmp/source-b.xz | xxd | tee -a recovered/diagnostics/strategy-b.txt
-          if xz -t /tmp/source-b.xz 2>recovered/diagnostics/b-xz.err; then echo 'strategy_b_xz=PASS' | tee -a recovered/diagnostics/strategy-b.txt; else echo 'strategy_b_xz=FAIL' | tee -a recovered/diagnostics/strategy-b.txt; cat recovered/diagnostics/b-xz.err; fi
+          set +e
+          xz -dc --ignore-check /tmp/source.xz > /tmp/source-ignore-check.payload 2>recovered/diagnostics/xz-ignore-check.err
+          echo "ignore_check_exit=$?" | tee recovered/diagnostics/salvage.txt
+          echo "ignore_check_payload_size=$(wc -c < /tmp/source-ignore-check.payload)" | tee -a recovered/diagnostics/salvage.txt
+          file /tmp/source-ignore-check.payload | tee -a recovered/diagnostics/salvage.txt
+          sha256sum /tmp/source-ignore-check.payload | tee -a recovered/diagnostics/salvage.txt
 
-          SOURCE=''
-          if xz -t /tmp/source-a.xz 2>/dev/null; then SOURCE=/tmp/source-a.xz; fi
-          if [ -z "$SOURCE" ] && xz -t /tmp/source-b.xz 2>/dev/null; then SOURCE=/tmp/source-b.xz; fi
-          if [ -n "$SOURCE" ]; then
-            xz -dc "$SOURCE" > /tmp/source.payload
-            file /tmp/source.payload | tee recovered/payload-type.txt
-            sha256sum "$SOURCE" /tmp/source.payload | tee recovered/hashes.txt
-            if tar -tf /tmp/source.payload > recovered/tar-list.txt 2>recovered/diagnostics/tar.err; then
-              tar -xf /tmp/source.payload -C recovered/source
-              find recovered/source -type f | sort > recovered/file-list.txt
-              echo "file_count=$(wc -l < recovered/file-list.txt)" | tee recovered/summary.txt
-              du -sh recovered/source | tee -a recovered/summary.txt
-              ROOT=recovered/source
-              if [ "$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ] && [ ! -d "$ROOT/android" ]; then
-                ONE="$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d | head -1)"
-                if [ -d "$ONE/android" ] || [ -d "$ONE/server" ]; then ROOT="$ONE"; fi
-              fi
-              echo "source_root=$ROOT" | tee -a recovered/summary.txt
-              for p in android server core contracts database docs scripts .github; do
-                if [ -e "$ROOT/$p" ]; then echo "FOUND $p"; else echo "MISSING $p"; fi
-              done | tee recovered/structure.txt
-              grep -RIl --exclude-dir=.git 'PromptPolicyComposer\|S3CompatibleStorageAdapter\|MemoryCandidate\|HybridRetrieval\|pgvector' "$ROOT" | sort | head -200 > recovered/completion-markers.txt || true
-            fi
+          python3 - <<'PY' | tee recovered/diagnostics/python-lzma.txt
+          import lzma, pathlib
+          data=pathlib.Path('/tmp/source.xz').read_bytes()
+          d=lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+          out=bytearray(); pos=0; step=256
+          try:
+              while pos < len(data):
+                  chunk=data[pos:pos+step]
+                  try:
+                      piece=d.decompress(chunk)
+                      out.extend(piece)
+                      pos += len(chunk)
+                  except Exception as e:
+                      print(f'ERROR input_offset={pos} output_len={len(out)} type={type(e).__name__} msg={e}')
+                      break
+              else:
+                  print(f'COMPLETE input_len={len(data)} output_len={len(out)} eof={d.eof}')
+          finally:
+              pathlib.Path('/tmp/source-python-partial.payload').write_bytes(out)
+              print(f'PARTIAL_SAVED size={len(out)}')
+          PY
+
+          best=/tmp/source-ignore-check.payload
+          if [ "$(wc -c < /tmp/source-python-partial.payload)" -gt "$(wc -c < "$best")" ]; then best=/tmp/source-python-partial.payload; fi
+          echo "best_payload=$best size=$(wc -c < "$best")" | tee -a recovered/diagnostics/salvage.txt
+
+          if tar -tf "$best" > recovered/tar-list.txt 2>recovered/diagnostics/tar-list.err; then
+            echo TAR_LIST=PASS | tee -a recovered/diagnostics/salvage.txt
+            tar -xf "$best" -C recovered/source
           else
-            echo 'NO_VALID_XZ_STREAM' | tee recovered/summary.txt
+            echo TAR_LIST=FAIL | tee -a recovered/diagnostics/salvage.txt
+            tar -xf "$best" -C recovered/source --ignore-zeros 2>recovered/diagnostics/tar-extract.err || true
           fi
+          find recovered/source -type f | sort > recovered/file-list.txt
+          echo "recovered_file_count=$(wc -l < recovered/file-list.txt)" | tee -a recovered/diagnostics/salvage.txt
+          du -sh recovered/source | tee -a recovered/diagnostics/salvage.txt
+
+          ROOT=recovered/source
+          if [ "$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ] && [ ! -d "$ROOT/android" ]; then
+            ONE="$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d | head -1)"
+            if [ -d "$ONE/android" ] || [ -d "$ONE/server" ]; then ROOT="$ONE"; fi
+          fi
+          echo "source_root=$ROOT" | tee recovered/summary.txt
+          for p in android server core contracts database docs scripts .github; do
+            if [ -e "$ROOT/$p" ]; then echo "FOUND $p"; else echo "MISSING $p"; fi
+          done | tee recovered/structure.txt
+          grep -RIl --exclude-dir=.git 'PromptPolicyComposer\|S3CompatibleStorageAdapter\|MemoryCandidate\|HybridRetrieval\|pgvector' "$ROOT" | sort | head -200 > recovered/completion-markers.txt || true
+          set -e
 
       - name: Upload diagnostics and recovered source
         uses: actions/upload-artifact@v4
