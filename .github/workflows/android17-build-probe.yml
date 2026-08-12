@@ -1,0 +1,37 @@
+name: Android 17 build probe
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/android17-build-probe.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-part1-completion
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android 17.0 SDK and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+          gradle --no-daemon --stacktrace :android:app:assembleDebug :android:app:assembleDebugAndroidTest
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          TEST_APK=$(find android/app/build/outputs/apk/androidTest -name '*androidTest.apk' -type f -size +0c | head -1)
+          test -n "$TEST_APK" && test -s "$TEST_APK"
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk "$TEST_APK"
