@@ -1,0 +1,425 @@
+name: Veltrix Part 1 Android Runtime Finalizer V12
+
+on:
+  push:
+    branches: [veltrix-hom-part1-completion]
+    paths: ['.github/workflows/part1-android-runtime-final-v12.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  android-runtime-final-v12:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    env:
+      V10_BASE_SHA: dd6defbab6165a1cf3942e7032160509884f8ee3
+      V10_RUN_ID: "31594099599"
+      V10_ARTIFACT: veltrix-hom-part1-final-v10-31594099599
+      VELTRIX_ENV: test
+      VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_DATABASE_USER: postgres
+      VELTRIX_DATABASE_PASSWORD: postgres
+      VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_TEST_DATABASE_USER: postgres
+      VELTRIX_TEST_DATABASE_PASSWORD: postgres
+      VELTRIX_AI_PROVIDER: disabled
+      VELTRIX_TEST_AI_MOCK: "true"
+      VELTRIX_EMBEDDING_PROVIDER: disabled
+      VELTRIX_TEST_EMBEDDING_MOCK: "true"
+      VELTRIX_EMBEDDING_DIMENSIONS: "64"
+      VELTRIX_TEST_OCR_MOCK: "true"
+      VELTRIX_TEST_TRANSLATE_MOCK: "true"
+      VELTRIX_STORAGE_PROVIDER: s3
+      VELTRIX_S3_ENDPOINT: http://127.0.0.1:9000
+      VELTRIX_S3_REGION: us-east-1
+      VELTRIX_S3_BUCKET: veltrix-hom-vnext
+      VELTRIX_S3_ACCESS_KEY: veltrixci
+      VELTRIX_S3_SECRET_KEY: veltrixci-secret-2026
+      VELTRIX_S3_PATH_STYLE: "true"
+      VELTRIX_WORKERS_ENABLED: "true"
+      ANDROID_AVD_HOME: ${{ github.workspace }}/.android-avd
+
+    steps:
+      - name: Checkout exact current source
+        uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+
+      - name: Prove product equivalence and import V10 APKs evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/prior-v10 evidence/provenance
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          git diff --name-only "$V10_BASE_SHA" HEAD | tee evidence/v12-product-diff.txt
+          test "$(wc -l < evidence/v12-product-diff.txt | tr -d ' ')" -eq 2
+          grep -Fx '.github/workflows/part1-android-runtime-final-v11.yml' evidence/v12-product-diff.txt
+          grep -Fx '.github/workflows/part1-android-runtime-final-v12.yml' evidence/v12-product-diff.txt
+          gh run download "$V10_RUN_ID" -n "$V10_ARTIFACT" -D evidence/prior-v10
+          grep -q BACKEND_EVIDENCE_REUSED_WITH_PRODUCT_EQUIVALENCE=PASS evidence/prior-v10/evidence/backend-equivalence-gate.txt
+          grep -q V10_REAL_SERVER=PASS evidence/prior-v10/evidence/v10-server-gate.txt
+          grep -q V10_ANDROID_BUILD=PASS evidence/prior-v10/evidence/v10-build-gate.txt
+          grep -q V10_API37_BOOT=PASS evidence/prior-v10/evidence/v10-boot-gate.txt
+          grep -q V10_INSTALL=PASS evidence/prior-v10/evidence/v10-install-gate.txt
+          APK=evidence/prior-v10/Veltrix-Hom-VNext-Part1-FINAL.apk
+          TEST_APK=evidence/prior-v10/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk
+          test -s "$APK"; test -s "$TEST_APK"
+          echo '4a70f76e971ed11a58cd125da050bef23b61223aa148e353994b4912d69342da  '"$APK" | sha256sum -c -
+          echo 'a6afe3978740c081edc8b1b1a4de785150cb1e16d8017a3a4e54ff32fe8fcd49  '"$TEST_APK" | sha256sum -c -
+          printf 'current_commit=%s\nproduct_commit=%s\nprior_run=%s\n' "$GITHUB_SHA" "$V10_BASE_SHA" "$V10_RUN_ID" | tee evidence/provenance/v12-equivalence.txt
+          echo V12_PRODUCT_EQUIVALENCE=PASS | tee evidence/v12-equivalence-gate.txt
+
+      - name: Setup JDK and Gradle
+        uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.5.1'}
+
+      - name: Start exact PostgreSQL pgvector MinIO and real Ktor
+        shell: bash
+        run: |
+          set -euo pipefail
+          S='minio/minio:RELEASE.2025-04-22T22-12-26Z'; M='minio/mc:RELEASE.2025-04-16T18-13-26Z'
+          docker pull "$S"; docker pull "$M"
+          docker run -d --name veltrix-minio-v12 -p 9000:9000 -p 9001:9001 -e MINIO_ROOT_USER="$VELTRIX_S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$VELTRIX_S3_SECRET_KEY" "$S" server /data --console-address ':9001'
+          for i in $(seq 1 60); do curl -fsS --max-time 2 http://127.0.0.1:9000/minio/health/ready >/dev/null && break || sleep 2; done
+          curl -fsS http://127.0.0.1:9000/minio/health/ready
+          docker run --rm --network host --entrypoint /bin/sh "$M" -c "mc alias set local '$VELTRIX_S3_ENDPOINT' '$VELTRIX_S3_ACCESS_KEY' '$VELTRIX_S3_SECRET_KEY' >/dev/null && mc mb --ignore-existing local/$VELTRIX_S3_BUCKET"
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c "SELECT extversion FROM pg_extension WHERE extname='vector';" | tee evidence/v12-pgvector.txt
+          grep -q 0.8.2 evidence/v12-pgvector.txt
+          nohup gradle --no-daemon :server:run > evidence/v12-server-run.txt 2>&1 &
+          echo $! > evidence/v12-server.pid
+          ready=0
+          for i in $(seq 1 90); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8080/health > evidence/v12-health.json; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+          grep -q '"status":"ok"' evidence/v12-health.json
+          curl -fsS --max-time 3 http://127.0.0.1:8080/ready | tee evidence/v12-ready.json
+          grep -q '"ready":true' evidence/v12-ready.json
+          ss -ltnp | grep ':8080' | tee evidence/v12-server-listener.txt
+          echo V12_REAL_SERVER=PASS | tee evidence/v12-server-gate.txt
+
+      - name: Setup Android 17 API 37
+        uses: android-actions/setup-android@v3
+
+      - name: Install exact Android 17 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'emulator' 'build-tools;37.0.0' 'platforms;android-37.0' 'system-images;android-37.0;google_apis;x86_64'
+          sudo apt-get update
+          sudo apt-get install -y libpulse0
+          "$ANDROID_HOME/emulator/emulator" -version 2>&1 | tee evidence/v12-emulator-version.txt
+
+      - name: Execute resilient API37 install launch persistence offline server and connected gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=evidence/prior-v10/Veltrix-Hom-VNext-Part1-FINAL.apk
+          TEST_APK=evidence/prior-v10/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk
+          PKG=com.veltrix.hom.vnext.dev
+          CMP=com.veltrix.hom.vnext.dev/com.veltrix.hom.vnext.MainActivity
+          mkdir -p evidence/runtime
+
+          collect_diag() {
+            adb devices -l > evidence/runtime/diag-adb-devices.txt 2>&1 || true
+            adb shell getprop > evidence/runtime/diag-getprop.txt 2>&1 || true
+            adb shell dumpsys activity activities > evidence/runtime/diag-activity.txt 2>&1 || true
+            adb shell dumpsys window windows > evidence/runtime/diag-window.txt 2>&1 || true
+            adb logcat -d -b all -t 5000 > evidence/runtime/diag-logcat.txt 2>&1 || true
+            ps -ef | grep -E '[e]mulator|[q]emu' > evidence/runtime/diag-host-processes.txt 2>&1 || true
+            ss -ltnp > evidence/runtime/diag-host-listeners.txt 2>&1 || true
+          }
+          trap collect_diag EXIT
+
+          wait_framework() {
+            local label="$1" stable=0 prev_s='' prev_f='' s f a p
+            : > "evidence/runtime/framework-${label}.txt"
+            for i in $(seq 1 90); do
+              adb wait-for-device >/dev/null 2>&1 || true
+              s=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
+              f=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\r' || true)
+              a=$(adb shell service check activity 2>&1 | tr -d '\r' || true)
+              p=$(adb shell service check package 2>&1 | tr -d '\r' || true)
+              printf 'sample=%s system=%s surface=%s activity=%s package=%s\n' "$i" "$s" "$f" "$a" "$p" | tee -a "evidence/runtime/framework-${label}.txt"
+              if [ -n "$s" ] && [ -n "$f" ] && [ "$s" = "$prev_s" ] && [ "$f" = "$prev_f" ] && echo "$a" | grep -q found && echo "$p" | grep -q found; then stable=$((stable+1)); else stable=0; fi
+              prev_s="$s"; prev_f="$f"
+              [ "$stable" -ge 2 ] && return 0
+              sleep 2
+            done
+            return 1
+          }
+
+          launch_verified() {
+            local label="$1" attempt sb fb sa fa pid state out
+            : > "evidence/runtime/launch-${label}.txt"
+            for attempt in $(seq 1 8); do
+              wait_framework "${label}-pre-${attempt}"
+              sb=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
+              fb=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\r' || true)
+              adb logcat -c || true
+              adb shell am force-stop "$PKG" || true
+              out=$(timeout 20s adb shell am start -W -n "$CMP" 2>&1 || true)
+              printf 'attempt=%s before_system=%s before_surface=%s\n%s\n' "$attempt" "$sb" "$fb" "$out" | tee -a "evidence/runtime/launch-${label}.txt"
+              for poll in $(seq 1 10); do
+                sa=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
+                fa=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\r' || true)
+                if [ "$sa" != "$sb" ] || [ "$fa" != "$fb" ]; then
+                  echo "framework_restart attempt=$attempt poll=$poll system=$sb->$sa surface=$fb->$fa" | tee -a "evidence/runtime/launch-${label}.txt"
+                  break
+                fi
+                pid=$(adb shell pidof "$PKG" 2>/dev/null | tr -d '\r' || true)
+                adb shell dumpsys activity activities > "evidence/runtime/activity-${label}-${attempt}.txt" 2>&1 || true
+                adb shell dumpsys window windows > "evidence/runtime/window-${label}-${attempt}.txt" 2>&1 || true
+                state=$( { grep -m1 -E 'mResumedActivity|topResumedActivity|ResumedActivity' "evidence/runtime/activity-${label}-${attempt}.txt" || true; grep -m1 -E 'mCurrentFocus|mFocusedApp' "evidence/runtime/window-${label}-${attempt}.txt" || true; } | tr '\n' ' ' )
+                printf 'attempt=%s poll=%s app_pid=%s state=%s\n' "$attempt" "$poll" "$pid" "$state" | tee -a "evidence/runtime/launch-${label}.txt"
+                if [ -n "$pid" ] && echo "$state" | grep -q "$PKG"; then return 0; fi
+                sleep 1
+              done
+              sa=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
+              fa=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\r' || true)
+              adb logcat -d -b all -t 2000 > "evidence/runtime/launch-${label}-${attempt}-logcat.txt" 2>&1 || true
+              if [ "$sa" = "$sb" ] && [ "$fa" = "$fb" ]; then
+                echo "APP_LAUNCH_FAILED_WITH_STABLE_FRAMEWORK attempt=$attempt" | tee -a "evidence/runtime/launch-${label}.txt"
+                return 1
+              fi
+            done
+            return 1
+          }
+
+          run_test() {
+            local label="$1" marker="$2" classarg="$3" attempt sb fb sa fa out rc
+            for attempt in $(seq 1 5); do
+              wait_framework "${label}-pre-${attempt}"
+              sb=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
+              fb=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\r' || true)
+              set +e
+              if [ -n "$classarg" ]; then
+                out=$(timeout 120s adb shell am instrument -w -e class "$classarg" "$I" 2>&1)
+              else
+                out=$(timeout 180s adb shell am instrument -w "$I" 2>&1)
+              fi
+              rc=$?
+              set -e
+              printf '%s\n' "$out" | tee "evidence/runtime/${label}-attempt-${attempt}.txt"
+              sa=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
+              fa=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\r' || true)
+              if [ "$rc" -eq 0 ] && echo "$out" | grep -Fq "$marker"; then
+                cp "evidence/runtime/${label}-attempt-${attempt}.txt" "evidence/runtime/${label}.txt"
+                return 0
+              fi
+              if [ "$sa" != "$sb" ] || [ "$fa" != "$fb" ]; then
+                echo "FRAMEWORK_RESTART_RETRY label=$label attempt=$attempt" | tee -a "evidence/runtime/${label}-retries.txt"
+                continue
+              fi
+              echo "TEST_FAILED_WITH_STABLE_FRAMEWORK label=$label attempt=$attempt rc=$rc" | tee -a "evidence/runtime/${label}-retries.txt"
+              return 1
+            done
+            return 1
+          }
+
+          sudo chmod 666 /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd -n veltrix_v12_api37 -k 'system-images;android-37.0;google_apis;x86_64' -f
+          C="$ANDROID_AVD_HOME/veltrix_v12_api37.avd/config.ini"
+          grep -q '^hw.ramSize=' "$C" && sed -i 's/^hw.ramSize=.*/hw.ramSize=4096/' "$C" || echo hw.ramSize=4096 >> "$C"
+          grep -q '^hw.cpu.ncore=' "$C" && sed -i 's/^hw.cpu.ncore=.*/hw.cpu.ncore=4/' "$C" || echo hw.cpu.ncore=4 >> "$C"
+          grep -q '^disk.dataPartition.size=' "$C" && sed -i 's/^disk.dataPartition.size=.*/disk.dataPartition.size=4G/' "$C" || echo disk.dataPartition.size=4G >> "$C"
+          adb kill-server || true
+          adb start-server
+          nohup "$ANDROID_HOME/emulator/emulator" @veltrix_v12_api37 -port 5554 -memory 4096 -cores 4 -partition-size 4096 -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -no-metrics -accel on > evidence/runtime/emulator.log 2>&1 &
+          EPID=$!
+          echo "$EPID" > evidence/runtime/emulator.pid
+          SERIAL=''
+          for i in $(seq 1 180); do
+            kill -0 "$EPID" 2>/dev/null || break
+            SERIAL=$(adb devices | awk 'NR>1 && $2=="device" {print $1; exit}')
+            [ -n "$SERIAL" ] && break
+            [ "$i" -ge 15 ] && adb connect 127.0.0.1:5555 >/dev/null 2>&1 || true
+            sleep 2
+          done
+          test -n "$SERIAL"
+          export ANDROID_SERIAL="$SERIAL"
+          echo "ANDROID_SERIAL=$SERIAL" | tee evidence/runtime/serial.txt
+          for i in $(seq 1 180); do [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break || sleep 2; done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1
+          adb shell getprop ro.build.version.release | tr -d '\r' | tee evidence/runtime/android-release.txt
+          adb shell getprop ro.build.version.sdk | tr -d '\r' | tee evidence/runtime/android-api.txt
+          grep -Fx 17 evidence/runtime/android-release.txt
+          grep -Fx 37 evidence/runtime/android-api.txt
+          AVAIL=$(adb shell df -Pk /data | awk 'NR==2 {print $4}' | tr -d '\r')
+          echo "DATA_AVAILABLE_KB=$AVAIL" | tee evidence/runtime/data.txt
+          test "$AVAIL" -ge 524288
+          wait_framework boot
+          echo V12_API37_BOOT=PASS | tee evidence/runtime/boot-gate.txt
+
+          adb push "$APK" /data/local/tmp/veltrix.apk | tee evidence/runtime/push-app.txt
+          adb shell pm install -r -t /data/local/tmp/veltrix.apk 2>&1 | tee evidence/runtime/install-app.txt
+          grep -q '^Success$' evidence/runtime/install-app.txt
+          wait_framework after-app-install
+          adb push "$TEST_APK" /data/local/tmp/veltrix-test.apk | tee evidence/runtime/push-test.txt
+          adb shell pm install -r -t /data/local/tmp/veltrix-test.apk 2>&1 | tee evidence/runtime/install-test.txt
+          grep -q '^Success$' evidence/runtime/install-test.txt
+          wait_framework after-test-install
+          I=$(adb shell pm list instrumentation | sed -n 's/^instrumentation:\([^ ]*\).*target=com.veltrix.hom.vnext.dev.*/\1/p' | head -1 | tr -d '\r')
+          test -n "$I"
+          echo "$I" | tee evidence/runtime/instrumentation.txt
+          adb shell pm path "$PKG" | tee evidence/runtime/package-path.txt
+          grep -q '^package:' evidence/runtime/package-path.txt
+          echo V12_INSTALL=PASS | tee evidence/runtime/install-gate.txt
+
+          launch_verified cold
+          echo V12_COLD_LAUNCH=PASS | tee evidence/runtime/cold-gate.txt
+
+          run_test shell 'OK (1 test)' 'com.veltrix.hom.vnext.ShellInstrumentedTest'
+          echo V12_SHELL=PASS | tee evidence/runtime/shell-gate.txt
+
+          curl -fsS --max-time 3 http://127.0.0.1:8080/health | tee evidence/runtime/pre-server-health.json
+          grep -q '"status":"ok"' evidence/runtime/pre-server-health.json
+          adb reverse --remove tcp:8080 >/dev/null 2>&1 || true
+          adb reverse tcp:8080 tcp:8080
+          adb reverse --list | tee evidence/runtime/adb-reverse.txt
+          grep -Eq 'tcp:8080.*tcp:8080' evidence/runtime/adb-reverse.txt
+          run_test server-device 'OK (1 test)' 'com.veltrix.hom.vnext.ServerIntegrationInstrumentedTest'
+          echo V12_SERVER_DEVICE=PASS | tee evidence/runtime/server-device-gate.txt
+
+          run_test process-seed 'OK (1 test)' 'com.veltrix.hom.vnext.PersistenceInstrumentedTest#aSeedProjectForProcessRestart'
+          adb shell am force-stop "$PKG"
+          test -z "$(adb shell pidof "$PKG" 2>/dev/null || true)"
+          run_test process-verify 'OK (1 test)' 'com.veltrix.hom.vnext.PersistenceInstrumentedTest#zVerifyProjectAfterProcessRestart'
+          echo V12_PROCESS_DEATH=PASS | tee evidence/runtime/process-gate.txt
+
+          wait_framework before-offline
+          adb shell cmd connectivity airplane-mode enable || adb shell settings put global airplane_mode_on 1
+          adb shell svc wifi disable || true
+          sleep 2
+          test "$(adb shell settings get global airplane_mode_on | tr -d '\r')" = 1
+          run_test offline-seed 'OK (1 test)' 'com.veltrix.hom.vnext.OfflineDataInstrumentedTest#aSeedOfflineDurableState'
+          adb shell am force-stop "$PKG"
+          run_test offline-verify 'OK (1 test)' 'com.veltrix.hom.vnext.OfflineDataInstrumentedTest#zVerifyOfflineDurableStateAfterProcessRestart'
+          echo V12_OFFLINE=PASS | tee evidence/runtime/offline-gate.txt
+          adb shell cmd connectivity airplane-mode disable || adb shell settings put global airplane_mode_on 0
+          adb shell svc wifi enable || true
+          for i in $(seq 1 30); do [ "$(adb shell settings get global airplane_mode_on | tr -d '\r')" = 0 ] && break || sleep 1; done
+          wait_framework after-network-restore
+          adb reverse tcp:8080 tcp:8080
+
+          full_ok=0
+          for attempt in $(seq 1 4); do
+            wait_framework "full-pre-${attempt}"
+            adb shell pm clear "$PKG" | tee "evidence/runtime/full-clear-${attempt}.txt"
+            grep -q Success "evidence/runtime/full-clear-${attempt}.txt"
+            adb reverse tcp:8080 tcp:8080
+            sb=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
+            fb=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\r' || true)
+            set +e
+            out=$(timeout 240s adb shell am instrument -w "$I" 2>&1)
+            rc=$?
+            set -e
+            printf '%s\n' "$out" | tee "evidence/runtime/full-connected-attempt-${attempt}.txt"
+            sa=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
+            fa=$(adb shell pidof surfaceflinger 2>/dev/null | tr -d '\r' || true)
+            if [ "$rc" -eq 0 ] && echo "$out" | grep -Fq 'OK (6 tests)'; then
+              cp "evidence/runtime/full-connected-attempt-${attempt}.txt" evidence/runtime/connected.txt
+              full_ok=1
+              break
+            fi
+            if [ "$sa" != "$sb" ] || [ "$fa" != "$fb" ]; then
+              echo "FRAMEWORK_RESTART_RETRY full attempt=$attempt" | tee -a evidence/runtime/full-retries.txt
+              continue
+            fi
+            echo "FULL_SUITE_FAILED_WITH_STABLE_FRAMEWORK attempt=$attempt rc=$rc" | tee -a evidence/runtime/full-retries.txt
+            break
+          done
+          test "$full_ok" -eq 1
+          echo V12_CONNECTED_6_TESTS=PASS | tee evidence/runtime/connected-gate.txt
+
+          launch_verified final
+          echo V12_FINAL_LAUNCH=PASS | tee evidence/runtime/final-launch-gate.txt
+          echo V12_ANDROID_RUNTIME_ALL=PASS | tee evidence/runtime/runtime-all.txt
+          trap - EXIT
+          collect_diag
+
+      - name: Final all-green marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          for marker in \
+            'V12_PRODUCT_EQUIVALENCE=PASS:evidence/v12-equivalence-gate.txt' \
+            'V12_REAL_SERVER=PASS:evidence/v12-server-gate.txt' \
+            'V12_API37_BOOT=PASS:evidence/runtime/boot-gate.txt' \
+            'V12_INSTALL=PASS:evidence/runtime/install-gate.txt' \
+            'V12_COLD_LAUNCH=PASS:evidence/runtime/cold-gate.txt' \
+            'V12_SHELL=PASS:evidence/runtime/shell-gate.txt' \
+            'V12_SERVER_DEVICE=PASS:evidence/runtime/server-device-gate.txt' \
+            'V12_PROCESS_DEATH=PASS:evidence/runtime/process-gate.txt' \
+            'V12_OFFLINE=PASS:evidence/runtime/offline-gate.txt' \
+            'V12_CONNECTED_6_TESTS=PASS:evidence/runtime/connected-gate.txt' \
+            'V12_FINAL_LAUNCH=PASS:evidence/runtime/final-launch-gate.txt' \
+            'V12_ANDROID_RUNTIME_ALL=PASS:evidence/runtime/runtime-all.txt'; do
+              text=${marker%%:*}; file=${marker#*:}; grep -q "$text" "$file"
+          done
+          printf '%s\n' 'VELTRIX HOM vNEXT PART 1 BACKEND / CORE / INTELLIGENCE FOUNDATION: ACCEPTANCE CANDIDATE — FINAL GATE GREEN' | tee evidence/FINAL_STATUS.txt
+          echo FINAL_COMBINED_GATE_V12=PASS | tee evidence/v12-final-gate.txt
+
+      - name: Package exact source APK evidence handoff and hashes
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf final
+          mkdir -p final/evidence final/provenance final/handoff/docs final/handoff/contracts
+          cp -a evidence/. final/evidence/ 2>/dev/null || true
+          git archive --format=zip --output=final/Veltrix-Hom-VNext-Part1-EXACT-TESTED-SOURCE.zip HEAD
+          cp evidence/prior-v10/Veltrix-Hom-VNext-Part1-FINAL.apk final/Veltrix-Hom-VNext-Part1-FINAL.apk
+          cp evidence/prior-v10/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk final/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk
+          cp docs/FINAL_MANAGER_HANDOFF.md docs/Test_Report.md docs/Security_Report.md docs/Performance_Report.md docs/Known_Limitations.md docs/VERIFIED_CLAIMED_NOT_VERIFIED.md final/
+          cp contracts/openapi.yaml final/OpenAPI-final.yaml
+          cp docs/Migration_Report.md final/DB_Migration_Report.md
+          cp docs/Part2_Integration_Contract.md final/Part2_Integration_Contract.md
+          cp docs/Part3_Frontend_Handoff.md final/Part3_Frontend_Handoff.md
+          cp -a docs/. final/handoff/docs/
+          cp -a contracts/. final/handoff/contracts/
+          cp README.md CHECKPOINT_IMPORT_PROVENANCE.md final/handoff/
+          [ -s evidence/FINAL_STATUS.txt ] && cp evidence/FINAL_STATUS.txt final/ || true
+          printf 'repository=Rahmowin-1st/Veltrix-Hom-VNext\nbranch=%s\ncommit=%s\nrun_id=%s\napk_build_run=%s\napk_product_commit=%s\n' "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$V10_RUN_ID" "$V10_BASE_SHA" | tee final/provenance/runtime.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+          for src,dst in [('final/evidence','final/Veltrix-Hom-VNext-Part1-EVIDENCE.zip'),('final/handoff','final/Veltrix-Hom-VNext-Part1-HANDOFF.zip')]:
+              with zipfile.ZipFile(dst,'w',zipfile.ZIP_DEFLATED,compresslevel=9) as z:
+                  for f in sorted(Path(src).rglob('*')):
+                      if f.is_file(): z.write(f,f.relative_to(src))
+          PY
+          (cd final && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          cat final/SHA256SUMS
+
+      - name: Upload V12 final artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-hom-part1-final-v12-${{ github.run_id }}
+          path: final/
+          if-no-files-found: error
+          retention-days: 30
