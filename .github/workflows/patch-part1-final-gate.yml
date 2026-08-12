@@ -1,0 +1,40 @@
+name: Patch Part 1 final gate
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/patch-part1-final-gate.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout completion branch
+        uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-part1-completion
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Patch invalid MinIO release pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE=.github/workflows/part1-final-gate.yml
+          grep -q 'quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z' "$FILE"
+          sed -i 's#quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z#quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z#g' "$FILE"
+          grep -q 'quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z' "$FILE"
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Veltrix Backend CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/workflows/part1-final-gate.yml
+          git commit -m 'ci: fix pinned MinIO release for Part 1 gate'
+          git push origin HEAD:veltrix-hom-part1-completion
