@@ -18,89 +18,91 @@ jobs:
         with:
           ref: veltrix-hom-part1-completion
 
-      - name: Verify transport and salvage payload
+      - name: Repair corrupted transport chunks by manifest hash
         shell: bash
         run: |
-          set -u
-          mkdir -p recovered/source recovered/diagnostics
+          set -euo pipefail
+          mkdir -p recovered/repaired recovered/source recovered/diagnostics
+          cp ci/source-v2/c*.b64 recovered/repaired/
+          python3 - <<'PY' | tee recovered/diagnostics/repair.txt
+          import hashlib, pathlib, re
+          root=pathlib.Path('ci/source-v2')
+          out=pathlib.Path('recovered/repaired')
+          manifest=(root/'MANIFEST.txt').read_text()
+          alpha=b'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+          bad=[]
+          for p in sorted(root.glob('c*.b64')):
+              name=p.stem
+              m=re.search(rf'^{name}_sha256=([0-9a-f]{{64}})$',manifest,re.M)
+              target=bytes.fromhex(m.group(1))
+              data=bytearray(p.read_bytes())
+              current=hashlib.sha256(data).digest()
+              if current==target:
+                  print(name,'PASS')
+                  continue
+              print(name,'MISMATCH','searching_single_substitution')
+              found=None
+              for i,orig in enumerate(data):
+                  for ch in alpha:
+                      if ch==orig: continue
+                      data[i]=ch
+                      if hashlib.sha256(data).digest()==target:
+                          found=(i,orig,ch)
+                          break
+                  if found: break
+                  data[i]=orig
+              if found:
+                  i,orig,ch=found
+                  print(name,'REPAIRED',f'offset={i}',f'{chr(orig)}->{chr(ch)}')
+                  (out/p.name).write_bytes(data)
+                  assert hashlib.sha256(data).digest()==target
+              else:
+                  data=bytearray(p.read_bytes())
+                  bad.append(name)
+                  print(name,'NO_SINGLE_SUBSTITUTION_MATCH')
+          print('UNREPAIRED',','.join(bad) if bad else 'NONE')
+          pathlib.Path('recovered/diagnostics/unrepaired.txt').write_text('\n'.join(bad))
+          PY
 
-          echo '=== MANIFEST VS REPOSITORY CHUNKS ===' | tee recovered/diagnostics/chunk-integrity.txt
+          echo '=== repaired chunk integrity ===' | tee recovered/diagnostics/repaired-integrity.txt
           BAD=0
-          for f in ci/source-v2/c*.b64; do
+          for f in recovered/repaired/c*.b64; do
             n="$(basename "$f" .b64)"
             expected="$(sed -n "s/^${n}_sha256=//p" ci/source-v2/MANIFEST.txt)"
             actual="$(sha256sum "$f" | awk '{print $1}')"
             if [ "$expected" = "$actual" ]; then state=PASS; else state=FAIL; BAD=$((BAD+1)); fi
-            printf '%s %s expected=%s actual=%s chars=%s\n' "$n" "$state" "$expected" "$actual" "$(wc -c < "$f")" | tee -a recovered/diagnostics/chunk-integrity.txt
+            echo "$n $state expected=$expected actual=$actual" | tee -a recovered/diagnostics/repaired-integrity.txt
           done
-          echo "bad_chunk_count=$BAD" | tee -a recovered/diagnostics/chunk-integrity.txt
+          echo "bad_after_repair=$BAD" | tee -a recovered/diagnostics/repaired-integrity.txt
 
-          cat ci/source-v2/c*.b64 > /tmp/source.b64
-          base64 -d /tmp/source.b64 > /tmp/source.xz
+          cat recovered/repaired/c*.b64 > /tmp/source.b64
+          base64 -d /tmp/source.b64 > /tmp/source.tar.xz
           expected_archive="$(sed -n 's/^archive_sha256=//p' ci/source-v2/MANIFEST.txt)"
-          actual_archive="$(sha256sum /tmp/source.xz | awk '{print $1}')"
+          actual_archive="$(sha256sum /tmp/source.tar.xz | awk '{print $1}')"
           printf 'expected_archive=%s\nactual_archive=%s\n' "$expected_archive" "$actual_archive" | tee recovered/diagnostics/archive-integrity.txt
-          xz --robot --list /tmp/source.xz > recovered/diagnostics/xz-list.txt 2>recovered/diagnostics/xz-list.err || true
-          xz --list --verbose /tmp/source.xz >> recovered/diagnostics/xz-list-human.txt 2>&1 || true
-          if xz -t /tmp/source.xz; then echo XZ_CHECK=PASS | tee recovered/diagnostics/xz-check.txt; else echo XZ_CHECK=FAIL | tee recovered/diagnostics/xz-check.txt; fi
 
-          set +e
-          xz -dc --ignore-check /tmp/source.xz > /tmp/source-ignore-check.payload 2>recovered/diagnostics/xz-ignore-check.err
-          echo "ignore_check_exit=$?" | tee recovered/diagnostics/salvage.txt
-          echo "ignore_check_payload_size=$(wc -c < /tmp/source-ignore-check.payload)" | tee -a recovered/diagnostics/salvage.txt
-          file /tmp/source-ignore-check.payload | tee -a recovered/diagnostics/salvage.txt
-          sha256sum /tmp/source-ignore-check.payload | tee -a recovered/diagnostics/salvage.txt
-
-          python3 - <<'PY' | tee recovered/diagnostics/python-lzma.txt
-          import lzma, pathlib
-          data=pathlib.Path('/tmp/source.xz').read_bytes()
-          d=lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
-          out=bytearray(); pos=0; step=256
-          try:
-              while pos < len(data):
-                  chunk=data[pos:pos+step]
-                  try:
-                      piece=d.decompress(chunk)
-                      out.extend(piece)
-                      pos += len(chunk)
-                  except Exception as e:
-                      print(f'ERROR input_offset={pos} output_len={len(out)} type={type(e).__name__} msg={e}')
-                      break
-              else:
-                  print(f'COMPLETE input_len={len(data)} output_len={len(out)} eof={d.eof}')
-          finally:
-              pathlib.Path('/tmp/source-python-partial.payload').write_bytes(out)
-              print(f'PARTIAL_SAVED size={len(out)}')
-          PY
-
-          best=/tmp/source-ignore-check.payload
-          if [ "$(wc -c < /tmp/source-python-partial.payload)" -gt "$(wc -c < "$best")" ]; then best=/tmp/source-python-partial.payload; fi
-          echo "best_payload=$best size=$(wc -c < "$best")" | tee -a recovered/diagnostics/salvage.txt
-
-          if tar -tf "$best" > recovered/tar-list.txt 2>recovered/diagnostics/tar-list.err; then
-            echo TAR_LIST=PASS | tee -a recovered/diagnostics/salvage.txt
-            tar -xf "$best" -C recovered/source
+          if [ "$BAD" -eq 0 ] && [ "$expected_archive" = "$actual_archive" ]; then
+            xz -t /tmp/source.tar.xz
+            tar -xJf /tmp/source.tar.xz -C recovered/source
+            find recovered/source -type f | sort > recovered/file-list.txt
+            echo "archive_exact=YES" | tee recovered/summary.txt
+            echo "file_count=$(wc -l < recovered/file-list.txt)" | tee -a recovered/summary.txt
+            du -sh recovered/source | tee -a recovered/summary.txt
+            ROOT=recovered/source
+            if [ "$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ] && [ ! -d "$ROOT/android" ]; then
+              ONE="$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d | head -1)"
+              if [ -d "$ONE/android" ] || [ -d "$ONE/server" ]; then ROOT="$ONE"; fi
+            fi
+            echo "source_root=$ROOT" | tee -a recovered/summary.txt
+            for p in android server core contracts database docs scripts .github; do
+              if [ -e "$ROOT/$p" ]; then echo "FOUND $p"; else echo "MISSING $p"; fi
+            done | tee recovered/structure.txt
+            grep -RIl --exclude-dir=.git 'PromptPolicyComposer\|S3CompatibleStorageAdapter\|MemoryCandidate\|HybridRetrieval\|pgvector' "$ROOT" | sort | head -300 > recovered/completion-markers.txt || true
           else
-            echo TAR_LIST=FAIL | tee -a recovered/diagnostics/salvage.txt
-            tar -xf "$best" -C recovered/source --ignore-zeros 2>recovered/diagnostics/tar-extract.err || true
+            echo "archive_exact=NO" | tee recovered/summary.txt
           fi
-          find recovered/source -type f | sort > recovered/file-list.txt
-          echo "recovered_file_count=$(wc -l < recovered/file-list.txt)" | tee -a recovered/diagnostics/salvage.txt
-          du -sh recovered/source | tee -a recovered/diagnostics/salvage.txt
 
-          ROOT=recovered/source
-          if [ "$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ] && [ ! -d "$ROOT/android" ]; then
-            ONE="$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d | head -1)"
-            if [ -d "$ONE/android" ] || [ -d "$ONE/server" ]; then ROOT="$ONE"; fi
-          fi
-          echo "source_root=$ROOT" | tee recovered/summary.txt
-          for p in android server core contracts database docs scripts .github; do
-            if [ -e "$ROOT/$p" ]; then echo "FOUND $p"; else echo "MISSING $p"; fi
-          done | tee recovered/structure.txt
-          grep -RIl --exclude-dir=.git 'PromptPolicyComposer\|S3CompatibleStorageAdapter\|MemoryCandidate\|HybridRetrieval\|pgvector' "$ROOT" | sort | head -200 > recovered/completion-markers.txt || true
-          set -e
-
-      - name: Upload diagnostics and recovered source
+      - name: Upload recovery result
         uses: actions/upload-artifact@v4
         with:
           name: recovered-completion-source
