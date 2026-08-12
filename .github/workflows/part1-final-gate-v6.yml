@@ -150,7 +150,7 @@ jobs:
           CFG="$ANDROID_AVD_HOME/veltrix_vnext_api37.avd/config.ini"
           printf '\nhw.ramSize=4096\nhw.cpu.ncore=2\ndisk.dataPartition.size=4G\n' >> "$CFG"
           adb kill-server || true; adb start-server
-          nohup "$ANDROID_HOME/emulator/emulator" @veltrix_vnext_api37 -port 5554 -memory 4096 -cores 2 -partition-size 4096 -no-window -gpu swiftshader -noaudio -no-boot-anim -no-snapshot -no-metrics -accel on > evidence/emulator.log 2>&1 &
+          nohup "$ANDROID_HOME/emulator/emulator" @veltrix_vnext_api37 -port 5554 -memory 4096 -cores 2 -partition-size 4096 -no-window -gpu swiftshader -feature -Vulkan -noaudio -no-boot-anim -no-snapshot -no-metrics -accel on > evidence/emulator.log 2>&1 &
           EPID=$!
           SERIAL=''
           for i in $(seq 1 180); do
