@@ -1,0 +1,111 @@
+name: Veltrix Part 1 Source Audit
+
+on:
+  push:
+    branches: [veltrix-hom-part1-completion]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      VELTRIX_ENV: test
+      VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_DATABASE_USER: postgres
+      VELTRIX_DATABASE_PASSWORD: postgres
+      VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_TEST_DATABASE_USER: postgres
+      VELTRIX_TEST_DATABASE_PASSWORD: postgres
+      VELTRIX_AI_PROVIDER: disabled
+      VELTRIX_TEST_AI_MOCK: "true"
+      VELTRIX_EMBEDDING_PROVIDER: disabled
+      VELTRIX_TEST_EMBEDDING_MOCK: "true"
+      VELTRIX_EMBEDDING_DIMENSIONS: "64"
+      VELTRIX_STORAGE_PROVIDER: local
+      VELTRIX_WORKERS_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+
+      - name: PostgreSQL pgvector readiness
+        run: |
+          set -euo pipefail
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c "SELECT extversion FROM pg_extension WHERE extname='vector';"
+
+      - name: Gradle core/server tests
+        id: gradle_tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :core:test :server:test 2>&1 | tee /tmp/gradle-tests.log
+
+      - name: Deterministic 105 regression
+        id: deterministic
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          bash scripts/run_local_regressions.sh 2>&1 | tee /tmp/deterministic.log
+
+      - name: Structure self-check
+        id: structure
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          bash scripts/verify_structure.sh 2>&1 | tee /tmp/structure.log
+
+      - name: OpenAPI parse inventory
+        id: openapi
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pyyaml
+          python3 - <<'PY'
+          import yaml
+          d=yaml.safe_load(open('contracts/openapi.yaml'))
+          assert str(d.get('openapi','')).startswith('3.1')
+          ops=[]
+          for p,v in d.get('paths',{}).items():
+              for method,op in v.items():
+                  if method.lower() in {'get','post','put','patch','delete'}:
+                      assert op.get('operationId'), (method,p)
+                      ops.append(op['operationId'])
+          assert len(ops)==len(set(ops))
+          print(f"OPENAPI_PARSE=PASS paths={len(d.get('paths',{}))} operations={len(ops)}")
+          PY
+
+      - name: Audit summary
+        if: always()
+        run: |
+          printf 'gradle=%s\ndeterministic=%s\nstructure=%s\nopenapi=%s\n' \
+            '${{ steps.gradle_tests.outcome }}' '${{ steps.deterministic.outcome }}' '${{ steps.structure.outcome }}' '${{ steps.openapi.outcome }}'
+          test '${{ steps.gradle_tests.outcome }}' = success
+          test '${{ steps.deterministic.outcome }}' = success
+          test '${{ steps.structure.outcome }}' = success
+          test '${{ steps.openapi.outcome }}' = success
