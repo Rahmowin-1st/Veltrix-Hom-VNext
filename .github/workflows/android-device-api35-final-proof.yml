@@ -52,9 +52,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = '59112a3d8242223bd5c2e6ab9c12c36edae90fd0'
+          test -z "$(git status --porcelain)"
           mkdir -p device-evidence
           git rev-parse HEAD | tee device-evidence/commit.txt
-          test -z "$(git status --porcelain)"
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
