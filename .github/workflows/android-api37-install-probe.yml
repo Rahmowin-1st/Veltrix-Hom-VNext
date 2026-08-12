@@ -61,6 +61,7 @@ jobs:
           "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging "$APK" | tee evidence/apk-badging.txt
           "$ANDROID_HOME/build-tools/37.0.0/zipalign" -c -P 16 -v 4 "$APK" > evidence/zipalign-16k.txt 2>&1
           tail -80 evidence/zipalign-16k.txt
+          grep -q 'Verification successful' evidence/zipalign-16k.txt
           unzip -l "$APK" | grep '\.so$' | tee evidence/native-libraries.txt || true
 
       - name: Boot exact API 37 emulator with durable data capacity
@@ -147,12 +148,65 @@ jobs:
           adb shell pm path com.veltrix.hom.vnext.dev | tee evidence/installed-package-path.txt
           echo 'ANDROID_API37_INSTALL_PROBE=PASS' | tee evidence/result.txt
 
-      - name: Cold launch installed APK
+      - name: Cold launch installed APK with service stability gate
         shell: bash
         run: |
           set -euo pipefail
-          adb shell am force-stop com.veltrix.hom.vnext.dev
-          adb shell am start -W -n com.veltrix.hom.vnext.dev/com.veltrix.hom.vnext.MainActivity 2>&1 | tee evidence/cold-launch.txt
+          PACKAGE=com.veltrix.hom.vnext.dev
+          COMPONENT=com.veltrix.hom.vnext.dev/com.veltrix.hom.vnext.MainActivity
+
+          SERVICE_READY=0
+          for i in $(seq 1 60); do
+            adb wait-for-device
+            BOOT=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
+            ACTIVITY=$(adb shell service check activity 2>&1 | tr -d '\r' || true)
+            PACKAGE_SERVICE=$(adb shell service check package 2>&1 | tr -d '\r' || true)
+            printf 'try=%s boot=%s activity=%s package=%s\n' "$i" "$BOOT" "$ACTIVITY" "$PACKAGE_SERVICE" | tee -a evidence/launch-service-readiness.txt
+            if [ "$BOOT" = '1' ] && echo "$ACTIVITY" | grep -q 'found' && echo "$PACKAGE_SERVICE" | grep -q 'found'; then
+              SERVICE_READY=1
+              break
+            fi
+            sleep 2
+          done
+          test "$SERVICE_READY" -eq 1
+          adb shell pm path "$PACKAGE" | tee evidence/launch-package-path.txt
+          adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$PACKAGE" 2>&1 | tee evidence/launch-resolve.txt || true
+          adb logcat -c || true
+
+          LAUNCH_OK=0
+          : > evidence/cold-launch.txt
+          for i in $(seq 1 5); do
+            printf '\nLAUNCH_ATTEMPT=%s\n' "$i" | tee -a evidence/cold-launch.txt
+            adb shell am force-stop "$PACKAGE" >> evidence/cold-launch.txt 2>&1 || true
+            set +e
+            OUT=$(adb shell am start -W -S -n "$COMPONENT" 2>&1)
+            RC=$?
+            set -e
+            printf '%s\n' "$OUT" | tee -a evidence/cold-launch.txt
+            printf 'LAUNCH_RC=%s\n' "$RC" | tee -a evidence/cold-launch.txt
+            if [ "$RC" -eq 0 ] && echo "$OUT" | grep -q 'Status: ok'; then
+              sleep 3
+              PID=$(adb shell pidof "$PACKAGE" 2>/dev/null | tr -d '\r' || true)
+              printf 'APP_PID=%s\n' "$PID" | tee -a evidence/cold-launch.txt
+              if [ -n "$PID" ]; then
+                LAUNCH_OK=1
+                break
+              fi
+            fi
+            adb get-state 2>&1 | tee -a evidence/cold-launch.txt || true
+            adb shell getprop sys.boot_completed 2>&1 | tee -a evidence/cold-launch.txt || true
+            adb shell service check activity 2>&1 | tee -a evidence/cold-launch.txt || true
+            adb shell pidof system_server 2>&1 | tee -a evidence/cold-launch.txt || true
+            sleep 3
+          done
+
+          adb logcat -d -b all -t 2500 > evidence/logcat-cold-launch.txt 2>&1 || true
+          adb shell dumpsys activity activities > evidence/dumpsys-activity.txt 2>&1 || true
+          adb shell dumpsys package "$PACKAGE" > evidence/dumpsys-app-package.txt 2>&1 || true
+          if [ "$LAUNCH_OK" -ne 1 ]; then
+            grep -E -i 'FATAL EXCEPTION|AndroidRuntime|Process: com.veltrix.hom.vnext|system_server|Watchdog|lowmemory|am_crash' evidence/logcat-cold-launch.txt | tail -300 | tee evidence/cold-launch-failure-summary.txt || true
+            exit 1
+          fi
           grep -q 'Status: ok' evidence/cold-launch.txt
           echo 'ANDROID_API37_COLD_LAUNCH_PROBE=PASS' | tee -a evidence/result.txt
 
