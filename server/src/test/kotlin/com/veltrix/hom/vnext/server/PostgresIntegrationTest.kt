@@ -21,7 +21,7 @@ class PostgresIntegrationTest {
             assertEquals(p.id,m.scopeId)
             val src=sources.createMetadata(a.accountId,SourceCreateRequest("fixture","TEXT","text/plain","a".repeat(64),12))
             val ready=sources.ingestText(a.accountId,src.id,"British English uses colour. This source is a deterministic retrieval fixture.")
-            assertEquals("READY",ready.state)
+            assertEquals("PROCESSING",ready.state) // low-level lexical ingestion is not READY until required indexing completes
             val hits=sources.search(a.accountId,SourceSearchRequest("colour",listOf(src.id),8))
             assertTrue(hits.isNotEmpty());assertEquals(src.id,hits.first().sourceId);assertTrue(hits.first().textHash.isNotBlank())
             sources.linkProject(a.accountId,src.id,p.id);sources.unlinkProject(a.accountId,src.id,p.id)
