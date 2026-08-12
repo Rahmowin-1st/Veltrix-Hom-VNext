@@ -18,7 +18,9 @@ jobs:
           ref: veltrix-hom-part1-completion
       - name: Record probed branch HEAD
         shell: bash
-        run: git rev-parse HEAD
+        run: |
+          git rev-parse HEAD
+          echo 'probe_generation=3'
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
