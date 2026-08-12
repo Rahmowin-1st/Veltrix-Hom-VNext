@@ -1,0 +1,296 @@
+name: Veltrix Part 1 Android Runtime Finalizer V14
+
+on:
+  push:
+    branches: [veltrix-hom-part1-completion]
+    paths: ['.github/workflows/part1-android-runtime-final-v14.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  V10_BASE_SHA: dd6defbab6165a1cf3942e7032160509884f8ee3
+  V10_RUN_ID: "31594099599"
+  V10_ARTIFACT: veltrix-hom-part1-final-v10-31594099599
+
+jobs:
+  android-runtime:
+    name: API37 runtime ${{ matrix.gpu }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        gpu: [swangle, lavapipe]
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    env:
+      GPU_MODE: ${{ matrix.gpu }}
+      VELTRIX_ENV: test
+      VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_DATABASE_USER: postgres
+      VELTRIX_DATABASE_PASSWORD: postgres
+      VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_TEST_DATABASE_USER: postgres
+      VELTRIX_TEST_DATABASE_PASSWORD: postgres
+      VELTRIX_AI_PROVIDER: disabled
+      VELTRIX_TEST_AI_MOCK: "true"
+      VELTRIX_EMBEDDING_PROVIDER: disabled
+      VELTRIX_TEST_EMBEDDING_MOCK: "true"
+      VELTRIX_EMBEDDING_DIMENSIONS: "64"
+      VELTRIX_TEST_OCR_MOCK: "true"
+      VELTRIX_TEST_TRANSLATE_MOCK: "true"
+      VELTRIX_STORAGE_PROVIDER: s3
+      VELTRIX_S3_ENDPOINT: http://127.0.0.1:9000
+      VELTRIX_S3_REGION: us-east-1
+      VELTRIX_S3_BUCKET: veltrix-hom-vnext
+      VELTRIX_S3_ACCESS_KEY: veltrixci
+      VELTRIX_S3_SECRET_KEY: veltrixci-secret-2026
+      VELTRIX_S3_PATH_STYLE: "true"
+      VELTRIX_WORKERS_ENABLED: "true"
+      ANDROID_AVD_HOME: ${{ github.workspace }}/.android-avd
+
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+
+      - name: Prove product equivalence and import exact V10 APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/prior-v10 evidence/provenance
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          git diff --name-only "$V10_BASE_SHA" HEAD | tee evidence/v14-product-diff.txt
+          while IFS= read -r path; do
+            case "$path" in
+              .github/workflows/part1-android-runtime-final-v11.yml|.github/workflows/part1-android-runtime-final-v12.yml|.github/workflows/part1-android-runtime-final-v13.yml|.github/scripts/android-runtime-gate-v13.sh|.github/scripts/android-runtime-gate-v14.sh|.github/workflows/part1-android-runtime-final-v14.yml) ;;
+              *) echo "Unexpected product-equivalence diff: $path"; exit 1 ;;
+            esac
+          done < evidence/v14-product-diff.txt
+          test "$(wc -l < evidence/v14-product-diff.txt | tr -d ' ')" -eq 6
+          gh run download "$V10_RUN_ID" -n "$V10_ARTIFACT" -D evidence/prior-v10
+          grep -q BACKEND_EVIDENCE_REUSED_WITH_PRODUCT_EQUIVALENCE=PASS evidence/prior-v10/evidence/backend-equivalence-gate.txt
+          grep -q BACKEND_SOURCE_GATES=PASS evidence/prior-v10/evidence/backend-source-gates.txt
+          grep -q BACKEND_RUNTIME_GATES=PASS evidence/prior-v10/evidence/backend-runtime-gates.txt
+          grep -q V10_REAL_SERVER=PASS evidence/prior-v10/evidence/v10-server-gate.txt
+          grep -q V10_ANDROID_BUILD=PASS evidence/prior-v10/evidence/v10-build-gate.txt
+          grep -q V10_API37_BOOT=PASS evidence/prior-v10/evidence/v10-boot-gate.txt
+          grep -q V10_INSTALL=PASS evidence/prior-v10/evidence/v10-install-gate.txt
+          APK=evidence/prior-v10/Veltrix-Hom-VNext-Part1-FINAL.apk
+          TEST_APK=evidence/prior-v10/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk
+          echo '4a70f76e971ed11a58cd125da050bef23b61223aa148e353994b4912d69342da  '"$APK" | sha256sum -c -
+          echo 'a6afe3978740c081edc8b1b1a4de785150cb1e16d8017a3a4e54ff32fe8fcd49  '"$TEST_APK" | sha256sum -c -
+          printf 'current_commit=%s\nproduct_commit=%s\nprior_run=%s\ngpu=%s\n' "$GITHUB_SHA" "$V10_BASE_SHA" "$V10_RUN_ID" "$GPU_MODE" | tee evidence/provenance/v14-equivalence.txt
+          echo V14_PRODUCT_EQUIVALENCE=PASS | tee evidence/v14-equivalence-gate.txt
+
+      - name: Setup JDK and Gradle
+        uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.5.1'}
+
+      - name: Start real PostgreSQL pgvector MinIO and Ktor
+        shell: bash
+        run: |
+          set -euo pipefail
+          S='minio/minio:RELEASE.2025-04-22T22-12-26Z'; M='minio/mc:RELEASE.2025-04-16T18-13-26Z'
+          docker pull "$S"; docker pull "$M"
+          docker run -d --name veltrix-minio-v14 -p 9000:9000 -p 9001:9001 -e MINIO_ROOT_USER="$VELTRIX_S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$VELTRIX_S3_SECRET_KEY" "$S" server /data --console-address ':9001'
+          for i in $(seq 1 60); do curl -fsS --max-time 2 http://127.0.0.1:9000/minio/health/ready >/dev/null && break || sleep 2; done
+          curl -fsS http://127.0.0.1:9000/minio/health/ready
+          docker run --rm --network host --entrypoint /bin/sh "$M" -c "mc alias set local '$VELTRIX_S3_ENDPOINT' '$VELTRIX_S3_ACCESS_KEY' '$VELTRIX_S3_SECRET_KEY' >/dev/null && mc mb --ignore-existing local/$VELTRIX_S3_BUCKET"
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c "SELECT extversion FROM pg_extension WHERE extname='vector';" | tee evidence/v14-pgvector.txt
+          grep -q 0.8.2 evidence/v14-pgvector.txt
+          nohup gradle --no-daemon :server:run > evidence/v14-server-run.txt 2>&1 &
+          echo $! > evidence/v14-server.pid
+          ready=0
+          for i in $(seq 1 90); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8080/health > evidence/v14-health.json; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+          grep -q '"status":"ok"' evidence/v14-health.json
+          curl -fsS --max-time 3 http://127.0.0.1:8080/ready | tee evidence/v14-ready.json
+          grep -q '"ready":true' evidence/v14-ready.json
+          ss -ltnp | grep ':8080' | tee evidence/v14-server-listener.txt
+          echo V14_REAL_SERVER=PASS | tee evidence/v14-server-gate.txt
+
+      - name: Setup Android 17 API 37
+        uses: android-actions/setup-android@v3
+      - name: Install exact Android runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'emulator' 'build-tools;37.0.0' 'platforms;android-37.0' 'system-images;android-37.0;google_apis;x86_64'
+          sudo apt-get update
+          sudo apt-get install -y libpulse0
+          "$ANDROID_HOME/emulator/emulator" -version 2>&1 | tee evidence/v14-emulator-version.txt
+
+      - name: Execute package-recovery Android runtime gate
+        shell: bash
+        run: bash .github/scripts/android-runtime-gate-v14.sh
+
+      - name: Record successful attempt marker
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'V14_ANDROID_RUNTIME_ALL=PASS' evidence/runtime/runtime-all.txt
+          printf 'V14_ATTEMPT_GREEN=PASS\ngpu=%s\ncommit=%s\nrun=%s\n' "$GPU_MODE" "$GITHUB_SHA" "$GITHUB_RUN_ID" | tee evidence/v14-attempt-green.txt
+
+      - name: Upload V14 attempt evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-v14-attempt-${{ matrix.gpu }}-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+  finalize:
+    name: Select verified attempt and package acceptance candidate
+    if: always()
+    needs: android-runtime
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact V14 source
+        uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+
+      - name: Download attempts and exact V10 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p attempts prior-v10 final/evidence final/provenance final/handoff/docs final/handoff/contracts
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --name-only "$V10_BASE_SHA" HEAD | tee final/evidence/product-equivalence-diff.txt
+          while IFS= read -r path; do
+            case "$path" in
+              .github/workflows/part1-android-runtime-final-v11.yml|.github/workflows/part1-android-runtime-final-v12.yml|.github/workflows/part1-android-runtime-final-v13.yml|.github/scripts/android-runtime-gate-v13.sh|.github/scripts/android-runtime-gate-v14.sh|.github/workflows/part1-android-runtime-final-v14.yml) ;;
+              *) echo "Unexpected product-equivalence diff: $path"; exit 1 ;;
+            esac
+          done < final/evidence/product-equivalence-diff.txt
+          test "$(wc -l < final/evidence/product-equivalence-diff.txt | tr -d ' ')" -eq 6
+          gh run download "$GITHUB_RUN_ID" -p 'veltrix-v14-attempt-*' -D attempts
+          gh run download "$V10_RUN_ID" -n "$V10_ARTIFACT" -D prior-v10
+          echo '4a70f76e971ed11a58cd125da050bef23b61223aa148e353994b4912d69342da  prior-v10/Veltrix-Hom-VNext-Part1-FINAL.apk' | sha256sum -c -
+          echo 'a6afe3978740c081edc8b1b1a4de785150cb1e16d8017a3a4e54ff32fe8fcd49  prior-v10/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk' | sha256sum -c -
+
+      - name: Select all-green Android attempt
+        id: select
+        shell: bash
+        run: |
+          set -euo pipefail
+          SELECTED=''
+          for d in attempts/*; do
+            [ -d "$d" ] || continue
+            if [ -s "$d/v14-attempt-green.txt" ] && grep -q 'V14_ATTEMPT_GREEN=PASS' "$d/v14-attempt-green.txt" && grep -q 'V14_ANDROID_RUNTIME_ALL=PASS' "$d/runtime/runtime-all.txt"; then
+              SELECTED="$d"
+              break
+            fi
+          done
+          if [ -n "$SELECTED" ]; then
+            echo "selected=$SELECTED" >> "$GITHUB_OUTPUT"
+            echo 'green=true' >> "$GITHUB_OUTPUT"
+            cat "$SELECTED/v14-attempt-green.txt" | tee final/evidence/v14-selected-attempt.txt
+          else
+            echo 'green=false' >> "$GITHUB_OUTPUT"
+            printf '%s\n' 'PART 1 NOT COMPLETE — no V14 renderer completed all Android runtime gates' | tee final/evidence/V14_FAILURE_STATUS.txt
+            find attempts -maxdepth 3 -type f -print | sort > final/evidence/v14-attempt-files.txt
+          fi
+
+      - name: Verify selected markers and create final status
+        if: steps.select.outputs.green == 'true'
+        shell: bash
+        env:
+          SELECTED: ${{ steps.select.outputs.selected }}
+        run: |
+          set -euo pipefail
+          cp -a "$SELECTED" final/evidence/v14-selected
+          cp -a prior-v10/evidence final/evidence/v10-backend-build-runtime
+          for marker in \
+            'V14_PRODUCT_EQUIVALENCE=PASS:v14-equivalence-gate.txt' \
+            'V14_REAL_SERVER=PASS:v14-server-gate.txt' \
+            'V14_API37_BOOT=PASS:runtime/boot-gate.txt' \
+            'V14_INSTALL=PASS:runtime/install-gate.txt' \
+            'V14_COLD_LAUNCH=PASS:runtime/cold-gate.txt' \
+            'V14_SHELL=PASS:runtime/shell-gate.txt' \
+            'V14_SERVER_DEVICE=PASS:runtime/server-device-gate.txt' \
+            'V14_PROCESS_DEATH=PASS:runtime/process-gate.txt' \
+            'V14_OFFLINE=PASS:runtime/offline-gate.txt' \
+            'V14_CONNECTED_6_TESTS=PASS:runtime/connected-gate.txt' \
+            'V14_FINAL_LAUNCH=PASS:runtime/final-launch-gate.txt' \
+            'V14_ANDROID_RUNTIME_ALL=PASS:runtime/runtime-all.txt'; do
+              text=${marker%%:*}; file=${marker#*:}; grep -q "$text" "$SELECTED/$file"
+          done
+          grep -q BACKEND_SOURCE_GATES=PASS prior-v10/evidence/backend-source-gates.txt
+          grep -q BACKEND_RUNTIME_GATES=PASS prior-v10/evidence/backend-runtime-gates.txt
+          grep -q V10_ANDROID_BUILD=PASS prior-v10/evidence/v10-build-gate.txt
+          printf '%s\n' 'VELTRIX HOM vNEXT PART 1 BACKEND / CORE / INTELLIGENCE FOUNDATION: ACCEPTANCE CANDIDATE — FINAL GATE GREEN' | tee final/FINAL_STATUS.txt
+          echo FINAL_COMBINED_GATE_V14=PASS | tee final/evidence/v14-final-gate.txt
+
+      - name: Package exact source APK evidence handoff and hashes
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git archive --format=zip --output=final/Veltrix-Hom-VNext-Part1-EXACT-TESTED-SOURCE.zip HEAD
+          cp prior-v10/Veltrix-Hom-VNext-Part1-FINAL.apk final/Veltrix-Hom-VNext-Part1-FINAL.apk
+          cp prior-v10/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk final/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk
+          cp docs/FINAL_MANAGER_HANDOFF.md docs/Test_Report.md docs/Security_Report.md docs/Performance_Report.md docs/Known_Limitations.md docs/VERIFIED_CLAIMED_NOT_VERIFIED.md final/
+          cp contracts/openapi.yaml final/OpenAPI-final.yaml
+          cp docs/Migration_Report.md final/DB_Migration_Report.md
+          cp docs/Part2_Integration_Contract.md final/Part2_Integration_Contract.md
+          cp docs/Part3_Frontend_Handoff.md final/Part3_Frontend_Handoff.md
+          cp -a docs/. final/handoff/docs/
+          cp -a contracts/. final/handoff/contracts/
+          cp README.md CHECKPOINT_IMPORT_PROVENANCE.md final/handoff/
+          printf 'repository=Rahmowin-1st/Veltrix-Hom-VNext\nbranch=%s\ncommit=%s\nrun_id=%s\napk_build_run=%s\napk_product_commit=%s\n' "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$V10_RUN_ID" "$V10_BASE_SHA" | tee final/provenance/runtime.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+          for src,dst in [('final/evidence','final/Veltrix-Hom-VNext-Part1-EVIDENCE.zip'),('final/handoff','final/Veltrix-Hom-VNext-Part1-HANDOFF.zip')]:
+              with zipfile.ZipFile(dst,'w',zipfile.ZIP_DEFLATED,compresslevel=9) as z:
+                  for f in sorted(Path(src).rglob('*')):
+                      if f.is_file(): z.write(f,f.relative_to(src))
+          PY
+          (cd final && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          cat final/SHA256SUMS
+
+      - name: Upload V14 final artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-hom-part1-final-v14-${{ github.run_id }}
+          path: final/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce acceptance only when a renderer is all-green
+        shell: bash
+        run: |
+          set -euo pipefail
+          test '${{ steps.select.outputs.green }}' = 'true'
+          grep -q 'ACCEPTANCE CANDIDATE — FINAL GATE GREEN' final/FINAL_STATUS.txt
+          grep -q FINAL_COMBINED_GATE_V14=PASS final/evidence/v14-final-gate.txt
