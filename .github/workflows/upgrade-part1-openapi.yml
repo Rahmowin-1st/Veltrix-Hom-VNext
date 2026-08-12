@@ -1,0 +1,49 @@
+name: Upgrade Part 1 OpenAPI
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/upgrade-part1-openapi.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-part1-completion
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate and verify authoritative contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pyyaml
+          python3 scripts/generate_openapi_contract.py
+          python3 scripts/verify_openapi_drift.py
+          python3 - <<'PY'
+          import yaml
+          d=yaml.safe_load(open('contracts/openapi.yaml'))
+          ops=[op['operationId'] for p in d['paths'].values() for m,op in p.items() if m.upper() in {'GET','POST','PUT','PATCH','DELETE'}]
+          assert len(ops)==106, len(ops)
+          assert len(ops)==len(set(ops))
+          print('OPENAPI_AUTHORITATIVE=PASS paths=%d operations=%d' % (len(d['paths']),len(ops)))
+          PY
+          git diff --check
+      - name: Commit generated contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- contracts/openapi.yaml; then
+            echo 'OpenAPI already authoritative.'
+            exit 0
+          fi
+          git config user.name 'Veltrix Backend CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add contracts/openapi.yaml
+          git commit -m 'contracts: cover all public Part 1 Ktor operations'
+          git push origin HEAD:veltrix-hom-part1-completion
