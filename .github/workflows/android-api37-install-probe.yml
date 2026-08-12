@@ -1,0 +1,152 @@
+name: Android 17 API 37 Install Probe
+
+on:
+  push:
+    branches: [veltrix-hom-part1-completion]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  api37-install-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      ANDROID_AVD_HOME: ${{ github.workspace }}/.android-avd
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle 9.5.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install exact Android runtime and host dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            'platform-tools' \
+            'emulator' \
+            'build-tools;37.0.0' \
+            'platforms;android-37.0' \
+            'system-images;android-37.0;google_apis;x86_64'
+          sudo apt-get update
+          sudo apt-get install -y libpulse0
+          adb version | tee evidence/adb-version.txt
+          "$ANDROID_HOME/emulator/emulator" -version 2>&1 | tee evidence/emulator-version.txt
+
+      - name: Build and statically inspect exact APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :android:app:assembleDebug | tee evidence/android-build.txt
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          sha256sum "$APK" | tee evidence/apk-sha256.txt
+          "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging "$APK" | tee evidence/apk-badging.txt
+          "$ANDROID_HOME/build-tools/37.0.0/zipalign" -c -P 16 -v 4 "$APK" > evidence/zipalign-16k.txt 2>&1 || true
+          tail -80 evidence/zipalign-16k.txt
+          unzip -l "$APK" | grep '\.so$' | tee evidence/native-libraries.txt || true
+
+      - name: Boot exact API 37 emulator and wait for Package Manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+          test -e /dev/kvm && test -r /dev/kvm && test -w /dev/kvm
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd \
+            -n veltrix_install_probe \
+            -k 'system-images;android-37.0;google_apis;x86_64' -f
+          AVD_CONFIG="$ANDROID_AVD_HOME/veltrix_install_probe.avd/config.ini"
+          grep -q '^hw.ramSize=' "$AVD_CONFIG" && sed -i 's/^hw.ramSize=.*/hw.ramSize=4096/' "$AVD_CONFIG" || echo 'hw.ramSize=4096' >> "$AVD_CONFIG"
+          grep -q '^hw.cpu.ncore=' "$AVD_CONFIG" && sed -i 's/^hw.cpu.ncore=.*/hw.cpu.ncore=2/' "$AVD_CONFIG" || echo 'hw.cpu.ncore=2' >> "$AVD_CONFIG"
+          adb kill-server || true
+          adb start-server
+          nohup "$ANDROID_HOME/emulator/emulator" @veltrix_install_probe \
+            -port 5554 -memory 4096 -cores 2 \
+            -no-window -gpu software -noaudio -no-boot-anim -no-snapshot -no-metrics -accel on \
+            > evidence/emulator.log 2>&1 &
+          EMULATOR_PID=$!
+          SERIAL=''
+          for i in $(seq 1 180); do
+            kill -0 "$EMULATOR_PID" 2>/dev/null || break
+            SERIAL=$(adb devices | awk 'NR>1 && $2 == "device" {print $1; exit}')
+            [ -n "$SERIAL" ] && break
+            [ "$i" -ge 15 ] && adb connect 127.0.0.1:5555 >/dev/null 2>&1 || true
+            sleep 2
+          done
+          test -n "$SERIAL"
+          export ANDROID_SERIAL="$SERIAL"
+          printf 'ANDROID_SERIAL=%s\n' "$SERIAL" | tee evidence/android-serial.txt
+          for i in $(seq 1 180); do
+            [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = '1' ] && break
+            sleep 2
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = '1'
+          PM_READY=0
+          for i in $(seq 1 90); do
+            if adb shell pm path android > evidence/pm-ready.txt 2>&1; then PM_READY=1; break; fi
+            sleep 2
+          done
+          test "$PM_READY" -eq 1
+          adb shell getprop ro.build.version.release | tee evidence/android-release.txt
+          adb shell getprop ro.build.version.sdk | tee evidence/android-api.txt
+          adb shell getconf PAGE_SIZE | tee evidence/page-size.txt || true
+          adb shell df -h /data | tee evidence/data-disk.txt
+          adb shell dumpsys package | grep -m1 -E 'Packages:|Package Changes' | tee evidence/package-service.txt || true
+          adb devices -l | tee evidence/adb-final.txt
+
+      - name: Install APK with deterministic non-streaming path
+        shell: bash
+        run: |
+          set -uo pipefail
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          set +e
+          adb install --no-streaming -r -t "$APK" > evidence/install-app.txt 2>&1
+          RC=$?
+          set -e
+          cat evidence/install-app.txt
+          printf 'ADB_INSTALL_RC=%s\n' "$RC" | tee evidence/install-rc.txt
+          if [ "$RC" -ne 0 ]; then
+            adb shell logcat -d -b all -t 1500 > evidence/logcat-install-failure.txt 2>&1 || true
+            adb shell dumpsys package > evidence/dumpsys-package-failure.txt 2>&1 || true
+            adb shell df -h > evidence/df-failure.txt 2>&1 || true
+            exit "$RC"
+          fi
+          grep -q 'Success' evidence/install-app.txt
+          adb shell pm path com.veltrix.hom.vnext.dev | tee evidence/installed-package-path.txt
+          echo 'ANDROID_API37_INSTALL_PROBE=PASS' | tee evidence/result.txt
+
+      - name: Cold launch installed APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          adb shell am force-stop com.veltrix.hom.vnext.dev
+          adb shell am start -W -n com.veltrix.hom.vnext.dev/com.veltrix.hom.vnext.MainActivity 2>&1 | tee evidence/cold-launch.txt
+          grep -q 'Status: ok' evidence/cold-launch.txt
+          echo 'ANDROID_API37_COLD_LAUNCH_PROBE=PASS' | tee -a evidence/result.txt
+
+      - name: Upload install evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-api37-install-probe-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
