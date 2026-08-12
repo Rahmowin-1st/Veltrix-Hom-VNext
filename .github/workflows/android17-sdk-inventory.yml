@@ -1,0 +1,29 @@
+name: Android 17 SDK inventory
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/android17-sdk-inventory.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: android-actions/setup-android@v3
+      - name: Show SDK manager version and Android 17 packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --version
+          echo '=== DEFAULT CHANNEL ==='
+          sdkmanager --list | grep -Ei 'android-37|Cinnamon|37\.0\.|system-images;android-17|system-images;android-37' || true
+          echo '=== CHANNEL 3 ==='
+          sdkmanager --list --channel=3 | grep -Ei 'android-37|Cinnamon|37\.0\.|system-images;android-17|system-images;android-37' || true
+          echo '=== ALL PLATFORM LINES CHANNEL 3 ==='
+          sdkmanager --list --channel=3 | grep -E '^  platforms;' | tail -30 || true
+          echo '=== ALL API35+ SYSTEM IMAGE LINES CHANNEL 3 ==='
+          sdkmanager --list --channel=3 | grep -E '^  system-images;' | grep -E 'android-(35|36|37)|Cinnamon' | head -80 || true
