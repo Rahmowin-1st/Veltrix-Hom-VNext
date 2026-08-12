@@ -73,7 +73,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p evidence/prior-v10 evidence/provenance
+          mkdir -p evidence/prior-v10 evidence/provenance evidence/backend-core
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
           git diff --name-only "$V10_BASE_SHA" HEAD | tee evidence/v14-product-diff.txt
@@ -86,12 +86,17 @@ jobs:
           test "$(wc -l < evidence/v14-product-diff.txt | tr -d ' ')" -eq 6
           gh run download "$V10_RUN_ID" -n "$V10_ARTIFACT" -D evidence/prior-v10
           grep -q BACKEND_EVIDENCE_REUSED_WITH_PRODUCT_EQUIVALENCE=PASS evidence/prior-v10/evidence/backend-equivalence-gate.txt
-          grep -q BACKEND_SOURCE_GATES=PASS evidence/prior-v10/evidence/backend-source-gates.txt
-          grep -q BACKEND_RUNTIME_GATES=PASS evidence/prior-v10/evidence/backend-runtime-gates.txt
           grep -q V10_REAL_SERVER=PASS evidence/prior-v10/evidence/v10-server-gate.txt
           grep -q V10_ANDROID_BUILD=PASS evidence/prior-v10/evidence/v10-build-gate.txt
           grep -q V10_API37_BOOT=PASS evidence/prior-v10/evidence/v10-boot-gate.txt
           grep -q V10_INSTALL=PASS evidence/prior-v10/evidence/v10-install-gate.txt
+          NESTED=evidence/prior-v10/evidence/prior-v9/Veltrix-Hom-VNext-Part1-EVIDENCE.zip
+          test -s "$NESTED"
+          unzip -q "$NESTED" -d evidence/backend-core
+          grep -q BACKEND_SOURCE_GATES=PASS evidence/backend-core/backend-source-gates.txt
+          grep -q BACKEND_RUNTIME_GATES=PASS evidence/backend-core/backend-runtime-gates.txt
+          grep -q ANDROID_API37_BOOT_STABILITY=PASS evidence/backend-core/android-boot-gate.txt
+          grep -q ANDROID_APK_INSTALL=PASS evidence/backend-core/android-install-gate.txt
           APK=evidence/prior-v10/Veltrix-Hom-VNext-Part1-FINAL.apk
           TEST_APK=evidence/prior-v10/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk
           echo '4a70f76e971ed11a58cd125da050bef23b61223aa148e353994b4912d69342da  '"$APK" | sha256sum -c -
@@ -182,7 +187,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p attempts prior-v10 final/evidence final/provenance final/handoff/docs final/handoff/contracts
+          mkdir -p attempts prior-v10 final/evidence final/provenance final/handoff/docs final/handoff/contracts final/evidence/backend-core
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git diff --name-only "$V10_BASE_SHA" HEAD | tee final/evidence/product-equivalence-diff.txt
           while IFS= read -r path; do
@@ -196,6 +201,11 @@ jobs:
           gh run download "$V10_RUN_ID" -n "$V10_ARTIFACT" -D prior-v10
           echo '4a70f76e971ed11a58cd125da050bef23b61223aa148e353994b4912d69342da  prior-v10/Veltrix-Hom-VNext-Part1-FINAL.apk' | sha256sum -c -
           echo 'a6afe3978740c081edc8b1b1a4de785150cb1e16d8017a3a4e54ff32fe8fcd49  prior-v10/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk' | sha256sum -c -
+          NESTED=prior-v10/evidence/prior-v9/Veltrix-Hom-VNext-Part1-EVIDENCE.zip
+          test -s "$NESTED"
+          unzip -q "$NESTED" -d final/evidence/backend-core
+          grep -q BACKEND_SOURCE_GATES=PASS final/evidence/backend-core/backend-source-gates.txt
+          grep -q BACKEND_RUNTIME_GATES=PASS final/evidence/backend-core/backend-runtime-gates.txt
 
       - name: Select all-green Android attempt
         id: select
@@ -244,8 +254,8 @@ jobs:
             'V14_ANDROID_RUNTIME_ALL=PASS:runtime/runtime-all.txt'; do
               text=${marker%%:*}; file=${marker#*:}; grep -q "$text" "$SELECTED/$file"
           done
-          grep -q BACKEND_SOURCE_GATES=PASS prior-v10/evidence/backend-source-gates.txt
-          grep -q BACKEND_RUNTIME_GATES=PASS prior-v10/evidence/backend-runtime-gates.txt
+          grep -q BACKEND_SOURCE_GATES=PASS final/evidence/backend-core/backend-source-gates.txt
+          grep -q BACKEND_RUNTIME_GATES=PASS final/evidence/backend-core/backend-runtime-gates.txt
           grep -q V10_ANDROID_BUILD=PASS prior-v10/evidence/v10-build-gate.txt
           printf '%s\n' 'VELTRIX HOM vNEXT PART 1 BACKEND / CORE / INTELLIGENCE FOUNDATION: ACCEPTANCE CANDIDATE — FINAL GATE GREEN' | tee final/FINAL_STATUS.txt
           echo FINAL_COMBINED_GATE_V14=PASS | tee final/evidence/v14-final-gate.txt
