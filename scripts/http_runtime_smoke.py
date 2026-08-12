@@ -142,7 +142,7 @@ for _ in range(60):
     time.sleep(1)
 assert source['state']=='READY',source
 storage=call('GET',f"/v1/sources/{source['id']}/storage",token=token)
-assert storage['provider'].lower()=='s3' and storage['key'] and storage['size']>0 and storage['sha256'],storage
+assert storage['provider'].lower()=='s3-compatible' and storage['key'] and storage['size']>0 and storage['sha256'],storage
 
 call('POST',f"/v1/sources/{source['id']}/link-project",{'projectId':project['id']},token)
 hits=call('POST','/v1/sources/search',{
