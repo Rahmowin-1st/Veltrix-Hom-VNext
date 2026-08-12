@@ -1,0 +1,296 @@
+name: Veltrix Part 1 Runtime FINAL Gate
+
+on:
+  push:
+    branches: [veltrix-hom-part1-completion]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  runtime-final-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+
+    env:
+      VELTRIX_ENV: test
+      VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_DATABASE_USER: postgres
+      VELTRIX_DATABASE_PASSWORD: postgres
+      VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_TEST_DATABASE_USER: postgres
+      VELTRIX_TEST_DATABASE_PASSWORD: postgres
+      VELTRIX_AI_PROVIDER: disabled
+      VELTRIX_TEST_AI_MOCK: "true"
+      VELTRIX_EMBEDDING_PROVIDER: disabled
+      VELTRIX_TEST_EMBEDDING_MOCK: "true"
+      VELTRIX_EMBEDDING_DIMENSIONS: "64"
+      VELTRIX_TEST_OCR_MOCK: "true"
+      VELTRIX_TEST_TRANSLATE_MOCK: "true"
+      VELTRIX_STORAGE_PROVIDER: s3
+      VELTRIX_S3_ENDPOINT: http://127.0.0.1:9000
+      VELTRIX_S3_REGION: us-east-1
+      VELTRIX_S3_BUCKET: veltrix-hom-vnext
+      VELTRIX_S3_ACCESS_KEY: veltrixci
+      VELTRIX_S3_SECRET_KEY: veltrixci-secret-2026
+      VELTRIX_S3_PATH_STYLE: "true"
+      VELTRIX_WORKERS_ENABLED: "false"
+      ANDROID_AVD_HOME: ${{ github.workspace }}/.android-avd
+
+    steps:
+      - name: Checkout exact normal source tree
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Record exact commit provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/provenance
+          printf 'repository=Rahmowin-1st/Veltrix-Hom-VNext\nbranch=%s\ncommit=%s\nrun_id=%s\nfoundation_checkpoint=d47d0876eb2ee30a480549a89b42382b4a31d8ed\n' \
+            "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID" | tee evidence/provenance/source.txt
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git status --porcelain | tee evidence/provenance/git-status.txt
+          test ! -s evidence/provenance/git-status.txt
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle 9.5.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+
+      - name: Start pinned S3-compatible object storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE='quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z'
+          docker pull "$IMAGE"
+          docker run -d --name veltrix-minio \
+            -p 9000:9000 -p 9001:9001 \
+            -e MINIO_ROOT_USER="$VELTRIX_S3_ACCESS_KEY" \
+            -e MINIO_ROOT_PASSWORD="$VELTRIX_S3_SECRET_KEY" \
+            "$IMAGE" server /data --console-address ':9001'
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:9000/minio/health/ready >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:9000/minio/health/ready
+          python3 -m pip install --quiet awscli
+          AWS_ACCESS_KEY_ID="$VELTRIX_S3_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$VELTRIX_S3_SECRET_KEY" AWS_DEFAULT_REGION="$VELTRIX_S3_REGION" \
+            aws --endpoint-url "$VELTRIX_S3_ENDPOINT" s3api create-bucket --bucket "$VELTRIX_S3_BUCKET" >/dev/null
+          docker inspect veltrix-minio --format '{{json .Config.Image}} {{json .Image}}' | tee evidence/minio-image.txt
+          docker ps --filter name=veltrix-minio | tee evidence/minio.txt
+
+      - name: PostgreSQL pgvector readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c "SELECT extversion FROM pg_extension WHERE extname='vector';" | tee evidence/pgvector.txt
+
+      - name: Core and server integration on PostgreSQL plus S3
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :core:test :server:test | tee evidence/gradle-server-tests.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/gradle-server-tests.txt
+
+      - name: Deterministic 105 regression and structure gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/run_local_regressions.sh | tee evidence/deterministic-105.txt
+          grep -q 'LOCAL_REGRESSION_GATE=PASS total=105' evidence/deterministic-105.txt
+          bash scripts/verify_structure.sh | tee evidence/structure.txt
+          grep -q 'STRUCTURE_VERIFY=PASS' evidence/structure.txt
+
+      - name: OpenAPI route drift guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pyyaml
+          python3 scripts/verify_openapi_drift.py | tee evidence/openapi-drift.txt
+          grep -q 'OPENAPI_DRIFT=PASS' evidence/openapi-drift.txt
+
+      - name: Secret and legacy isolation scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R --exclude-dir=.git --exclude-dir=build --exclude='*.md' -nE '(sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{20,}|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY)' .
+          ! grep -R --exclude-dir=build -n 'SYSTEM_ALERT_WINDOW' android
+          echo 'SECRET_LEGACY_SCAN=PASS' | tee evidence/security-static.txt
+
+      - name: Start real Ktor and prove readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup gradle --no-daemon :server:run > evidence/server-run.txt 2>&1 &
+          echo $! > evidence/server.pid
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8080/health > evidence/health.json; then break; fi
+            sleep 2
+          done
+          cat evidence/health.json
+          grep -q '"status":"ok"' evidence/health.json
+          curl -fsS http://127.0.0.1:8080/ready | tee evidence/ready.json
+          grep -q '"database":"ok"' evidence/ready.json
+          grep -q '"storageConfigured":true' evidence/ready.json
+          grep -q '"embeddingConfigured":true' evidence/ready.json
+          grep -q '"testAiConfigured":true' evidence/ready.json
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform and emulator image
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-37' 'build-tools;36.0.0' 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64'
+
+      - name: Build app and instrumentation APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :android:app:assembleDebug :android:app:assembleDebugAndroidTest | tee evidence/android-build.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/android-build.txt
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          TEST_APK=$(find android/app/build/outputs/apk/androidTest -name '*androidTest.apk' -type f -size +0c | head -1)
+          test -s "$APK"
+          test -n "$TEST_APK"
+          aapt dump badging "$APK" | tee evidence/android-badging.txt
+          grep -q "package: name='com.veltrix.hom.vnext.dev'" evidence/android-badging.txt
+          ! aapt dump permissions "$APK" | grep -q 'SYSTEM_ALERT_WINDOW'
+
+      - name: Boot deterministic Android emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -e /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd -n veltrix_vnext_api35 -k 'system-images;android-35;google_apis;x86_64' -f
+          avdmanager list avd | tee evidence/avd-list.txt
+          grep -q 'Name: veltrix_vnext_api35' evidence/avd-list.txt
+          nohup "$ANDROID_HOME/emulator/emulator" @veltrix_vnext_api35 \
+            -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -no-metrics -accel on \
+            > evidence/emulator.log 2>&1 &
+          timeout 180 adb wait-for-device
+          for i in $(seq 1 120); do
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = '1' ]; then break; fi
+            sleep 2
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = '1'
+          adb devices -l | tee evidence/adb.txt
+          adb get-state | tr -d '\r' | grep -Fx device
+
+      - name: Install exact APK and cold launch
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          TEST_APK=$(find android/app/build/outputs/apk/androidTest -name '*androidTest.apk' -type f -size +0c | head -1)
+          adb install -r -t "$APK" | tee evidence/install-app.txt
+          grep -q Success evidence/install-app.txt
+          adb install -r -t "$TEST_APK" | tee evidence/install-test.txt
+          grep -q Success evidence/install-test.txt
+          adb shell am force-stop com.veltrix.hom.vnext.dev
+          adb shell am start -W -n com.veltrix.hom.vnext.dev/com.veltrix.hom.vnext.MainActivity | tee evidence/cold-launch.txt
+          grep -q 'Status: ok' evidence/cold-launch.txt
+
+      - name: Shell navigation instrumentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          I=$(adb shell pm list instrumentation | sed -n 's/^instrumentation:\([^ ]*\).*target=com.veltrix.hom.vnext.dev.*/\1/p' | head -1 | tr -d '\r')
+          test -n "$I"
+          adb shell am instrument -w -e class 'com.veltrix.hom.vnext.ShellInstrumentedTest' "$I" | tee evidence/shell-instrumentation.txt
+          grep -q 'OK (1 test)' evidence/shell-instrumentation.txt
+
+      - name: Process-death persistence runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          I=$(adb shell pm list instrumentation | sed -n 's/^instrumentation:\([^ ]*\).*target=com.veltrix.hom.vnext.dev.*/\1/p' | head -1 | tr -d '\r')
+          adb shell am instrument -w -e class 'com.veltrix.hom.vnext.PersistenceInstrumentedTest#aSeedProjectForProcessRestart' "$I" | tee evidence/process-seed.txt
+          grep -q 'OK (1 test)' evidence/process-seed.txt
+          adb shell am force-stop com.veltrix.hom.vnext.dev
+          test -z "$(adb shell pidof com.veltrix.hom.vnext.dev 2>/dev/null || true)"
+          adb shell am instrument -w -e class 'com.veltrix.hom.vnext.PersistenceInstrumentedTest#zVerifyProjectAfterProcessRestart' "$I" | tee evidence/process-verify.txt
+          grep -q 'OK (1 test)' evidence/process-verify.txt
+
+      - name: Offline persistence runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          I=$(adb shell pm list instrumentation | sed -n 's/^instrumentation:\([^ ]*\).*target=com.veltrix.hom.vnext.dev.*/\1/p' | head -1 | tr -d '\r')
+          adb shell cmd connectivity airplane-mode enable || adb shell settings put global airplane_mode_on 1
+          adb shell svc wifi disable || true
+          sleep 2
+          test "$(adb shell settings get global airplane_mode_on | tr -d '\r')" = '1'
+          adb shell am instrument -w -e class 'com.veltrix.hom.vnext.OfflineDataInstrumentedTest#aSeedOfflineDurableState' "$I" | tee evidence/offline-seed.txt
+          grep -q 'OK (1 test)' evidence/offline-seed.txt
+          adb shell am force-stop com.veltrix.hom.vnext.dev
+          adb shell am instrument -w -e class 'com.veltrix.hom.vnext.OfflineDataInstrumentedTest#zVerifyOfflineDurableStateAfterProcessRestart' "$I" | tee evidence/offline-verify.txt
+          grep -q 'OK (1 test)' evidence/offline-verify.txt
+          adb shell cmd connectivity airplane-mode disable || adb shell settings put global airplane_mode_on 0
+          adb shell svc wifi enable || true
+
+      - name: Final reinstall and relaunch
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          adb install -r -t "$APK" | tee evidence/reinstall.txt
+          grep -q Success evidence/reinstall.txt
+          adb shell am force-stop com.veltrix.hom.vnext.dev
+          adb shell am start -W -n com.veltrix.hom.vnext.dev/com.veltrix.hom.vnext.MainActivity | tee evidence/final-launch.txt
+          grep -q 'Status: ok' evidence/final-launch.txt
+
+      - name: Package exact tested source APK evidence and hashes
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p final/evidence final/provenance
+          cp -a evidence/. final/evidence/ 2>/dev/null || true
+          git archive --format=zip --output=final/Veltrix-Hom-VNext-Part1-EXACT-TESTED-SOURCE.zip HEAD
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          if [ -s "$APK" ]; then cp "$APK" final/Veltrix-Hom-VNext-Part1-FINAL.apk; fi
+          sha256sum final/Veltrix-Hom-VNext-Part1-EXACT-TESTED-SOURCE.zip | tee final/provenance/source_sha256.txt
+          if [ -s final/Veltrix-Hom-VNext-Part1-FINAL.apk ]; then sha256sum final/Veltrix-Hom-VNext-Part1-FINAL.apk | tee final/provenance/apk_sha256.txt; fi
+          cp evidence/provenance/source.txt final/provenance/runtime.txt
+
+      - name: Upload runtime final artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-hom-part1-runtime-final-${{ github.run_id }}
+          path: final/
+          if-no-files-found: error
+          retention-days: 30
