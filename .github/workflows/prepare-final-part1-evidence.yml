@@ -1,0 +1,264 @@
+name: Prepare final Part 1 evidence sources
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/prepare-final-part1-evidence.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-part1-completion
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add deterministic cancellation probe support
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('server/src/main/kotlin/com/veltrix/hom/vnext/server/foundation/AiFoundation.kt')
+          s=p.read_text()
+          old='''        val segments = listOf("TEST_ONLY: ", fingerprint, " | ", normalized.take(160))\n        for ((index, segment) in segments.withIndex()) {\n            cancellation.throwIfCancelled()\n            yield(AiProviderChunk(segment, final = index == segments.lastIndex))\n        }'''
+          new='''        val segments = listOf("TEST_ONLY: ", fingerprint, " | ", normalized.take(160))\n        val slowCiProbe = normalized.contains("CI_SLOW_STREAM_MARKER")\n        for ((index, segment) in segments.withIndex()) {\n            if (slowCiProbe) Thread.sleep(250) // test-only provider; enables real HTTP cancellation verification\n            cancellation.throwIfCancelled()\n            yield(AiProviderChunk(segment, final = index == segments.lastIndex))\n        }'''
+          if old in s:
+              s=s.replace(old,new)
+          elif new not in s:
+              raise SystemExit('Deterministic provider stream block not found')
+          p.write_text(s)
+          PY
+
+      - name: Create real Ktor runtime smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > scripts/http_runtime_smoke.py <<'PY'
+          #!/usr/bin/env python3
+          import json, re, sys, threading, time, uuid
+          from urllib import request, error
+
+          BASE=(sys.argv[1] if len(sys.argv)>1 else 'http://127.0.0.1:8080').rstrip('/')
+
+          def call(method,path,payload=None,token=None,expected=(200,),headers=None,raw=False,timeout=30):
+              body=None
+              h={'Accept':'application/json'}
+              if payload is not None:
+                  body=json.dumps(payload).encode(); h['Content-Type']='application/json'
+              if token: h['Authorization']='Bearer '+token
+              if headers: h.update(headers)
+              req=request.Request(BASE+path,data=body,headers=h,method=method)
+              try:
+                  with request.urlopen(req,timeout=timeout) as r:
+                      data=r.read(); status=r.status
+              except error.HTTPError as e:
+                  data=e.read(); status=e.code
+              if status not in expected:
+                  raise AssertionError(f'{method} {path}: expected {expected}, got {status}: {data[:1000]!r}')
+              if raw: return status,data.decode(errors='replace')
+              if not data: return None
+              return json.loads(data)
+
+          def multipart(path,fields,file_field,filename,mime,file_bytes,token):
+              boundary='----veltrix-ci-'+uuid.uuid4().hex
+              chunks=[]
+              for k,v in fields.items():
+                  chunks += [f'--{boundary}\r\n'.encode(),f'Content-Disposition: form-data; name="{k}"\r\n\r\n'.encode(),str(v).encode(),b'\r\n']
+              chunks += [f'--{boundary}\r\n'.encode(),f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode(),f'Content-Type: {mime}\r\n\r\n'.encode(),file_bytes,b'\r\n',f'--{boundary}--\r\n'.encode()]
+              body=b''.join(chunks)
+              req=request.Request(BASE+path,data=body,headers={'Authorization':'Bearer '+token,'Content-Type':f'multipart/form-data; boundary={boundary}','Accept':'application/json'},method='POST')
+              with request.urlopen(req,timeout=30) as r:
+                  assert r.status==201,(r.status,r.read())
+                  return json.loads(r.read())
+
+          def stream(token,chat_id,text,key,project_id=None,source_ids=None,request_id=None):
+              payload={'conversationId':chat_id,'text':text,'learningMode':'TUTOR','idempotencyKey':key,'sourceIds':source_ids or []}
+              if project_id: payload['projectId']=project_id
+              headers={'X-Request-ID':request_id} if request_id else {}
+              _,body=call('POST','/v1/ai/stream',payload,token,(200,),headers,raw=True,timeout=45)
+              segments=[]; message_id=None
+              for line in body.splitlines():
+                  if line.startswith('data: '):
+                      try:
+                          obj=json.loads(line[6:])
+                          if 'segment' in obj: segments.append(obj['segment'])
+                          if obj.get('messageId'): message_id=obj['messageId']
+                      except json.JSONDecodeError:
+                          pass
+              return body,''.join(segments),message_id
+
+          health=call('GET','/health'); assert health['status']=='ok'
+          ready=call('GET','/ready'); assert ready['ready'] is True and ready['database']=='ok' and ready['storageConfigured'] is True and ready['embeddingConfigured'] is True
+          assert ready['testAiConfigured'] is True and ready['aiConfigured'] is False
+
+          login=f'ci-{int(time.time())}-{uuid.uuid4().hex[:8]}@example.test'
+          session=call('POST','/v1/auth/register',{'login':login,'password':'testing-password-12345','displayName':'Veltrix CI'},expected=(201,))
+          token=session['sessionToken']; account=session['accountId']
+          assert len(token)>=32 and len(account)==36
+
+          global_chat=call('POST','/v1/chats',{'scope':'GLOBAL','title':'CI Memory','learningMode':'TUTOR'},token,(201,))
+          body,full,assistant_id=stream(token,global_chat['id'],'I prefer concise explanations for grammar.','ci-memory-'+uuid.uuid4().hex)
+          assert 'TEST_ONLY:' in full and 'ctx:project=none' in full and assistant_id
+
+          memory_item=None
+          for _ in range(30):
+              memories=call('GET','/v1/memory?limit=100',token=token)
+              memory_item=next((m for m in memories if 'concise explanations' in m['statement'].lower()),None)
+              if memory_item: break
+              time.sleep(1)
+          assert memory_item, 'automatic post-chat memory did not materialize'
+          corrected=call('POST',f"/v1/memory/{memory_item['id']}/correct",{'statement':'Prefer compact bullet explanations for grammar','evidenceObjectId':assistant_id},token)
+          assert corrected['status']=='USER_CORRECTED'
+
+          project=call('POST','/v1/projects',{'title':'CEFR C1 CI','purpose':'runtime evidence'},token,(201,))
+          instruction=call('PUT',f"/v1/projects/{project['id']}/instructions",{'body':'Use British English. Correct my grammar. Prefer CEFR C1 vocabulary.'},token)
+          assert instruction['active'] is True
+
+          phrase='cedar nebula calibration 4829 proves hybrid retrieval provenance'
+          source=multipart('/v1/sources/upload',{'title':'CI RAG Fixture','type':'FILE','mimeType':'text/plain'},'file','ci-rag.txt','text/plain',('Veltrix source evidence. '+phrase+'. This fixture is deterministic.').encode(),token)
+          for _ in range(60):
+              source=call('GET',f"/v1/sources/{source['id']}",token=token)
+              if source['state']=='READY': break
+              if source['state'] in ('FAILED','UNSUPPORTED'): raise AssertionError(source)
+              time.sleep(1)
+          assert source['state']=='READY',source
+          storage=call('GET',f"/v1/sources/{source['id']}/storage",token=token)
+          assert storage['provider'].lower()=='s3' and storage['key'] and storage['size']>0 and storage['sha256']
+
+          call('POST',f"/v1/sources/{source['id']}/link-project",{'projectId':project['id']},token)
+          hits=call('POST','/v1/sources/search',{'query':'cedar nebula calibration','sourceIds':[source['id']],'projectId':project['id'],'limit':5},token)
+          assert hits and hits[0]['citation']['sourceId']==source['id'] and hits[0]['fusedScore']>0
+
+          project_chat=call('POST','/v1/chats',{'scope':'PROJECT','projectId':project['id'],'title':'CI Project Brain','learningMode':'TUTOR'},token,(201,))
+          body,full,project_assistant=stream(token,project_chat['id'],'Use my grammar explanation preference. Explain the cedar nebula calibration evidence.','ci-project-ai-'+uuid.uuid4().hex,project['id'],[source['id']])
+          assert f"ctx:project={project['id']}" in full,full
+          assert ';instruction=none' not in full and ';mode=TUTOR' in full
+          mem=int(re.search(r';mem=(\d+)',full).group(1)); cites=int(re.search(r';citations=(\d+)',full).group(1))
+          assert mem>=1 and cites>=1,(mem,cites,full)
+          citations=call('GET',f"/v1/chats/{project_chat['id']}/messages/{project_assistant}/citations",token=token)
+          assert citations and any(c['citation']['sourceId']==source['id'] for c in citations)
+
+          body,global_full,_=stream(token,global_chat['id'],'Use my grammar explanation preference.','ci-global-isolation-'+uuid.uuid4().hex)
+          assert 'ctx:project=none' in global_full and ';instruction=none' in global_full and ';citations=0' in global_full
+          assert int(re.search(r';mem=(\d+)',global_full).group(1))>=1
+
+          note_id=str(uuid.uuid4()); mutation_id=str(uuid.uuid4()); idem='ci-note-'+uuid.uuid4().hex
+          batch={'mutations':[{'mutationId':mutation_id,'entityType':'NOTE','entityId':note_id,'operation':'UPSERT','idempotencyKey':idem,'payload':{'title':'Offline queued note','body':'exactly once runtime proof','projectId':project['id']}}]}
+          first=call('POST','/v1/sync/mutations',batch,token); replay=call('POST','/v1/sync/mutations',batch,token)
+          assert first['results'][0]['status']=='APPLIED'
+          assert replay['results'][0]['status']=='APPLIED' and replay['results'][0]['code']=='IDEMPOTENT_REPLAY'
+          notes=call('GET','/v1/notes?limit=200',token=token); assert sum(1 for n in notes if n['id']==note_id)==1
+
+          second=call('POST','/v1/auth/register',{'login':f'b-{uuid.uuid4().hex}@example.test','password':'testing-password-12345','displayName':'Isolation B'},expected=(201,))
+          token_b=second['sessionToken']
+          call('GET',f"/v1/projects/{project['id']}",token=token_b,expected=(404,))
+          call('GET',f"/v1/sources/{source['id']}",token=token_b,expected=(404,))
+          b_hits=call('POST','/v1/sources/search',{'query':'cedar nebula calibration','sourceIds':[source['id']],'limit':5},token_b)
+          assert b_hits==[]
+
+          cancel_chat=call('POST','/v1/chats',{'scope':'GLOBAL','title':'CI Cancel','learningMode':'TUTOR'},token,(201,))
+          rid='ci-cancel-'+uuid.uuid4().hex; result={}
+          def run_slow():
+              result['stream']=stream(token,cancel_chat['id'],'CI_SLOW_STREAM_MARKER cancellation proof','ci-cancel-msg-'+uuid.uuid4().hex,request_id=rid)
+          thread=threading.Thread(target=run_slow); thread.start(); time.sleep(.35)
+          cancelled=call('POST','/v1/ai/cancel',{'requestId':rid},token); assert cancelled['cancelled'] is True,cancelled
+          thread.join(15); assert not thread.is_alive()
+          cancel_body=result['stream'][0]
+          assert 'event: error' in cancel_body and 'AI_CANCELLED' in cancel_body,cancel_body
+
+          call('GET','/v1/store',token=token,expected=(501,))
+          print(json.dumps({'HTTP_RUNTIME_SMOKE':'PASS','accountId':account,'projectId':project['id'],'sourceId':source['id'],'automaticMemoryId':corrected['id'],'hybridHits':len(hits),'projectCitations':cites,'syncReplay':'IDEMPOTENT_REPLAY','crossAccountIsolation':'PASS','sseCancellation':'PASS','liveAiConfigured':ready['aiConfigured'],'testAiConfigured':ready['testAiConfigured']},sort_keys=True))
+          PY
+          chmod +x scripts/http_runtime_smoke.py
+
+      - name: Create final Part 1 documentation set
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p docs
+          python3 - <<'PY'
+          from pathlib import Path
+          docs={
+          'Architecture.md':'''# Architecture\n\nVeltrix Hom vNext Part 1 is split into Android presentation/foundation, reusable Kotlin domain logic, Ktor services, PostgreSQL persistence, contracts, scripts, and documentation. Public Ktor routes call repositories/services; deterministic business rules remain outside Compose UI. Production AI, storage, embedding, OCR and translation are adapter boundaries. Part 2 economy and Part 3 final presentation are intentionally outside this foundation.\n''',
+          'Repository_Map.md':'''# Repository Map\n\n- `android/` Android app, Room persistence, WorkManager/sync contracts, instrumentation tests.\n- `core/` domain models and deterministic engines.\n- `server/` Ktor routes, repositories, AI/context, memory, RAG, storage and learning services.\n- `contracts/` OpenAPI 3.1 contract.\n- `database/migrations/` PostgreSQL/pgvector schema evolution.\n- `scripts/` deterministic regressions, route drift, runtime smoke and verification.\n- `.github/workflows/` reproducible CI gates.\n- `docs/` architecture, security, performance and handoff records.\n''',
+          'Environment_Setup.md':'''# Environment Setup\n\nRuntime requires JDK 17, PostgreSQL 17-compatible service with pgvector, and production/staging S3-compatible object storage. Test CI uses deterministic AI/embedding/OCR/translation adapters, real PostgreSQL, real S3-compatible MinIO, real Ktor and a real Android emulator. Production AI credentials stay server-side; no provider key belongs in the APK. Android debug/test uses emulator host mapping; production configuration must use HTTPS.\n''',
+          'Database_Schema.md':'''# Database Schema\n\nMigrations V001–V004 define account/session, projects/goals, memory/evidence, sources/chunks, chats/messages, notes, assessments, flashcards, mistakes, sync/idempotency, activity, source processing, vector embeddings, post-response jobs, deep practice, attachments/citations, generated artifacts and related indexes. Ownership columns are account-scoped and hot paths receive indexes. Vector rows retain source/version/chunk/text-hash/model provenance.\n''',
+          'Migration_Report.md':'''# Migration Report\n\nThe final gate applies the repository migrations against a clean PostgreSQL 17-compatible database with pgvector enabled before runtime verification. Migration success is classified VERIFIED only from the exact final-gate run; source presence alone is not runtime evidence.\n''',
+          'API_OpenAPI.md':'''# API / OpenAPI\n\n`contracts/openapi.yaml` is OpenAPI 3.1. `scripts/generate_openapi_contract.py` derives the public `/v1` inventory from Ktor registration and `scripts/verify_openapi_drift.py` fails on undocumented or stale operations. Current completion source targets 106 public v1 operations with unique operation IDs. Android consumes repository/domain contracts rather than raw SQL.\n''',
+          'Android_Domain_Contracts.md':'''# Android Domain Contracts\n\nAndroid owns local state and presentation-facing repositories; server/domain logic remains replaceable behind typed contracts. Required states include loading, success, empty, error, offline/stale, processing, pagination, mutation progress, conflict and retry. Debug package is `com.veltrix.hom.vnext.dev`; release base package is `com.veltrix.hom.vnext`.\n''',
+          'AI_Engine.md':'''# AI Engine\n\nAI execution is provider-independent. A deterministic provider exists only for test environment; production routing excludes test adapters. The OpenAI Responses adapter implements server-side streaming, timeout/cancellation, error mapping, retry/fallback support and structured generation. Chat calls the context orchestrator before provider routing. Private chain-of-thought is never a persistence target.\n''',
+          'AI_Provider_Routing.md':'''# AI Provider Routing\n\nOperations map to FAST or HIGH_QUALITY policy tiers rather than one expensive model. Provider capabilities gate streaming/structured/vision requirements. Production live-provider verification requires an approved credential; absence of a credential does not permit fake production output and does not block deterministic orchestration tests.\n''',
+          'AI_Context_Pipeline.md':'''# AI Context Pipeline\n\nChat resolves conversation scope, explicit Project, active Project instruction, Learning Mode, selected Sources and READY attachments, account Memory, matching Project Memory, hybrid evidence and allowed deterministic tools. `ContextPlanner` applies scope/ownership rules; `PromptPolicyComposer` separates policy from user content. Assistant segments and real citation mappings are persisted, then post-response jobs are queued off the visible streaming path.\n''',
+          'Memory_Engine.md':'''# Memory Engine\n\nMemory is account- or Project-scoped with category, origin, confidence, evidence and lifecycle status. Retrieval ranks relevant evidence while respecting scope, correction precedence and user settings. Project Memory never applies to unrelated global Chat. Maturity uses diverse evidence rather than raw chat count.\n''',
+          'Memory_Automation.md':'''# Memory Automation\n\nDurable post-response jobs derive explicit user preference/interest/goal/weakness/format candidates. Learning signals and meaningful activity add lower-confidence evidence. Candidates are normalized, deduplicated and conflict checked; user-corrected Memory outranks inferred evidence. Workers are asynchronous and idempotent.\n''',
+          'Memory_Maturity.md':'''# Memory Maturity\n\nPart 1 retains COLD, LEARNING, SUFFICIENT and STRONG. Maturity cannot be raised to STRONG by chat spam alone; durable Memory, Projects, assessments and diverse long-term evidence contribute. Part 2 may consume maturity together with future profile level without rewriting Part 1.\n''',
+          'Chat.md':'''# Chat\n\nChat supports GLOBAL/PROJECT/SOURCE/SPECIALIZED scopes, durable messages, streaming, retry/regenerate lineage, attachments, citations, Project linking, Memory flags, Learning Mode, tools and generated artifacts. Message states cover queued/sending/streaming/completed/failed/cancelled paths and idempotency protects duplicate sends.\n''',
+          'Projects.md':'''# Projects\n\nProject is an operating environment, not a folder. It scopes Sources, Chats, goals, notes, learning artifacts, mistakes, Memory, AI instructions and snapshots. Ownership validation prevents Project context leaking into unrelated global Chat.\n''',
+          'Project_Brain.md':'''# Project Brain\n\nProject workspace snapshots aggregate the active Project, goals, recent chats and system counts without requiring every historical object at open. Project AI instructions are versioned/active data and are injected only when the conversation scope matches.\n''',
+          'Sources_Library.md':'''# Sources / Library\n\nSource ingestion validates MIME/size, stores the object through `StorageAdapter`, extracts/OCRs content, normalizes/chunks, indexes lexical text, creates semantic embeddings and marks READY only after required indexing. Processing jobs are durable and diagnosable; local storage is development/test only.\n''',
+          'Hybrid_RAG.md':'''# Hybrid RAG\n\nHybrid retrieval combines PostgreSQL lexical ranking, exact-match bonus and pgvector similarity under account/source/Project/version filters. Deterministic embeddings make CI reproducible; production embedding remains an adapter. Unchanged text hashes avoid unnecessary re-embedding.\n''',
+          'Object_Storage.md':'''# Object Storage\n\n`StorageAdapter` exposes put/open/delete/head/signed-read behavior. Production/staging uses S3-compatible storage; CI uses real MinIO. Database rows store provider, object key, hash, size, MIME, ETag/version metadata. User filenames never become trusted filesystem paths.\n''',
+          'Citation_Retrieval.md':'''# Citation Retrieval\n\nEvery grounded citation maps to persisted sourceId, sourceVersion, chunkId, textHash and retrieval score, plus page/section where available. Chat persists message-to-citation relations. The model does not get permission to invent citation IDs; insufficient evidence must remain explicit.\n''',
+          'Tests_Quizzes_Practice.md':'''# Tests, Quizzes and Practice\n\nAssessments support deterministic scoring and durable attempts. Wrong answers produce Mistakes/LearningSignals. Practice has session/item/attempt/hint/check/skip/complete state, deterministic sequencing bounds and persistence. Open-ended AI evaluation is an adapter boundary and does not control future Part 2 economy.\n''',
+          'Flashcards.md':'''# Flashcards\n\nDeck/card persistence, due queue and AGAIN/HARD/GOOD/EASY scheduling use deterministic SRS. AI may draft content but never decides due dates. Offline Android state and sync contracts preserve review mutations with idempotency.\n''',
+          'Mistakes_Learning_Signals.md':'''# Mistakes and Learning Signals\n\nMistakes aggregate recurring concepts instead of blindly duplicating rows. Assessment/practice/flashcard evidence feeds LearningSignals and targeted Practice/Flashcard flows. Meaningful activity emits stable events for future Part 2 consumption without awarding XP in Part 1.\n''',
+          'Learning_Modes.md':'''# Learning Modes\n\nPart 1 exposes DEFAULT, TUTOR, SOCRATIC, EXPLAIN_SIMPLE, DEEP_DIVE, PRACTICE_COACH, EXAM_PREP, RESEARCH and WRITING_HELP contracts. Mode enters planned AI context and policy composition; final visual controls belong to Part 3.\n''',
+          'Translate.md':'''# Translate\n\nTranslation is adapter-based and cost-tier aware. Production AI translation routes through FAST policy when AI-backed; test translation remains deterministic and explicitly test-only. Offline translation is not claimed unless a real local provider is added.\n''',
+          'Tool_Bridge.md':'''# Tool Bridge\n\nDeterministic tools are registered server-side and validated before execution. Chat receives only allowed tool IDs; tool results are treated as authoritative and persisted/returned as metadata. Tool loops are bounded by the server contract rather than letting a model invent calculator/unit/date results.\n''',
+          'Search.md':'''# Search\n\nGlobal search returns typed results across supported knowledge and learning entities with ownership filters, metadata/deep links and bounded ranking. Source search additionally supports hybrid semantic+lexical retrieval. No search query may cross account ownership.\n''',
+          'Offline_Sync.md':'''# Offline and Sync\n\nAndroid persists profile/Project snapshots, notes, flashcard state, assessment progress and a sync queue. Server mutations use local mutation IDs, idempotency keys, revision conflict handling and durable idempotency records. Duplicate delivery produces one server effect; content conflicts are explicit rather than silent overwrite. Offline AI is not faked.\n''',
+          'Notifications_Settings.md':'''# Notifications and Settings\n\nSettings cover account/AI/Memory/learning/notifications/data/accessibility/privacy/Project defaults through typed server contracts. Notification preferences include category, quiet-hours JSON and timezone. Part 1 avoids manipulative reward spam.\n''',
+          'Security.md':'''# Security\n\nSecurity invariants: account ownership on every durable object, scoped vector retrieval, server-side service secrets, bounded upload MIME/size, validated UUIDs, parameterized PostgreSQL access, session expiry/revocation, idempotency replay protection and no private raw content in normal logs. Final classification depends on exact runtime/security gate evidence.\n''',
+          'Performance.md':'''# Performance\n\nArchitecture avoids loading full histories at startup: Home/Project snapshots are bounded, lists paginate, source chunks remain server-side, and Android renders cached state first. Hot PostgreSQL paths are indexed in migrations. Production-scale latency claims are not made from tiny deterministic fixtures; final CI reports foundation timing only.\n''',
+          'Feature_Inventory.md':'''# Feature Inventory\n\n| Capability | vNext Part 1 system | Persistence/API | Project/Memory/AI | Runtime gate |\n|---|---|---|---|---|\n| Chat | scoped streaming brain | messages/attachments/citations | Project + Memory + RAG + tools | Ktor smoke + server tests |\n| Projects | operating workspace | projects/goals/instructions/snapshot | primary scope | server tests + HTTP |\n| Sources | durable ingestion/RAG | S3 + chunks + vectors | Project links + citations | MinIO/pgvector HTTP flow |\n| Tutor/Modes | context policy | typed mode contract | AI planner | AI fingerprint smoke |\n| Practice | deep session engine | PostgreSQL state | Mistakes/signals | server integration |\n| Tests/Quizzes | assessment engine | durable attempts | Mistakes/signals | server integration |\n| Flashcards | deterministic SRS | durable schedule | Project/source/mistake | server + Android persistence |\n| Mistakes | recurrence/mastery | durable engine | Practice/Memory signals | server integration |\n| Translate | adapter service | API contract | optional Project | deterministic CI only unless live provider |\n| Calculator/tools | deterministic bridge | tool invocation | Chat allowed tools | server integration |\n| Notifications/Settings | typed preferences | PostgreSQL/API | account/Project defaults | server tests |\n| Account/Profile | durable auth/profile | PostgreSQL/API | root ownership | HTTP runtime |\n| History/Timeline | meaningful events | activity_event | Part 2 hook | server integration |\n''',
+          'Legacy_Capability_Mapping.md':'''# Legacy Capability Mapping\n\nOld Veltrix Hom remains untouched and is only a capability reference. vNext does not depend on legacy runtime/WebView architecture. A capability is considered preserved only when it has a callable vNext path, durable model, ownership/error behavior and appropriate Part 1 tests; class-name presence alone is insufficient.\n''',
+          'Part2_Integration_Contract.md':'''# Part 2 Integration Contract\n\nPart 1 emits meaningful idempotent activity events such as PROJECT_CREATED, GOAL_COMPLETED, SOURCE_ADDED, TEST_COMPLETED, QUIZ_COMPLETED, PRACTICE_COMPLETED, FLASHCARD_REVIEW_COMPLETED, MISTAKE_RESOLVED, NOTE_CREATED and MEANINGFUL_CHAT_SESSION. Part 2 may consume them for Level/XP/Coins/Map/Seasons/Store/achievements without changing learning engines. Part 1 does not award XP or implement economy.\n''',
+          'Part3_Frontend_Handoff.md':'''# Part 3 Frontend Handoff\n\nFrontend may replace all developer-shell presentation without rewriting business logic. Primary destinations: HOME, PERSONAL, STORE, PROJECTS. Capability destinations: CHAT, LIBRARY, TESTING, PRACTICE, QUIZZES, FLASHCARDS, MISTAKES, CALCULATOR, TRANSLATE, NOTIFICATIONS, SETTINGS. Repositories expose loading/success/empty/error/offline/processing/conflict/retry state; frontend never calls raw SQL.\n''',
+          'Test_Report.md':'''# Test Report\n\nThe exact final commit must pass: Kotlin core/server tests on real PostgreSQL+pgvector; deterministic 105 regression; structure and 106-operation OpenAPI drift; real MinIO/S3 source flow; Ktor health/readiness/auth/RAG/AI/Memory/sync/isolation/cancellation smoke; Android APK/androidTest build; emulator install/cold launch; process-death/offline persistence; connected instrumentation; artifact hashes. Any red step means PART 1 NOT COMPLETE.\n''',
+          'Security_Report.md':'''# Security Report\n\nRequired evidence includes cross-account Project/Source isolation, vector ownership filters, server-side secret policy, source validation, parameterized SQL, malformed-ID/error handling, session auth, idempotency replay, source/APK secret scans and no legacy runtime dependency. Live production credential quality is classified separately from deterministic CI.\n''',
+          'Performance_Report.md':'''# Performance Report\n\nPart 1 reports only measured foundation/runtime timing captured by CI where available. Architectural controls include bounded pagination, snapshot aggregation, indexed queries, background source/memory work and no heavy database/network work intended on Android main thread. Production-scale p95 claims require production-like load and are not fabricated here.\n''',
+          'Known_Limitations.md':'''# Known Limitations\n\n- Live production AI is NOT VERIFIED unless an approved provider credential is available to the final live-probe environment.\n- Physical-camera OCR and external production OCR are NOT VERIFIED without a real device/service credential; CI OCR adapter is test-only.\n- Production translation provider quality is NOT VERIFIED without its live credential/provider probe.\n- Part 2 economy/Map/XP/Coins and Part 3 final Liquid Glass/game presentation are intentionally out of Part 1 scope.\n- Android Part 1 UI is a functional developer shell, not final product presentation.\n''',
+          'VERIFIED_CLAIMED_NOT_VERIFIED.md':'''# VERIFIED / CLAIMED / NOT VERIFIED\n\nUse only these labels. `VERIFIED` requires execution evidence from the exact tested commit. Source implementation without runtime execution is `CLAIMED / IMPLEMENTED BUT NOT VERIFIED`. Missing live external credential boundaries are `NOT VERIFIED`. Deterministic CI adapters must always be identified as test-only and never imply live-provider verification.\n''',
+          'FINAL_MANAGER_HANDOFF.md':'''# Final Manager Handoff\n\nOwner: Veltrix Back-end Agent. Scope: Veltrix Hom vNext Part 1 core/intelligence foundation.\n\nThis source tree is an acceptance-candidate implementation only. It does not self-accept. Manager should audit the exact final-gate run, commit SHA, canonical artifact digest, APK/source/handoff SHA-256 values and `VERIFIED / CLAIMED / NOT VERIFIED` classification before freeze. Live production AI/OCR/translation credentials remain independent external verification boundaries when unavailable. No Part 2 economy or Part 3 final UI is claimed.\n''',
+          }
+          for name,body in docs.items():
+              Path('docs',name).write_text(body.strip()+"\n")
+          required='''Architecture.md Repository_Map.md Environment_Setup.md Database_Schema.md Migration_Report.md API_OpenAPI.md Android_Domain_Contracts.md AI_Engine.md AI_Provider_Routing.md AI_Context_Pipeline.md Memory_Engine.md Memory_Automation.md Memory_Maturity.md Chat.md Projects.md Project_Brain.md Sources_Library.md Hybrid_RAG.md Object_Storage.md Citation_Retrieval.md Tests_Quizzes_Practice.md Flashcards.md Mistakes_Learning_Signals.md Learning_Modes.md Translate.md Tool_Bridge.md Search.md Offline_Sync.md Notifications_Settings.md Security.md Performance.md Feature_Inventory.md Legacy_Capability_Mapping.md Part2_Integration_Contract.md Part3_Frontend_Handoff.md Test_Report.md Security_Report.md Performance_Report.md Known_Limitations.md VERIFIED_CLAIMED_NOT_VERIFIED.md FINAL_MANAGER_HANDOFF.md'''.split()
+          missing=[x for x in required if not Path('docs',x).is_file()]
+          if missing: raise SystemExit(missing)
+          print('DOCS_READY',len(required))
+          PY
+
+      - name: Keep regression evidence out of source documentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/run_local_regressions.sh')
+          s=p.read_text()
+          s=s.replace('mkdir -p out/regression out/foundation-regression docs','mkdir -p out/regression out/foundation-regression out/regression-evidence')
+          s=s.replace('| tee docs/core-regression-output.txt','| tee out/regression-evidence/core-regression-output.txt')
+          s=s.replace('| tee docs/foundation-regression-output.txt','| tee out/regression-evidence/foundation-regression-output.txt')
+          s=s.replace("grep -q 'SUMMARY | PASS=48 FAIL=0 TOTAL=48' docs/core-regression-output.txt","grep -q 'SUMMARY | PASS=48 FAIL=0 TOTAL=48' out/regression-evidence/core-regression-output.txt")
+          s=s.replace("grep -q 'SUMMARY | PASS=57 FAIL=0 TOTAL=57' docs/foundation-regression-output.txt","grep -q 'SUMMARY | PASS=57 FAIL=0 TOTAL=57' out/regression-evidence/foundation-regression-output.txt")
+          p.write_text(s)
+          PY
+          git diff --check
+
+      - name: Commit final evidence sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Veltrix Backend CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add server/src/main/kotlin/com/veltrix/hom/vnext/server/foundation/AiFoundation.kt scripts/http_runtime_smoke.py scripts/run_local_regressions.sh docs
+          git commit -m 'test: harden Part 1 runtime evidence and final documentation'
+          git push origin HEAD:veltrix-hom-part1-completion
