@@ -83,7 +83,7 @@ jobs:
           adb start-server
           nohup "$ANDROID_HOME/emulator/emulator" @veltrix_install_probe \
             -port 5554 -memory 4096 -cores 2 -partition-size 4096 \
-            -no-window -gpu software -noaudio -no-boot-anim -no-snapshot -no-metrics -accel on \
+            -no-window -gpu swiftshader -noaudio -no-boot-anim -no-snapshot -no-metrics -accel on \
             > evidence/emulator.log 2>&1 &
           EMULATOR_PID=$!
           SERIAL=''
