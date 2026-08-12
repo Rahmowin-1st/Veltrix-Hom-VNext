@@ -148,7 +148,7 @@ jobs:
           adb shell pm path com.veltrix.hom.vnext.dev | tee evidence/installed-package-path.txt
           echo 'ANDROID_API37_INSTALL_PROBE=PASS' | tee evidence/result.txt
 
-      - name: Cold launch installed APK with service stability gate
+      - name: Cold launch installed APK by process and resumed activity state
         shell: bash
         run: |
           set -euo pipefail
@@ -170,44 +170,58 @@ jobs:
           done
           test "$SERVICE_READY" -eq 1
           adb shell pm path "$PACKAGE" | tee evidence/launch-package-path.txt
-          adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$PACKAGE" 2>&1 | tee evidence/launch-resolve.txt || true
+          adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$PACKAGE" 2>&1 | tee evidence/launch-resolve.txt
+          grep -q 'com.veltrix.hom.vnext.MainActivity' evidence/launch-resolve.txt
           adb logcat -c || true
+          SYSTEM_SERVER_BEFORE=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
+          printf 'SYSTEM_SERVER_BEFORE=%s\n' "$SYSTEM_SERVER_BEFORE" | tee evidence/system-server-stability.txt
+          test -n "$SYSTEM_SERVER_BEFORE"
 
           LAUNCH_OK=0
           : > evidence/cold-launch.txt
           for i in $(seq 1 5); do
             printf '\nLAUNCH_ATTEMPT=%s\n' "$i" | tee -a evidence/cold-launch.txt
             adb shell am force-stop "$PACKAGE" >> evidence/cold-launch.txt 2>&1 || true
+            sleep 1
             set +e
-            OUT=$(adb shell am start -W -S -n "$COMPONENT" 2>&1)
+            OUT=$(adb shell am start -S -n "$COMPONENT" 2>&1)
             RC=$?
             set -e
             printf '%s\n' "$OUT" | tee -a evidence/cold-launch.txt
-            printf 'LAUNCH_RC=%s\n' "$RC" | tee -a evidence/cold-launch.txt
-            if [ "$RC" -eq 0 ] && echo "$OUT" | grep -q 'Status: ok'; then
-              sleep 3
-              PID=$(adb shell pidof "$PACKAGE" 2>/dev/null | tr -d '\r' || true)
-              printf 'APP_PID=%s\n' "$PID" | tee -a evidence/cold-launch.txt
-              if [ -n "$PID" ]; then
+            printf 'LAUNCH_COMMAND_RC=%s\n' "$RC" | tee -a evidence/cold-launch.txt
+            sleep 5
+
+            STATE=$(adb get-state 2>&1 | tr -d '\r' || true)
+            PID=$(adb shell pidof "$PACKAGE" 2>/dev/null | tr -d '\r' || true)
+            ACTIVITY_STATE=$(adb shell dumpsys activity activities 2>&1 || true)
+            WINDOW_STATE=$(adb shell dumpsys window windows 2>&1 || true)
+            SYSTEM_SERVER_AFTER=$(adb shell pidof system_server 2>/dev/null | tr -d '\r' || true)
+            printf 'ADB_STATE=%s\nAPP_PID=%s\nSYSTEM_SERVER_AFTER=%s\n' "$STATE" "$PID" "$SYSTEM_SERVER_AFTER" | tee -a evidence/cold-launch.txt
+            printf '%s\n' "$ACTIVITY_STATE" > evidence/dumpsys-activity-attempt-${i}.txt
+            printf '%s\n' "$WINDOW_STATE" > evidence/dumpsys-window-attempt-${i}.txt
+            printf 'system_server_before=%s system_server_after=%s\n' "$SYSTEM_SERVER_BEFORE" "$SYSTEM_SERVER_AFTER" | tee -a evidence/system-server-stability.txt
+
+            RESUMED=$(printf '%s\n' "$ACTIVITY_STATE" | grep -m1 -E 'mResumedActivity|topResumedActivity|ResumedActivity' || true)
+            FOCUSED=$(printf '%s\n' "$WINDOW_STATE" | grep -m1 -E 'mCurrentFocus|mFocusedApp' || true)
+            printf 'RESUMED=%s\nFOCUSED=%s\n' "$RESUMED" "$FOCUSED" | tee -a evidence/cold-launch.txt
+
+            if [ "$STATE" = 'device' ] && [ -n "$PID" ] && [ "$SYSTEM_SERVER_AFTER" = "$SYSTEM_SERVER_BEFORE" ]; then
+              if echo "$RESUMED $FOCUSED" | grep -q "$PACKAGE"; then
                 LAUNCH_OK=1
                 break
               fi
             fi
-            adb get-state 2>&1 | tee -a evidence/cold-launch.txt || true
-            adb shell getprop sys.boot_completed 2>&1 | tee -a evidence/cold-launch.txt || true
-            adb shell service check activity 2>&1 | tee -a evidence/cold-launch.txt || true
-            adb shell pidof system_server 2>&1 | tee -a evidence/cold-launch.txt || true
             sleep 3
           done
 
-          adb logcat -d -b all -t 2500 > evidence/logcat-cold-launch.txt 2>&1 || true
-          adb shell dumpsys activity activities > evidence/dumpsys-activity.txt 2>&1 || true
+          adb logcat -d -b all -t 3000 > evidence/logcat-cold-launch.txt 2>&1 || true
+          adb shell dumpsys activity activities > evidence/dumpsys-activity-final.txt 2>&1 || true
+          adb shell dumpsys window windows > evidence/dumpsys-window-final.txt 2>&1 || true
           adb shell dumpsys package "$PACKAGE" > evidence/dumpsys-app-package.txt 2>&1 || true
           if [ "$LAUNCH_OK" -ne 1 ]; then
-            grep -E -i 'FATAL EXCEPTION|AndroidRuntime|Process: com.veltrix.hom.vnext|system_server|Watchdog|lowmemory|am_crash' evidence/logcat-cold-launch.txt | tail -300 | tee evidence/cold-launch-failure-summary.txt || true
+            grep -E -i 'FATAL EXCEPTION|AndroidRuntime|Process: com.veltrix.hom.vnext|system_server|Watchdog|lowmemory|am_crash|ActivityTaskManager' evidence/logcat-cold-launch.txt | tail -400 | tee evidence/cold-launch-failure-summary.txt || true
             exit 1
           fi
-          grep -q 'Status: ok' evidence/cold-launch.txt
           echo 'ANDROID_API37_COLD_LAUNCH_PROBE=PASS' | tee -a evidence/result.txt
 
       - name: Upload install evidence
