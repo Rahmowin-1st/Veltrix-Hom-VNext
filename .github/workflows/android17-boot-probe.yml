@@ -1,0 +1,105 @@
+name: Android 17 boot probe
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/android17-boot-probe.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  boot-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-part1-completion
+      - name: Record probed branch HEAD
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android 17.0 emulator image
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'emulator' 'platforms;android-37.0' 'system-images;android-37.0;google_apis;x86_64'
+      - name: Boot with pinned ADB port and diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+          test -r /dev/kvm && test -w /dev/kvm
+
+          export ANDROID_AVD_HOME="$GITHUB_WORKSPACE/.android-avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd -n veltrix_vnext_api37_probe -k 'system-images;android-37.0;google_apis;x86_64' -f
+          avdmanager list avd
+          cat "$ANDROID_AVD_HOME/veltrix_vnext_api37_probe.avd/config.ini"
+
+          adb kill-server || true
+          adb start-server
+          adb devices -l
+
+          nohup "$ANDROID_HOME/emulator/emulator" @veltrix_vnext_api37_probe \
+            -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim \
+            -no-snapshot -no-metrics -accel on -port 5554 -verbose -show-kernel \
+            > emulator.log 2>&1 &
+          EMU_PID=$!
+          echo "emulator_pid=$EMU_PID"
+
+          ready=0
+          for i in $(seq 1 120); do
+            if ! kill -0 "$EMU_PID" 2>/dev/null; then
+              echo 'Emulator process exited unexpectedly'
+              tail -n 300 emulator.log || true
+              exit 1
+            fi
+            if adb -s emulator-5554 get-state 2>/dev/null | grep -qx device; then
+              ready=1
+              break
+            fi
+            if (( i % 10 == 0 )); then
+              echo "--- probe $i ---"
+              adb devices -l || true
+              ss -lntp | grep -E '5554|5555|8554' || true
+              tail -n 80 emulator.log || true
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo 'ADB device did not appear'
+            adb devices -l || true
+            ss -lntp | grep -E '5554|5555|8554' || true
+            tail -n 400 emulator.log || true
+            exit 1
+          fi
+
+          adb -s emulator-5554 wait-for-device
+          booted=0
+          for i in $(seq 1 120); do
+            if [ "$(adb -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+              booted=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$booted" -ne 1 ]; then
+            echo 'Android guest did not complete boot'
+            adb -s emulator-5554 shell getprop || true
+            tail -n 400 emulator.log || true
+            exit 1
+          fi
+
+          adb -s emulator-5554 shell getprop ro.build.version.release
+          adb -s emulator-5554 shell getprop ro.build.version.sdk
+          adb -s emulator-5554 shell getprop ro.product.cpu.abi
+          echo 'ANDROID17_BOOT_PROBE=PASS'
