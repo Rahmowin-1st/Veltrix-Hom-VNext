@@ -1,0 +1,76 @@
+name: Normalize Part 1 source tree
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/normalize-part1-source.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout completion branch
+        uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-part1-completion
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Reconstruct manifest-exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/veltrix-part1-source
+          mkdir -p /tmp/veltrix-part1-source
+          for n in $(seq -w 0 11); do
+            f="ci/source-v2/c${n}.b64"
+            test -s "$f"
+            expected=$(sed -n "s/^c${n}_sha256=//p" ci/source-v2/MANIFEST.txt)
+            actual=$(sha256sum "$f" | awk '{print $1}')
+            test "$expected" = "$actual"
+          done
+          for n in $(seq -w 0 11); do cat "ci/source-v2/c${n}.b64"; done | base64 -d > /tmp/source.tar.xz
+          echo '1b363898c79f8eb7a74f5c279bc7c5f015f18703538c81ae34afc8aca1cdb2dc  /tmp/source.tar.xz' | sha256sum -c -
+          xz -t /tmp/source.tar.xz
+          tar -xJf /tmp/source.tar.xz -C /tmp/veltrix-part1-source
+          test -s /tmp/veltrix-part1-source/settings.gradle.kts
+          test -s /tmp/veltrix-part1-source/server/src/main/kotlin/com/veltrix/hom/vnext/server/Main.kt
+          test -s /tmp/veltrix-part1-source/database/migrations/V004__part1_intelligence_completion.sql
+
+      - name: Import source as normal repository tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -a --exclude='.github/' /tmp/veltrix-part1-source/ ./
+          mkdir -p provenance
+          cat > provenance/SEALED_SOURCE_IMPORT.md <<'EOF'
+          # Sealed source import provenance
+
+          The normal repository source tree was reconstructed from the accepted completion transport archive.
+
+          - Foundation checkpoint: `d47d0876eb2ee30a480549a89b42382b4a31d8ed`
+          - Sealed archive SHA-256: `1b363898c79f8eb7a74f5c279bc7c5f015f18703538c81ae34afc8aca1cdb2dc`
+          - Transport integrity: all `c00`..`c11` chunk hashes matched `ci/source-v2/MANIFEST.txt`
+          - XZ integrity: verified before extraction
+
+          The sealed transport is retained temporarily as provenance while completion work proceeds. The normal source files are the editable working tree from this commit onward.
+          EOF
+          git status --short
+
+      - name: Commit normalized source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Veltrix Backend CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A -- ':!.github/workflows'
+          if git diff --cached --quiet; then
+            echo 'No source import diff.'
+            exit 0
+          fi
+          git commit -m 'repo: import exact Part 1 completion source tree'
+          git push origin HEAD:veltrix-hom-part1-completion
