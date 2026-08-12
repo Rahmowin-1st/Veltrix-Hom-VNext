@@ -1,0 +1,48 @@
+name: Repair Part 1 runtime sources
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/repair-part1-runtime-sources.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: repair
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-part1-completion
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: src
+      - name: Reconstruct exact canonical runtime-source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat repair/ci/source-repair/sr*.b64 | base64 -d > /tmp/source.tar.xz
+          echo '029acd5e293c9f0f566a6fd38db53d84adfa0e24a29134110dbf04eb61ab9c96  /tmp/source.tar.xz' | sha256sum -c -
+          tar -xJf /tmp/source.tar.xz -C src
+          test -f src/android/app/src/main/kotlin/com/veltrix/hom/vnext/VeltrixApiClient.kt
+          test -f src/android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/ServerIntegrationInstrumentedTest.kt
+          test -f src/server/src/main/kotlin/com/veltrix/hom/vnext/server/AiObservabilityRepository.kt
+          test -f src/scripts/http_runtime_smoke.py
+          cd src
+          bash scripts/verify_structure.sh
+          python3 scripts/verify_openapi_drift.py
+          git diff --check
+      - name: Commit canonical runtime-source repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src
+          git config user.name 'Veltrix Backend CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/ServerIntegrationInstrumentedTest.kt android/app/src/debug/AndroidManifest.xml android/app/src/main/kotlin/com/veltrix/hom/vnext/VeltrixApiClient.kt scripts/http_runtime_smoke.py scripts/route_inventory.py scripts/sync_openapi_routes.py server/src/main/kotlin/com/veltrix/hom/vnext/server/AiObservabilityRepository.kt
+          if git diff --cached --quiet; then echo 'Runtime sources already canonical.'; exit 0; fi
+          git commit -m 'fix: restore canonical Part 1 runtime integration sources'
+          git push origin HEAD:veltrix-hom-part1-completion
