@@ -20,22 +20,26 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Repair exact bad chunks and verify archive
+      - name: Restore exact manifest chunks and archive
         shell: bash
         run: |
           set -euo pipefail
+          for n in c02 c09; do
+            if [ -s "ci/source-v2/${n}a.b64" ] && [ -s "ci/source-v2/${n}b.b64" ]; then
+              cat "ci/source-v2/${n}a.b64" "ci/source-v2/${n}b.b64" > "ci/source-v2/${n}.b64"
+            fi
+          done
           python3 - <<'PY'
           import hashlib, pathlib, re
           root=pathlib.Path('ci/source-v2')
           manifest=(root/'MANIFEST.txt').read_text()
           alpha=b'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-          repaired=[]
           for name in ('c02','c09'):
               p=root/(name+'.b64')
               target=bytes.fromhex(re.search(rf'^{name}_sha256=([0-9a-f]{{64}})$',manifest,re.M).group(1))
               data=bytearray(p.read_bytes())
               if hashlib.sha256(data).digest()==target:
-                  print(name,'already exact')
+                  print(name,'EXACT_FROM_HALVES')
                   continue
               found=None
               for i,orig in enumerate(data):
@@ -46,31 +50,34 @@ jobs:
                           found=(i,orig,ch); break
                   if found: break
                   data[i]=orig
-              if not found: raise SystemExit(f'{name}: manifest-exact single substitution not found')
+              if not found: raise SystemExit(f'{name}: exact repair unavailable')
               p.write_bytes(data)
-              print(name,'repaired',found[0],chr(found[1]),'->',chr(found[2]))
-              repaired.append(name)
+              print(name,'EXACT_SINGLE_SUBSTITUTION',found[0],chr(found[1]),'->',chr(found[2]))
           PY
-          for f in ci/source-v2/c*.b64; do
-            n=$(basename "$f" .b64)
-            expected=$(sed -n "s/^${n}_sha256=//p" ci/source-v2/MANIFEST.txt)
+          rm -f ci/source-v2/c02a.b64 ci/source-v2/c02b.b64 ci/source-v2/c09a.b64 ci/source-v2/c09b.b64
+          for n in $(seq -w 0 11); do
+            f="ci/source-v2/c${n}.b64"
+            test -s "$f"
+            expected=$(sed -n "s/^c${n}_sha256=//p" ci/source-v2/MANIFEST.txt)
             actual=$(sha256sum "$f" | awk '{print $1}')
+            echo "c${n} expected=$expected actual=$actual"
             test "$expected" = "$actual"
           done
-          cat ci/source-v2/c*.b64 | base64 -d > /tmp/source.tar.xz
+          test "$(find ci/source-v2 -maxdepth 1 -type f -name 'c*.b64' | wc -l)" = 12
+          for n in $(seq -w 0 11); do cat "ci/source-v2/c${n}.b64"; done | base64 -d > /tmp/source.tar.xz
           echo '1b363898c79f8eb7a74f5c279bc7c5f015f18703538c81ae34afc8aca1cdb2dc  /tmp/source.tar.xz' | sha256sum -c -
           xz -t /tmp/source.tar.xz
 
-      - name: Commit repair to completion branch
+      - name: Commit exact transport to completion branch
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- ci/source-v2/c02.b64 ci/source-v2/c09.b64; then
+          if git diff --quiet -- ci/source-v2; then
             echo 'Transport already exact; no commit needed.'
             exit 0
           fi
           git config user.name 'Veltrix Backend CI'
           git config user.email 'actions@users.noreply.github.com'
-          git add ci/source-v2/c02.b64 ci/source-v2/c09.b64
+          git add -A ci/source-v2
           git commit -m 'fix: restore manifest-exact sealed completion transport'
           git push origin HEAD:veltrix-hom-part1-completion
