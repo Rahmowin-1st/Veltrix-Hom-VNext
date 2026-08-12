@@ -1,0 +1,68 @@
+name: Recover sealed completion source
+
+on:
+  push:
+    branches:
+      - veltrix-hom-part1-completion
+    paths:
+      - '.github/workflows/recover-sealed-source.yml'
+      - 'ci/source-v2/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reassemble sealed source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p recovered
+          cat ci/source-v2/c*.b64 > /tmp/source.b64
+          base64 -d /tmp/source.b64 > /tmp/source.xz
+          echo "xz_sha256=$(sha256sum /tmp/source.xz | awk '{print $1}')" | tee recovered/recovery.txt
+          xz -t /tmp/source.xz
+          xz -dc /tmp/source.xz > /tmp/source.payload
+          file /tmp/source.payload | tee -a recovered/recovery.txt
+          echo "payload_sha256=$(sha256sum /tmp/source.payload | awk '{print $1}')" | tee -a recovered/recovery.txt
+          if tar -tf /tmp/source.payload >/tmp/tar-list.txt 2>/tmp/tar-error.txt; then
+            echo 'archive_type=tar' | tee -a recovered/recovery.txt
+            mkdir -p recovered/source
+            tar -xf /tmp/source.payload -C recovered/source
+          else
+            echo 'archive_type=unknown' | tee -a recovered/recovery.txt
+            cat /tmp/tar-error.txt
+            exit 2
+          fi
+          find recovered/source -maxdepth 3 -type f | sort | head -250 | tee recovered/tree.txt
+          echo "file_count=$(find recovered/source -type f | wc -l)" | tee -a recovered/recovery.txt
+          du -sh recovered/source | tee -a recovered/recovery.txt
+
+      - name: Inspect expected Veltrix structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="recovered/source"
+          if [ "$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ] && [ ! -d "$ROOT/android" ]; then
+            ONE="$(find "$ROOT" -mindepth 1 -maxdepth 1 -type d | head -1)"
+            if [ -d "$ONE/android" ] || [ -d "$ONE/server" ]; then ROOT="$ONE"; fi
+          fi
+          echo "source_root=$ROOT" | tee -a recovered/recovery.txt
+          for p in android server core contracts database docs scripts .github; do
+            if [ -e "$ROOT/$p" ]; then echo "FOUND $p"; else echo "MISSING $p"; fi
+          done | tee recovered/structure.txt
+          grep -RIl --exclude-dir=.git 'd47d0876eb2ee30a480549a89b42382b4a31d8ed' "$ROOT" | head -20 | tee recovered/checkpoint_refs.txt || true
+          grep -RIl --exclude-dir=.git 'PromptPolicyComposer\|S3CompatibleStorageAdapter\|MemoryCandidate\|Hybrid' "$ROOT" | head -100 | tee recovered/completion_markers.txt || true
+
+      - name: Upload recovery evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sealed-source-recovery
+          path: recovered
+          if-no-files-found: error
