@@ -1,0 +1,130 @@
+name: Android 17 API 37 Boot Probe
+
+on:
+  push:
+    branches: [veltrix-hom-part1-completion]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  api37-boot-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      ANDROID_AVD_HOME: ${{ github.workspace }}/.android-avd
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+
+      - name: Setup Android SDK command-line tools
+        uses: android-actions/setup-android@v3
+
+      - name: Install exact Android 17 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            'platform-tools' \
+            'emulator' \
+            'platforms;android-37.0' \
+            'system-images;android-37.0;google_apis;x86_64'
+          sdkmanager --list_installed | tee evidence/sdk-installed.txt
+          adb version | tee evidence/adb-version.txt
+          "$ANDROID_HOME/emulator/emulator" -version 2>&1 | tee evidence/emulator-version.txt
+
+      - name: Boot exact API 37 AVD with deterministic ADB discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+          test -e /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd \
+            -n veltrix_vnext_api37_probe \
+            -k 'system-images;android-37.0;google_apis;x86_64' -f
+          avdmanager list avd | tee evidence/avd-list.txt
+          AVD_CONFIG="$ANDROID_AVD_HOME/veltrix_vnext_api37_probe.avd/config.ini"
+          grep -q '^hw.ramSize=' "$AVD_CONFIG" && sed -i 's/^hw.ramSize=.*/hw.ramSize=4096/' "$AVD_CONFIG" || echo 'hw.ramSize=4096' >> "$AVD_CONFIG"
+          grep -q '^hw.cpu.ncore=' "$AVD_CONFIG" && sed -i 's/^hw.cpu.ncore=.*/hw.cpu.ncore=4/' "$AVD_CONFIG" || echo 'hw.cpu.ncore=4' >> "$AVD_CONFIG"
+          free -h | tee evidence/host-memory.txt
+          nproc | tee evidence/host-cpus.txt
+          cat "$AVD_CONFIG" | tee evidence/avd-config.txt
+
+          adb kill-server || true
+          adb start-server
+          adb devices -l | tee evidence/adb-before.txt
+
+          nohup "$ANDROID_HOME/emulator/emulator" @veltrix_vnext_api37_probe \
+            -port 5554 -memory 4096 -cores 4 \
+            -no-window -gpu software -noaudio -no-boot-anim -no-snapshot -no-metrics -accel on \
+            > evidence/emulator.log 2>&1 &
+          EMULATOR_PID=$!
+          echo "$EMULATOR_PID" | tee evidence/emulator.pid
+
+          SERIAL=''
+          for i in $(seq 1 300); do
+            if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then
+              echo 'EMULATOR_PROCESS_EXITED=1' | tee evidence/failure.txt
+              break
+            fi
+            SERIAL=$(adb devices | awk 'NR>1 && $2 == "device" {print $1; exit}')
+            if [ -n "$SERIAL" ]; then break; fi
+            if [ "$i" -ge 15 ]; then adb connect 127.0.0.1:5555 >/dev/null 2>&1 || true; fi
+            if [ $((i % 15)) -eq 0 ]; then
+              printf 'ADB_WAIT_ITERATION=%s\n' "$i" | tee -a evidence/progress.txt
+              adb devices -l | tee -a evidence/progress.txt
+              ss -ltnp 2>/dev/null | grep -E ':(5554|5555|8554)\b' | tee -a evidence/progress.txt || true
+              tail -100 evidence/emulator.log | tee evidence/emulator-tail.txt
+            fi
+            sleep 2
+          done
+
+          if [ -z "$SERIAL" ]; then
+            adb devices -l | tee evidence/adb-failure.txt || true
+            ss -ltnp 2>/dev/null | tee evidence/listening-ports-failure.txt || true
+            ps -ef | grep -E '[e]mulator|[q]emu-system|[a]db' | tee evidence/processes-failure.txt || true
+            cat evidence/emulator.log
+            exit 1
+          fi
+          export ANDROID_SERIAL="$SERIAL"
+          printf 'ANDROID_SERIAL=%s\n' "$SERIAL" | tee evidence/selected-device.txt
+
+          BOOT=0
+          for i in $(seq 1 300); do
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = '1' ]; then
+              BOOT=1
+              break
+            fi
+            if [ $((i % 15)) -eq 0 ]; then
+              printf 'BOOT_WAIT_ITERATION=%s\n' "$i" | tee -a evidence/progress.txt
+              adb shell getprop ro.boot.bootreason 2>/dev/null | tee -a evidence/progress.txt || true
+              tail -100 evidence/emulator.log | tee evidence/emulator-tail.txt
+            fi
+            sleep 2
+          done
+          if [ "$BOOT" -ne 1 ]; then
+            adb shell getprop | tee evidence/getprop-failure.txt || true
+            cat evidence/emulator.log
+            exit 1
+          fi
+
+          adb devices -l | tee evidence/adb-final.txt
+          adb shell getprop ro.build.version.release | tee evidence/android-release.txt
+          adb shell getprop ro.build.version.sdk | tee evidence/android-api.txt
+          grep -Fx '37' evidence/android-api.txt
+          echo 'ANDROID_API37_BOOT_PROBE=PASS' | tee evidence/result.txt
+
+      - name: Upload API 37 boot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-api37-boot-probe-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
