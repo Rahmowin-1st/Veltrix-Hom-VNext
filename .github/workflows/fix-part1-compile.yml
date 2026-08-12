@@ -18,47 +18,39 @@ jobs:
           ref: veltrix-hom-part1-completion
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Apply compile fixes
+      - name: Align integration test with completed source APIs
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          replacements = {
-            'server/src/main/kotlin/com/veltrix/hom/vnext/server/ChatIntelligenceRepository.kt': [
-              ('):List<MessageAttachmentResponse>=', '):List<MessageAttachmentResponse> ='),
-              ('):List<MessageCitationResponse>=', '):List<MessageCitationResponse> ='),
-            ],
-            'server/src/main/kotlin/com/veltrix/hom/vnext/server/GeneratedArtifactService.kt': [
-              ('):List<GeneratedArtifactResponse>=', '):List<GeneratedArtifactResponse> ='),
-            ],
-            'server/src/main/kotlin/com/veltrix/hom/vnext/server/Main.kt': [
-              ('private suspend fun <T> blocking(block:()->T):T=withContext(Dispatchers.IO){block()}',
-               'private suspend fun <T> blocking(block:suspend ()->T):T=withContext(Dispatchers.IO){block()}'),
-            ],
-            'server/src/main/kotlin/com/veltrix/hom/vnext/server/learning/DeepPracticeRepository.kt': [
-              ('val body=deterministicHint(i.prompt,i.expectedAnswer,count)',
-               'val body=deterministicHint(i.prompt,i.expectedAnswer ?: badState(),count)'),
-              ('val p=mapSession(rs);insertActivity',
-               'val p=mapSession(SessionRow(rs));insertActivity'),
-            ],
-          }
-          for name, reps in replacements.items():
-              p=Path(name); s=p.read_text()
-              for old,new in reps:
-                  if old not in s:
-                      raise SystemExit(f'missing expected source pattern in {name}: {old}')
+          p=Path('server/src/test/kotlin/com/veltrix/hom/vnext/server/Part1CompletionIntegrationTest.kt')
+          s=p.read_text()
+          replacements=[
+            ('planned.planned.carry.projectId','planned.planned.projectId'),
+            ('globalCtx.planned.carry.projectId','globalCtx.planned.projectId'),
+            ('planned.request.systemPrompt.contains("Source grounding is active")','planned.request.systemPrompt?.contains("Source grounding is active") == true'),
+            ('chats.appendAssistantContent(a.accountId, assistant.id, "Understood. I will keep explanations concise.")','chats.appendAssistantSegment(a.accountId, assistant.id, "Understood. I will keep explanations concise.")'),
+          ]
+          for old,new in replacements:
+              if old in s:
                   s=s.replace(old,new)
-              p.write_text(s)
+              elif new not in s:
+                  raise SystemExit(f'neither old nor expected new test API expression found: {old}')
+          p.write_text(s)
           PY
           git diff --check
-          git diff --stat
-      - name: Commit compile fixes
+          git diff -- server/src/test/kotlin/com/veltrix/hom/vnext/server/Part1CompletionIntegrationTest.kt
+      - name: Commit integration-test repair
         shell: bash
         run: |
           set -euo pipefail
+          if git diff --quiet; then
+            echo 'Integration test already aligned.'
+            exit 0
+          fi
           git config user.name 'Veltrix Backend CI'
           git config user.email 'actions@users.noreply.github.com'
-          git add server/src/main/kotlin/com/veltrix/hom/vnext/server
-          git commit -m 'fix: close server compile blockers in Part 1 completion'
+          git add server/src/test/kotlin/com/veltrix/hom/vnext/server/Part1CompletionIntegrationTest.kt
+          git commit -m 'test: align Part 1 integration flow with completed APIs'
           git push origin HEAD:veltrix-hom-part1-completion
