@@ -1,0 +1,106 @@
+name: Android 17 emulator diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/android17-emulator-diagnostic.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      ANDROID_AVD_HOME: ${{ github.workspace }}/.android-avd
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 59112a3d8242223bd5c2e6ab9c12c36edae90fd0
+      - name: Record exact diagnostic source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '59112a3d8242223bd5c2e6ab9c12c36edae90fd0'
+          git rev-parse HEAD
+      - uses: android-actions/setup-android@v3
+      - name: Install exact Android 17.0 emulator image
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'emulator' 'system-images;android-37.0;google_apis;x86_64'
+      - name: Host KVM and emulator diagnostics
+        shell: bash
+        run: |
+          set -u
+          echo '=== HOST ==='
+          uname -a
+          id
+          echo '=== CPU VIRTUALIZATION FLAGS ==='
+          grep -Eo '(vmx|svm)' /proc/cpuinfo | sort | uniq -c || true
+          echo '=== KVM ==='
+          ls -l /dev/kvm || true
+          test -e /dev/kvm && sudo chmod 666 /dev/kvm || true
+          ls -l /dev/kvm || true
+          echo '=== EMULATOR ==='
+          "$ANDROID_HOME/emulator/emulator" -version || true
+          "$ANDROID_HOME/emulator/emulator" -accel-check || true
+          echo '=== ADB ==='
+          adb version || true
+      - name: Create exact API37 AVD
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd -n veltrix_diag_api37 -k 'system-images;android-37.0;google_apis;x86_64' -f
+          avdmanager list avd
+          echo '=== AVD FILES ==='
+          find "$ANDROID_AVD_HOME" -maxdepth 2 -type f -print | sort
+          echo '=== CONFIG ==='
+          cat "$ANDROID_AVD_HOME/veltrix_diag_api37.avd/config.ini"
+      - name: Boot with supported SwiftShader GPU and capture bounded evidence
+        shell: bash
+        run: |
+          set -u
+          adb kill-server || true
+          adb start-server
+          LOG="$GITHUB_WORKSPACE/emulator-diagnostic.log"
+          : > "$LOG"
+          "$ANDROID_HOME/emulator/emulator" @veltrix_diag_api37 \
+            -no-window -gpu swiftshader -noaudio -no-boot-anim -no-snapshot -no-metrics -accel on -wipe-data \
+            >"$LOG" 2>&1 &
+          PID=$!
+          echo "EMULATOR_PID=$PID"
+          BOOTED=0
+          for i in $(seq 1 90); do
+            if ! kill -0 "$PID" 2>/dev/null; then
+              echo "EMULATOR_EXITED_AT_ITERATION=$i"
+              break
+            fi
+            STATE=$(adb get-state 2>/dev/null || true)
+            BOOT=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
+            if [ $((i % 10)) -eq 0 ]; then
+              echo "iteration=$i state=${STATE:-none} boot=${BOOT:-none}"
+            fi
+            if [ "$STATE" = device ] && [ "$BOOT" = 1 ]; then
+              BOOTED=1
+              break
+            fi
+            sleep 2
+          done
+          echo '=== PROCESS ==='
+          ps -fp "$PID" || true
+          echo '=== ADB DEVICES ==='
+          adb devices -l || true
+          echo '=== BOOT PROPS ==='
+          adb shell getprop ro.build.version.sdk 2>/dev/null || true
+          adb shell getprop ro.build.version.release 2>/dev/null || true
+          adb shell getprop sys.boot_completed 2>/dev/null || true
+          echo '=== EMULATOR LOG TAIL ==='
+          tail -200 "$LOG" || true
+          echo "BOOTED=$BOOTED"
+          if [ "$BOOTED" -ne 1 ]; then exit 1; fi
+          test "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" = 37
