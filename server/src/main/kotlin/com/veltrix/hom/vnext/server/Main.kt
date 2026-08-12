@@ -327,7 +327,7 @@ private fun ApplicationCall.bearerToken():String {
 private fun ApplicationCall.id():String=parameters["id"]?.let(::validatedUuid) ?: throw validation("Missing id")
 private fun validatedUuid(value:String):String=runCatching{UUID.fromString(value).toString()}.getOrElse{throw validation("Invalid UUID")}
 private fun ApplicationCall.intQuery(name:String,default:Int,min:Int,max:Int):Int=request.queryParameters[name]?.toIntOrNull()?.coerceIn(min,max)?:default
-private suspend fun <T> blocking(block:()->T):T=withContext(Dispatchers.IO){block()}
+private suspend fun <T> blocking(block:suspend ()->T):T=withContext(Dispatchers.IO){block()}
 private fun hashKey(value:String)=sha256(value).take(24)
 private fun limited(call:ApplicationCall,limiter:RequestRateLimiter,key:String){if(!limiter.allow(key))throw DomainException(DomainError("RATE_LIMIT",ErrorCategory.RATE_LIMIT,"Too many requests",true,call.callId))}
 private suspend fun ApplicationCall.respondDomainError(error:DomainError){
