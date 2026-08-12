@@ -90,7 +90,7 @@ jobs:
           python3 -m pip install --quiet pyyaml
           python3 scripts/verify_openapi_drift.py | tee evidence/openapi-drift.txt
           grep -q 'OPENAPI_DRIFT=PASS' evidence/openapi-drift.txt
-          ! grep -R --exclude-dir=.git --exclude-dir=build --exclude='*.md' -nE '(sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{20,}|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY)' .
+          ! grep -R --exclude-dir=.git --exclude-dir=build --exclude='*.md' -nE '(sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z0-9_-]{20,}|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY)' .
           ! grep -R --exclude-dir=build -n 'SYSTEM_ALERT_WINDOW' android
           echo STATIC_SECURITY_GATE=PASS | tee evidence/security-static.txt
 
@@ -118,11 +118,17 @@ jobs:
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools' 'emulator' 'system-images;android-37.0;google_apis;x86_64'
+          # GitHub runner images may carry a newer preview emulator. Remove it first,
+          # then install strictly from Android SDK stable channel 0.
+          sdkmanager --uninstall 'emulator' >/dev/null 2>&1 || true
+          rm -rf "$ANDROID_HOME/emulator"
+          sdkmanager --channel=0 'emulator'
+          sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools' 'system-images;android-37.0;google_apis;x86_64'
           sudo apt-get update
           sudo apt-get install -y libpulse0
           "$ANDROID_HOME/emulator/emulator" -version 2>&1 | tee evidence/emulator-version.txt
-          grep -q 'Android emulator version' evidence/emulator-version.txt
+          grep -q 'Android emulator version 36.6.11' evidence/emulator-version.txt
+          echo 'ANDROID_EMULATOR_STABLE_CHANNEL_GATE=PASS version=36.6.11' | tee evidence/emulator-stable-channel.txt
 
       - name: Build exact APK and androidTest APK
         shell: bash
