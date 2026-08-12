@@ -1,0 +1,318 @@
+name: Veltrix Hom vNext Part 1 FINAL Gate V2
+
+on:
+  push:
+    branches: [ veltrix-hom-part1-completion ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  VELTRIX_ENV: test
+  VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_DATABASE_USER: postgres
+  VELTRIX_DATABASE_PASSWORD: postgres
+  VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_TEST_DATABASE_USER: postgres
+  VELTRIX_TEST_DATABASE_PASSWORD: postgres
+  VELTRIX_AI_PROVIDER: disabled
+  VELTRIX_TEST_AI_MOCK: "true"
+  VELTRIX_EMBEDDING_PROVIDER: disabled
+  VELTRIX_TEST_EMBEDDING_MOCK: "true"
+  VELTRIX_EMBEDDING_DIMENSIONS: "64"
+  VELTRIX_TEST_OCR_MOCK: "true"
+  VELTRIX_TEST_TRANSLATE_MOCK: "true"
+  VELTRIX_STORAGE_PROVIDER: s3
+  VELTRIX_S3_ENDPOINT: http://127.0.0.1:9000
+  VELTRIX_S3_REGION: us-east-1
+  VELTRIX_S3_BUCKET: veltrix-hom-vnext
+  VELTRIX_S3_ACCESS_KEY: veltrixci
+  VELTRIX_S3_SECRET_KEY: veltrixci-secret-2026
+  VELTRIX_S3_PATH_STYLE: "true"
+  VELTRIX_WORKERS_ENABLED: "false"
+  ANDROID_AVD_HOME: ${{ github.workspace }}/.android-avd
+
+jobs:
+  final-gate-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+
+    steps:
+      - name: Checkout exact completion source
+        uses: actions/checkout@v4
+
+      - name: Record source provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/provenance
+          printf 'repository=%s\nbranch=%s\ncommit=%s\nrun_id=%s\nfoundation_checkpoint=d47d0876eb2ee30a480549a89b42382b4a31d8ed\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID" | tee evidence/provenance/repo.txt
+          git status --porcelain=v1
+          git rev-parse HEAD | tee evidence/provenance/commit.txt
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle 9.5.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+
+      - name: Start S3-compatible MinIO
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull minio/minio:RELEASE.2025-04-22T22-12-26Z
+          docker run -d --name veltrix-minio \
+            -p 9000:9000 -p 9001:9001 \
+            -e MINIO_ROOT_USER="$VELTRIX_S3_ACCESS_KEY" \
+            -e MINIO_ROOT_PASSWORD="$VELTRIX_S3_SECRET_KEY" \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z \
+            server /data --console-address ':9001'
+          ready=0
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 2 http://127.0.0.1:9000/minio/health/ready >/dev/null; then ready=1; break; fi
+            if ! docker ps --filter name=veltrix-minio --format '{{.Names}}' | grep -qx veltrix-minio; then
+              docker ps -a --filter name=veltrix-minio
+              docker logs veltrix-minio || true
+              exit 1
+            fi
+            sleep 2
+          done
+          test "$ready" = 1
+          curl -fsS http://127.0.0.1:9000/minio/health/ready | tee evidence/minio-ready.txt
+          docker run --rm --network host --entrypoint /bin/sh minio/mc:RELEASE.2025-04-16T18-13-26Z -c \
+            "mc alias set local http://127.0.0.1:9000 '$VELTRIX_S3_ACCESS_KEY' '$VELTRIX_S3_SECRET_KEY' >/dev/null && mc mb --ignore-existing local/$VELTRIX_S3_BUCKET && mc stat local/$VELTRIX_S3_BUCKET"
+          docker ps --filter name=veltrix-minio | tee evidence/minio.txt
+
+      - name: PostgreSQL and pgvector readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c "SELECT version(), extversion FROM pg_extension WHERE extname='vector';" | tee evidence/postgres-pgvector.txt
+
+      - name: Core and server compile regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :core:test :server:test | tee evidence/gradle-server-tests.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/gradle-server-tests.txt
+
+      - name: Baseline deterministic scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/verify_structure.sh | tee evidence/structure.txt
+          grep -q PASS evidence/structure.txt
+          mapfile -t CORE_FILES < <(find core/src/main/kotlin -name '*.kt' -type f | sort)
+          kotlinc "${CORE_FILES[@]}" scripts/CoreRegression.kt -include-runtime -d /tmp/core-regression.jar
+          java -jar /tmp/core-regression.jar | tee evidence/core-regression.txt
+          grep -q '48/48' evidence/core-regression.txt
+          kotlinc "${CORE_FILES[@]}" scripts/FoundationRegression.kt -include-runtime -d /tmp/foundation-regression.jar
+          java -jar /tmp/foundation-regression.jar | tee evidence/foundation-regression.txt
+          grep -Eq '(57/57|105/105|PASS)' evidence/foundation-regression.txt
+
+      - name: OpenAPI parse and drift guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pyyaml
+          python3 scripts/verify_openapi_drift.py | tee evidence/openapi-drift.txt
+          python3 - <<'PY' | tee evidence/openapi-parse.txt
+          import yaml
+          d=yaml.safe_load(open('contracts/openapi.yaml'))
+          assert d['openapi'].startswith('3.1')
+          ops=[]
+          for p,v in d.get('paths',{}).items():
+              for method,op in v.items():
+                  if method.lower() in {'get','post','put','patch','delete'}:
+                      assert op.get('operationId'), (method,p)
+                      ops.append(op['operationId'])
+          assert len(ops)==len(set(ops))
+          print('OPENAPI_PARSE=PASS paths=%d operations=%d' % (len(d.get('paths',{})),len(ops)))
+          PY
+
+      - name: Static security and legacy isolation scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R --exclude-dir=build --exclude='*.md' -nE '(sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{20,}|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY)' .
+          ! grep -R --exclude-dir=build -n 'SYSTEM_ALERT_WINDOW' android
+          ! grep -R --exclude-dir=build -nE '(OPENAI_API_KEY|VELTRIX_AI_API_KEY).*=.{10,}' android
+          echo STATIC_SECURITY=PASS | tee evidence/security-static.txt
+
+      - name: Start real Ktor server
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup gradle --no-daemon :server:run > evidence/server-run.txt 2>&1 &
+          echo $! > evidence/server.pid
+          ready=0
+          for i in $(seq 1 90); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8080/health > evidence/health.json; then ready=1; break; fi
+            sleep 2
+          done
+          if [ "$ready" != 1 ]; then cat evidence/server-run.txt; exit 1; fi
+          cat evidence/health.json
+          grep -q '"status":"ok"' evidence/health.json
+          curl -fsS http://127.0.0.1:8080/ready | tee evidence/ready.json
+          grep -q '"database":"ok"' evidence/ready.json
+          grep -q '"storageConfigured":true' evidence/ready.json
+          grep -q '"embeddingConfigured":true' evidence/ready.json
+          grep -q '"testAiConfigured":true' evidence/ready.json
+
+      - name: HTTP runtime smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS http://127.0.0.1:8080/health | tee evidence/http-health.txt
+          curl -fsS http://127.0.0.1:8080/ready | tee evidence/http-ready.txt
+          python3 scripts/http_runtime_smoke.py http://127.0.0.1:8080 | tee evidence/http-runtime.txt
+          grep -q 'HTTP_RUNTIME=PASS' evidence/http-runtime.txt
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API and emulator image
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-37' 'build-tools;36.0.0' 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64'
+
+      - name: Build APK and androidTest APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :android:app:assembleDebug :android:app:assembleDebugAndroidTest | tee evidence/android-build.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/android-build.txt
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          TEST_APK=$(find android/app/build/outputs/apk/androidTest -name '*androidTest.apk' -type f -size +0c | head -1)
+          test -n "$TEST_APK"
+          apkanalyzer manifest print "$APK" | tee evidence/android-manifest.txt
+          grep -q 'com.veltrix.hom.vnext.dev' evidence/android-manifest.txt
+          ! grep -q 'android.permission.SYSTEM_ALERT_WINDOW' evidence/android-manifest.txt
+
+      - name: Boot deterministic emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          mkdir -p "$ANDROID_AVD_HOME"
+          export ANDROID_AVD_HOME
+          echo no | avdmanager create avd -n veltrix_vnext_api35 -k 'system-images;android-35;google_apis;x86_64' -f
+          avdmanager list avd | tee evidence/avd-list.txt
+          grep -q 'Name: veltrix_vnext_api35' evidence/avd-list.txt
+          nohup "$ANDROID_HOME/emulator/emulator" @veltrix_vnext_api35 -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -no-metrics -accel on > evidence/emulator.log 2>&1 &
+          timeout 180 adb wait-for-device
+          for i in $(seq 1 120); do
+            [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = '1' ] && break
+            sleep 2
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = '1'
+          adb devices -l | tee evidence/adb.txt
+          adb get-state | tr -d '\r' | grep -Fx device
+
+      - name: Install and cold launch exact APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          TEST_APK=$(find android/app/build/outputs/apk/androidTest -name '*androidTest.apk' -type f | head -1)
+          adb install -r -t "$APK" | tee evidence/install-app.txt
+          grep -q Success evidence/install-app.txt
+          adb install -r -t "$TEST_APK" | tee evidence/install-test.txt
+          grep -q Success evidence/install-test.txt
+          adb shell am force-stop com.veltrix.hom.vnext.dev
+          adb shell am start -W -n com.veltrix.hom.vnext.dev/com.veltrix.hom.vnext.MainActivity | tee evidence/cold-launch.txt
+          grep -q 'Status: ok' evidence/cold-launch.txt
+
+      - name: Android process-death and offline gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          I=$(adb shell pm list instrumentation | sed -n 's/^instrumentation:\([^ ]*\).*target=com.veltrix.hom.vnext.dev.*/\1/p' | head -1 | tr -d '\r')
+          test -n "$I"
+          adb shell am instrument -w -e class 'com.veltrix.hom.vnext.PersistenceInstrumentedTest#aSeedProjectForProcessRestart' "$I" | tee evidence/process-seed.txt
+          grep -q 'OK (1 test)' evidence/process-seed.txt
+          adb shell am force-stop com.veltrix.hom.vnext.dev
+          test -z "$(adb shell pidof com.veltrix.hom.vnext.dev 2>/dev/null || true)"
+          adb shell am instrument -w -e class 'com.veltrix.hom.vnext.PersistenceInstrumentedTest#zVerifyProjectAfterProcessRestart' "$I" | tee evidence/process-verify.txt
+          grep -q 'OK (1 test)' evidence/process-verify.txt
+          adb shell cmd connectivity airplane-mode enable || adb shell settings put global airplane_mode_on 1
+          adb shell svc wifi disable || true
+          test "$(adb shell settings get global airplane_mode_on | tr -d '\r')" = '1'
+          adb shell am instrument -w -e class 'com.veltrix.hom.vnext.OfflineDataInstrumentedTest#aSeedOfflineDurableState' "$I" | tee evidence/offline-seed.txt
+          grep -q 'OK (1 test)' evidence/offline-seed.txt
+          adb shell am force-stop com.veltrix.hom.vnext.dev
+          adb shell am instrument -w -e class 'com.veltrix.hom.vnext.OfflineDataInstrumentedTest#zVerifyOfflineDurableStateAfterProcessRestart' "$I" | tee evidence/offline-verify.txt
+          grep -q 'OK (1 test)' evidence/offline-verify.txt
+          adb shell cmd connectivity airplane-mode disable || adb shell settings put global airplane_mode_on 0
+          adb shell svc wifi enable || true
+
+      - name: Connected Android regression and final relaunch
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :android:app:connectedDebugAndroidTest | tee evidence/android-connected.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/android-connected.txt
+          ! grep -q 'FAILURES!!!' evidence/android-connected.txt
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          adb install -r -t "$APK" | tee evidence/reinstall.txt
+          grep -q Success evidence/reinstall.txt
+          adb shell am force-stop com.veltrix.hom.vnext.dev
+          adb shell am start -W -n com.veltrix.hom.vnext.dev/com.veltrix.hom.vnext.MainActivity | tee evidence/final-launch.txt
+          grep -q 'Status: ok' evidence/final-launch.txt
+
+      - name: Package exact source APK evidence and SHA-256
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p final/provenance final/docs
+          git archive --format=zip --output=final/Veltrix-Hom-VNext-Part1-EXACT-TESTED-SOURCE.zip HEAD
+          if [ -s android/app/build/outputs/apk/debug/app-debug.apk ]; then cp android/app/build/outputs/apk/debug/app-debug.apk final/Veltrix-Hom-VNext-Part1-FINAL.apk; fi
+          if [ -d evidence ]; then (cd evidence && zip -qr ../final/Veltrix-Hom-VNext-Part1-EVIDENCE.zip .); fi
+          sha256sum final/Veltrix-Hom-VNext-Part1-EXACT-TESTED-SOURCE.zip | tee final/provenance/source_sha256.txt
+          if [ -s final/Veltrix-Hom-VNext-Part1-FINAL.apk ]; then sha256sum final/Veltrix-Hom-VNext-Part1-FINAL.apk | tee final/provenance/apk_sha256.txt; fi
+          if [ -s final/Veltrix-Hom-VNext-Part1-EVIDENCE.zip ]; then sha256sum final/Veltrix-Hom-VNext-Part1-EVIDENCE.zip | tee final/provenance/evidence_sha256.txt; fi
+          printf 'repository=%s\nbranch=%s\ncommit=%s\nrun_id=%s\nfoundation_checkpoint=d47d0876eb2ee30a480549a89b42382b4a31d8ed\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID" | tee final/provenance/repo.txt
+
+      - name: Stop runtime services
+        if: always()
+        shell: bash
+        run: |
+          if [ -f evidence/server.pid ]; then kill "$(cat evidence/server.pid)" 2>/dev/null || true; fi
+          adb emu kill 2>/dev/null || true
+          docker rm -f veltrix-minio 2>/dev/null || true
+
+      - name: Upload Part 1 V2 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Veltrix-Hom-VNext-Part1-FINAL-V2
+          if-no-files-found: error
+          path: final/
