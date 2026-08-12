@@ -59,11 +59,11 @@ jobs:
           test -s "$APK"
           sha256sum "$APK" | tee evidence/apk-sha256.txt
           "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging "$APK" | tee evidence/apk-badging.txt
-          "$ANDROID_HOME/build-tools/37.0.0/zipalign" -c -P 16 -v 4 "$APK" > evidence/zipalign-16k.txt 2>&1 || true
+          "$ANDROID_HOME/build-tools/37.0.0/zipalign" -c -P 16 -v 4 "$APK" > evidence/zipalign-16k.txt 2>&1
           tail -80 evidence/zipalign-16k.txt
           unzip -l "$APK" | grep '\.so$' | tee evidence/native-libraries.txt || true
 
-      - name: Boot exact API 37 emulator and wait for Package Manager
+      - name: Boot exact API 37 emulator with durable data capacity
         shell: bash
         run: |
           set -euo pipefail
@@ -76,10 +76,12 @@ jobs:
           AVD_CONFIG="$ANDROID_AVD_HOME/veltrix_install_probe.avd/config.ini"
           grep -q '^hw.ramSize=' "$AVD_CONFIG" && sed -i 's/^hw.ramSize=.*/hw.ramSize=4096/' "$AVD_CONFIG" || echo 'hw.ramSize=4096' >> "$AVD_CONFIG"
           grep -q '^hw.cpu.ncore=' "$AVD_CONFIG" && sed -i 's/^hw.cpu.ncore=.*/hw.cpu.ncore=2/' "$AVD_CONFIG" || echo 'hw.cpu.ncore=2' >> "$AVD_CONFIG"
+          grep -q '^disk.dataPartition.size=' "$AVD_CONFIG" && sed -i 's/^disk.dataPartition.size=.*/disk.dataPartition.size=4G/' "$AVD_CONFIG" || echo 'disk.dataPartition.size=4G' >> "$AVD_CONFIG"
+          cat "$AVD_CONFIG" | tee evidence/avd-config.txt
           adb kill-server || true
           adb start-server
           nohup "$ANDROID_HOME/emulator/emulator" @veltrix_install_probe \
-            -port 5554 -memory 4096 -cores 2 \
+            -port 5554 -memory 4096 -cores 2 -partition-size 4096 \
             -no-window -gpu software -noaudio -no-boot-anim -no-snapshot -no-metrics -accel on \
             > evidence/emulator.log 2>&1 &
           EMULATOR_PID=$!
@@ -109,20 +111,32 @@ jobs:
           adb shell getprop ro.build.version.sdk | tee evidence/android-api.txt
           adb shell getconf PAGE_SIZE | tee evidence/page-size.txt || true
           adb shell df -h /data | tee evidence/data-disk.txt
+          AVAILABLE_KB=$(adb shell df -Pk /data | awk 'NR==2 {print $4}' | tr -d '\r')
+          printf 'DATA_AVAILABLE_KB=%s\n' "$AVAILABLE_KB" | tee evidence/data-available-kb.txt
+          test "$AVAILABLE_KB" -ge 524288
           adb shell dumpsys package | grep -m1 -E 'Packages:|Package Changes' | tee evidence/package-service.txt || true
           adb devices -l | tee evidence/adb-final.txt
+          echo 'ANDROID_API37_DATA_CAPACITY_GATE=PASS' | tee evidence/data-capacity-gate.txt
 
-      - name: Install APK with deterministic non-streaming path
+      - name: Install APK through Package Manager
         shell: bash
         run: |
           set -uo pipefail
           APK=android/app/build/outputs/apk/debug/app-debug.apk
           set +e
-          adb install --no-streaming -r -t "$APK" > evidence/install-app.txt 2>&1
-          RC=$?
+          adb push "$APK" /data/local/tmp/veltrix-app.apk > evidence/push-app.txt 2>&1
+          PUSH_RC=$?
+          if [ "$PUSH_RC" -eq 0 ]; then
+            adb shell pm install -r -t /data/local/tmp/veltrix-app.apk > evidence/install-app.txt 2>&1
+            RC=$?
+          else
+            RC=$PUSH_RC
+            printf 'PUSH_FAILED_RC=%s\n' "$PUSH_RC" > evidence/install-app.txt
+          fi
           set -e
+          cat evidence/push-app.txt || true
           cat evidence/install-app.txt
-          printf 'ADB_INSTALL_RC=%s\n' "$RC" | tee evidence/install-rc.txt
+          printf 'APK_INSTALL_RC=%s\n' "$RC" | tee evidence/install-rc.txt
           if [ "$RC" -ne 0 ]; then
             adb shell logcat -d -b all -t 1500 > evidence/logcat-install-failure.txt 2>&1 || true
             adb shell dumpsys package > evidence/dumpsys-package-failure.txt 2>&1 || true
