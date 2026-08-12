@@ -81,12 +81,12 @@ class Part1CompletionIntegrationTest {
                     learningMode="TUTOR",
                     idempotencyKey="ctx-$suffix-12345678"
                 ))
-                assertEquals(project.id, planned.planned.carry.projectId)
+                assertEquals(project.id, planned.planned.projectId)
                 assertTrue(planned.planned.projectInstruction?.contains("British English") == true)
                 assertTrue(planned.planned.memories.any { it.statement.contains("concise", true) })
                 assertTrue(planned.planned.memories.any { it.statement.contains("phrasal", true) })
                 assertTrue(planned.citations.isNotEmpty())
-                assertTrue(planned.request.systemPrompt.contains("Source grounding is active"))
+                assertTrue(planned.request.systemPrompt?.contains("Source grounding is active") == true)
                 assertTrue(planned.planned.toolIds.isNotEmpty())
 
                 // Test-only provider exercises the same prepared provider request; it is never routed in production.
@@ -100,7 +100,7 @@ class Part1CompletionIntegrationTest {
                 ))
                 chats.markUserSending(a.accountId, userMessage.id)
                 val assistant = chats.createAssistantStreaming(a.accountId, projectChat.id, userMessage.id, "assistant-memory-$suffix-12345678")
-                chats.appendAssistantContent(a.accountId, assistant.id, "Understood. I will keep explanations concise.")
+                chats.appendAssistantSegment(a.accountId, assistant.id, "Understood. I will keep explanations concise.")
                 chats.finishAssistant(a.accountId, assistant.id)
                 chats.markUserCompleted(a.accountId, userMessage.id)
                 chatIntel.persistCitations(a.accountId, assistant.id, planned.citations)
@@ -117,7 +117,7 @@ class Part1CompletionIntegrationTest {
                     text="Explain a general topic concisely",
                     idempotencyKey="global-$suffix-12345678"
                 ))
-                assertNull(globalCtx.planned.carry.projectId)
+                assertNull(globalCtx.planned.projectId)
                 assertNull(globalCtx.planned.projectInstruction)
                 assertFalse(globalCtx.planned.memories.any { it.scopeId == project.id })
                 assertTrue(globalCtx.planned.memories.any { it.statement.contains("concise", true) })
