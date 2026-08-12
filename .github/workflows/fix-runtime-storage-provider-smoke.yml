@@ -1,0 +1,45 @@
+name: Fix runtime storage provider smoke
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/fix-runtime-storage-provider-smoke.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-part1-completion
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Align smoke with S3-compatible adapter id
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/http_runtime_smoke.py')
+          s=p.read_text()
+          old="storage['provider'].lower()=='s3'"
+          new="storage['provider'].lower()=='s3-compatible'"
+          if s.count(old) != 1:
+              raise SystemExit(f'expected exactly one provider assertion, found {s.count(old)}')
+          p.write_text(s.replace(old,new))
+          PY
+          git diff --check
+          git diff -- scripts/http_runtime_smoke.py
+      - name: Commit test contract repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Veltrix Backend CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add scripts/http_runtime_smoke.py
+          git commit -m 'test: align runtime storage assertion with adapter contract'
+          git push origin HEAD:veltrix-hom-part1-completion
