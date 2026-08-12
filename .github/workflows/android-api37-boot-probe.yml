@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   api37-boot-probe:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       ANDROID_AVD_HOME: ${{ github.workspace }}/.android-avd
@@ -35,7 +35,22 @@ jobs:
             'system-images;android-37.0;google_apis;x86_64'
           sdkmanager --list_installed | tee evidence/sdk-installed.txt
           adb version | tee evidence/adb-version.txt
+
+      - name: Prepare emulator host runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libpulse0
+          QEMU="$ANDROID_HOME/emulator/qemu/linux-x86_64/qemu-system-x86_64"
+          test -x "$QEMU"
+          ldd "$QEMU" | tee evidence/emulator-qemu-ldd.txt
+          if grep -q 'not found' evidence/emulator-qemu-ldd.txt; then
+            echo 'ANDROID_EMULATOR_HOST_LIBRARY_GATE=FAIL' | tee evidence/host-library-gate.txt
+            exit 1
+          fi
           "$ANDROID_HOME/emulator/emulator" -version 2>&1 | tee evidence/emulator-version.txt
+          echo 'ANDROID_EMULATOR_HOST_LIBRARY_GATE=PASS' | tee evidence/host-library-gate.txt
 
       - name: Boot exact API 37 AVD with deterministic ADB discovery
         shell: bash
