@@ -1,0 +1,168 @@
+openapi: 3.1.0
+info:
+  title: Veltrix Hom vNext Part 1 API
+  version: 0.1.0-part1
+  description: Android-first authenticated API. Part 2 economy/map endpoints are intentionally absent.
+servers:
+  - url: /v1
+security:
+  - bearerSession: []
+paths:
+  /auth/register:
+    post:
+      security: []
+      operationId: register
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RegisterRequest'}}}}
+      responses: {'201': {description: Created, content: {application/json: {schema: {$ref: '#/components/schemas/SessionResponse'}}}}, '400': {$ref: '#/components/responses/Error'}}
+  /auth/login:
+    post:
+      security: []
+      operationId: login
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/LoginRequest'}}}}
+      responses: {'200': {description: Session, content: {application/json: {schema: {$ref: '#/components/schemas/SessionResponse'}}}}, '401': {$ref: '#/components/responses/Error'}}
+  /auth/refresh:
+    post: {operationId: refreshSession, responses: {'200': {description: Rotated session}, '401': {$ref: '#/components/responses/Error'}}}
+  /auth/logout:
+    post: {operationId: logout, responses: {'200': {description: Signed out}}}
+  /profile:
+    get: {operationId: getProfile, responses: {'200': {description: Profile}}}
+    patch: {operationId: updateProfile, responses: {'200': {description: Updated}, '409': {$ref: '#/components/responses/Error'}}}
+  /home:
+    get: {operationId: homeSnapshot, responses: {'200': {description: Aggregated Home snapshot}}}
+  /projects:
+    get: {operationId: listProjects, parameters: [{$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/Offset'}], responses: {'200': {description: Projects}}}
+    post: {operationId: createProject, responses: {'201': {description: Created}}}
+  /projects/{id}:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    get: {operationId: getProject, responses: {'200': {description: Project}, '404': {$ref: '#/components/responses/Error'}}}
+    patch: {operationId: updateProject, responses: {'200': {description: Updated}, '409': {$ref: '#/components/responses/Error'}}}
+  /projects/{id}/workspace:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    get: {operationId: projectWorkspaceSnapshot, responses: {'200': {description: Workspace snapshot}}}
+  /projects/{id}/goals:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    get: {operationId: listGoals, responses: {'200': {description: Goals}}}
+    post: {operationId: createGoal, responses: {'201': {description: Created}}}
+  /projects/{id}/goals/{goalId}/transition:
+    post:
+      operationId: transitionGoal
+      parameters: [{$ref: '#/components/parameters/Id'}, {name: goalId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Transitioned}, '409': {$ref: '#/components/responses/Error'}}
+  /memory:
+    get: {operationId: listMemory, responses: {'200': {description: Scoped memories}}}
+    post: {operationId: createMemory, responses: {'201': {description: Memory created/deduplicated}}}
+  /memory/maturity:
+    get: {operationId: memoryMaturity, responses: {'200': {description: Maturity score/state}}}
+  /memory/{id}/correct:
+    post:
+      operationId: correctMemory
+      parameters: [{$ref: '#/components/parameters/Id'}]
+      responses: {'200': {description: Corrected with old revision retained}}
+  /sources:
+    post: {operationId: createSourceMetadata, responses: {'201': {description: Source metadata}}}
+  /sources/{id}/text:
+    post:
+      operationId: ingestTextSource
+      parameters: [{$ref: '#/components/parameters/Id'}]
+      responses: {'200': {description: Indexed source}}
+  /sources/search:
+    post: {operationId: searchSourceChunks, responses: {'200': {description: Provenance-preserving citations}}}
+  /sources/{id}/link-project:
+    post: {operationId: linkSourceProject, parameters: [{$ref: '#/components/parameters/Id'}], responses: {'200': {description: Linked}}}
+  /sources/{id}/unlink-project:
+    post: {operationId: unlinkSourceProject, parameters: [{$ref: '#/components/parameters/Id'}], responses: {'200': {description: Unlinked without deleting global source}}}
+  /chats:
+    get: {operationId: listChats, responses: {'200': {description: Chats}}}
+    post: {operationId: createChat, responses: {'201': {description: Chat}}}
+  /chats/{id}:
+    get: {operationId: getChat, parameters: [{$ref: '#/components/parameters/Id'}], responses: {'200': {description: Chat}}}
+  /chats/{id}/messages:
+    get: {operationId: listMessages, parameters: [{$ref: '#/components/parameters/Id'}], responses: {'200': {description: Message page}}}
+    post: {operationId: sendMessage, parameters: [{$ref: '#/components/parameters/Id'}], responses: {'202': {description: Queued idempotently}}}
+  /ai/stream:
+    post:
+      operationId: streamAi
+      description: SSE response path. Current checkpoint returns stable AI_PROVIDER_DOWN until a real provider adapter is configured and verified; no fake model output.
+      responses: {'200': {description: text/event-stream}, '503': {$ref: '#/components/responses/Error'}}
+  /notes:
+    get: {operationId: listNotes, responses: {'200': {description: Notes}}}
+    post: {operationId: createNote, responses: {'201': {description: Note}}}
+  /notes/{id}:
+    patch: {operationId: updateNote, parameters: [{$ref: '#/components/parameters/Id'}], responses: {'200': {description: Updated}, '409': {$ref: '#/components/responses/Error'}}}
+  /assessments:
+    post: {operationId: createAssessment, responses: {'201': {description: TEST or QUIZ}}}
+  /assessments/{id}/attempts:
+    post: {operationId: startAttempt, parameters: [{$ref: '#/components/parameters/Id'}], responses: {'201': {description: Attempt}}}
+  /assessments/attempts/{attemptId}/answer:
+    put: {operationId: autosaveAttemptAnswer, parameters: [{name: attemptId, in: path, required: true, schema: {type: string, format: uuid}}], responses: {'200': {description: Autosaved}}}
+  /assessments/attempts/{attemptId}/submit:
+    post: {operationId: submitAttempt, parameters: [{name: attemptId, in: path, required: true, schema: {type: string, format: uuid}}], responses: {'200': {description: Scored; wrong answers become Mistakes}}}
+  /practice:
+    post: {operationId: createPractice, responses: {'201': {description: Practice}}}
+  /practice/{id}/complete:
+    post: {operationId: completePractice, parameters: [{$ref: '#/components/parameters/Id'}], responses: {'200': {description: Completed}}}
+  /flashcards/decks:
+    post: {operationId: createDeck, responses: {'201': {description: Deck}}}
+  /flashcards/decks/{deckId}/cards:
+    post: {operationId: createCard, parameters: [{name: deckId, in: path, required: true, schema: {type: string, format: uuid}}], responses: {'201': {description: Card}}}
+  /flashcards/due:
+    get: {operationId: dueFlashcards, responses: {'200': {description: Due queue}}}
+  /flashcards/cards/{cardId}/review:
+    post: {operationId: reviewFlashcard, parameters: [{name: cardId, in: path, required: true, schema: {type: string, format: uuid}}], responses: {'200': {description: Deterministically rescheduled}}}
+  /mistakes:
+    get: {operationId: listMistakes, responses: {'200': {description: Mistakes}}}
+  /mistakes/{id}/resolve:
+    post: {operationId: resolveMistake, parameters: [{$ref: '#/components/parameters/Id'}], responses: {'200': {description: Resolved event}}}
+  /search:
+    post: {operationId: globalTypedSearch, responses: {'200': {description: Typed results with deep links}}}
+  /tools/invoke:
+    post: {operationId: invokeDeterministicTool, responses: {'200': {description: Deterministic result}}}
+  /translate:
+    post: {operationId: translate, responses: {'503': {$ref: '#/components/responses/Error'}}}
+  /store:
+    get: {operationId: storePart2Placeholder, responses: {'501': {description: Honest Part 2 placeholder; no economy data}}}
+components:
+  securitySchemes:
+    bearerSession: {type: http, scheme: bearer, bearerFormat: opaque-session-token}
+  parameters:
+    Id: {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+    Offset: {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+  responses:
+    Error:
+      description: Stable structured error
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [login, password, displayName]
+      properties:
+        login: {type: string}
+        password: {type: string, minLength: 12}
+        displayName: {type: string, minLength: 1, maxLength: 80}
+        preferredLanguage: {type: string, default: en}
+        timezone: {type: string, default: UTC}
+    LoginRequest:
+      type: object
+      required: [login, password]
+      properties: {login: {type: string}, password: {type: string}, deviceLabel: {type: [string, 'null']}}
+    SessionResponse:
+      type: object
+      required: [sessionToken, accountId, expiresAt]
+      properties:
+        sessionToken: {type: string}
+        accountId: {type: string, format: uuid}
+        expiresAt: {type: string, format: date-time}
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, category, message, retryable]
+          properties:
+            code: {type: string}
+            category: {type: string, enum: [AUTH, PERMISSION, VALIDATION, NOT_FOUND, CONFLICT, RATE_LIMIT, NETWORK_UPSTREAM, AI_PROVIDER, SOURCE_PROCESSING, STORAGE, DATABASE, TEMPORARY_UNAVAILABLE, INTERNAL]}
+            message: {type: string}
+            retryable: {type: boolean}
+            requestId: {type: [string, 'null']}
