@@ -88,7 +88,9 @@ class AiContextOrchestrator(
         val projectMemories = if (projectId != null && req.projectMemoryEnabled) memory.retrieveCore(accountId, projectId, req.text, 10)
             .filter { it.scope != MemoryScope.PROJECT || it.scopeId == projectId } else emptyList()
 
-        val hits = rag.search(
+        // Global chats must never silently search the account-wide Source Library.
+        // RAG is enabled only by explicit selected sources or by an active Project brain.
+        val hits = if (effectiveSourceIds.isEmpty() && projectId == null) emptyList() else rag.search(
             accountId = accountId,
             query = retrievalQuery,
             sourceIds = effectiveSourceIds,
