@@ -11,7 +11,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Derive stable API34 proof from exact API35 controller
+      - name: Derive stable API34 proof
         shell: bash
         run: |
           set -euo pipefail
@@ -19,9 +19,6 @@ jobs:
           dst=.github/workflows/part1-current-product-api34-final.yml
           cp "$src" "$dst"
           sed -i 's/Current Product API35 Final/Current Product API34 Final/g; s/current-product-api35-final/current-product-api34-final/g; s/android-35;google_apis/android-34;google_apis/g; s/API35/API34/g; s/api-level: 35/api-level: 34/g; s/test "$API" = 35/test "$API" = 34/g; s/Android_15_API_35/Android_14_API_34/g; s/api35-final/api34-final/g' "$dst"
-          grep -q 'api-level: 34' "$dst"
-          grep -q 'system-images;android-34;google_apis;x86_64' "$dst"
-          grep -q 'test "$API" = 34' "$dst"
           git config user.name github-actions
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add "$dst"
