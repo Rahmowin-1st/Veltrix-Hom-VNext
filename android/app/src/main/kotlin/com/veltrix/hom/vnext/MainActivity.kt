@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -45,15 +46,18 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun DeveloperShell(vm: AppViewModel = viewModel()) {
-    var destination by remember { mutableStateOf(PrimaryDestination.HOME) }
-    var capability by remember { mutableStateOf<CapabilityRoute?>(null) }
+    var destinationName by rememberSaveable { mutableStateOf(PrimaryDestination.HOME.name) }
+    var capabilityName by rememberSaveable { mutableStateOf<String?>(null) }
+    val destination = PrimaryDestination.valueOf(destinationName)
+    val capability = capabilityName?.let(CapabilityRoute::valueOf)
     val projects by vm.projects.collectAsStateWithLifecycle()
+
     Scaffold(bottomBar = {
         NavigationBar {
             listOf(PrimaryDestination.HOME, PrimaryDestination.PERSONAL, PrimaryDestination.STORE, PrimaryDestination.PROJECTS).forEach { dest ->
                 NavigationBarItem(
                     selected = destination == dest && capability == null,
-                    onClick = { destination = dest; capability = null },
+                    onClick = { destinationName = dest.name; capabilityName = null },
                     icon = { Text(dest.name.take(1)) },
                     label = { Text(dest.name.lowercase().replaceFirstChar { it.uppercase() }) },
                 )
@@ -63,16 +67,20 @@ private fun DeveloperShell(vm: AppViewModel = viewModel()) {
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Veltrix Hom vNext — Part 1 developer harness", style = MaterialTheme.typography.titleMedium)
-                Button(onClick = { capability = CapabilityRoute.CHAT }, modifier = Modifier.testTag("open-capabilities")) { Text("Capabilities") }
+                Button(onClick = { capabilityName = CapabilityRoute.CHAT.name }, modifier = Modifier.testTag("open-capabilities")) { Text("Capabilities") }
             }
+            Text(capabilityName ?: destinationName, modifier = Modifier.testTag("active-route"), style = MaterialTheme.typography.labelMedium)
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (capability != null) CapabilityScreen(capability!!, onSelect = { capability = it })
-                else when (destination) {
-                    PrimaryDestination.HOME -> HomeDeveloperScreen(projects.size)
-                    PrimaryDestination.PERSONAL -> Placeholder("Personal backend contract shell")
-                    PrimaryDestination.STORE -> Placeholder("Store: NOT_AVAILABLE / COMING_IN_PART_2 — no fake economy")
-                    PrimaryDestination.PROJECTS -> ProjectsDeveloperScreen(projects, vm::createProject)
+                if (capability != null) {
+                    CapabilityScreen(capability, onSelect = { capabilityName = it.name })
+                } else {
+                    when (destination) {
+                        PrimaryDestination.HOME -> HomeDeveloperScreen(projects.size)
+                        PrimaryDestination.PERSONAL -> Placeholder("Personal backend contract shell")
+                        PrimaryDestination.STORE -> Placeholder("Store: NOT_AVAILABLE / COMING_IN_PART_2 — no fake economy")
+                        PrimaryDestination.PROJECTS -> ProjectsDeveloperScreen(projects, vm::createProject)
+                    }
                 }
             }
         }
@@ -112,16 +120,13 @@ private fun ProjectsDeveloperScreen(projects: List<LocalProjectEntity>, create: 
 
 @Composable
 private fun CapabilityScreen(current: CapabilityRoute, onSelect: (CapabilityRoute) -> Unit) {
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().testTag("capability-screen")) {
         Text(current.name, modifier = Modifier.testTag("capability-current"), style = MaterialTheme.typography.headlineSmall)
         Text("Route contract reachable. Feature business logic belongs to repositories/domain services, not this composable.")
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("capability-list")) {
             items(CapabilityRoute.entries) { item ->
-                Button(
-                    onClick = { onSelect(item) },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp).testTag("capability-${item.name}"),
-                ) { Text(item.name) }
+                Button(onClick = { onSelect(item) }, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp).testTag("capability-${item.name}")) { Text(item.name) }
             }
         }
     }
