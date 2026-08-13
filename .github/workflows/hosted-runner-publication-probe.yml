@@ -1,0 +1,20 @@
+name: Hosted Runner Publication Probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Prove hosted runner command execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo HOSTED_RUNNER_COMMAND_EXECUTED=PASS
+          uname -a
+          test -n "${RUNNER_NAME:-}"
