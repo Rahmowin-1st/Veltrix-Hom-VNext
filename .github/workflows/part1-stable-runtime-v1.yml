@@ -1,4 +1,4 @@
-# retrigger after navigation state persistence fix
+# retrigger after single-route state-machine fix
 name: Veltrix Part 1 Stable Runtime V1
 
 on:
