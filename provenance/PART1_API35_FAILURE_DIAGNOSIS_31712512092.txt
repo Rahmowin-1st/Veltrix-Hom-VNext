@@ -1,0 +1,165 @@
+failed_run=31712512092
+diagnosed_from_artifact=PASS
+product_sha_expected=4e19f719688235b868add5a40f611b77ad909c96
+present_files:
+PROVENANCE.txt
+SHA256SUMS.txt
+Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk
+Veltrix-Hom-VNext-Part1-EXACT-TESTED-SOURCE.zip
+Veltrix-Hom-VNext-Part1-FINAL.apk
+evidence/app-apk-sha256.txt
+evidence/build-and-tests.txt
+evidence/health.json
+evidence/product-commit.txt
+evidence/runtime-environment.txt
+evidence/server-gate.txt
+evidence/server-run.txt
+evidence/server.pid
+evidence/source-zip-sha256.txt
+evidence/test-apk-sha256.txt
+gate_markers:
+product-commit.txt=PRESENT
+source-zip-sha256.txt=PRESENT
+server-gate.txt=PRESENT
+build-and-tests.txt=PRESENT
+runtime-environment.txt=PRESENT
+app-apk-sha256.txt=PRESENT
+test-apk-sha256.txt=PRESENT
+runtime/normal-system-services.txt=ABSENT
+runtime/install-app.txt=ABSENT
+runtime/install-test.txt=ABSENT
+runtime/resolve.txt=ABSENT
+runtime/cold-launch.txt=ABSENT
+runtime/shell-test.txt=ABSENT
+runtime/server-device-test.txt=ABSENT
+runtime/process-death-gate.txt=ABSENT
+runtime/offline-gate.txt=ABSENT
+runtime/reconnect-gate.txt=ABSENT
+runtime/all-instrumentation.txt=ABSENT
+runtime/connected-gradle.txt=ABSENT
+runtime/final-launch.txt=ABSENT
+runtime/runtime-all.txt=ABSENT
+first_failure_signals:
+2026-08-13T14:55:55.324194230Z main ERROR Log4j API could not find a logging provider.
+tails:
+--- build-and-tests.txt ---
+> Task :core:jar UP-TO-DATE
+> Task :android:app:processDebugNavigationResources FROM-CACHE
+> Task :server:compileKotlin UP-TO-DATE
+> Task :server:compileJava NO-SOURCE
+> Task :server:classes UP-TO-DATE
+> Task :android:app:parseDebugLocalResources FROM-CACHE
+> Task :android:app:generateDebugRFile FROM-CACHE
+> Task :server:jar
+> Task :android:app:kspDebugKotlin FROM-CACHE
+> Task :android:app:compileDebugKotlin FROM-CACHE
+> Task :android:app:javaPreCompileDebug FROM-CACHE
+> Task :core:processTestResources NO-SOURCE
+> Task :android:app:compileDebugJavaWithJavac FROM-CACHE
+> Task :android:app:generateDebugAssets UP-TO-DATE
+> Task :android:app:mergeDebugAssets
+> Task :android:app:compressDebugAssets FROM-CACHE
+> Task :android:app:generateDebugGlobalSynthetics FROM-CACHE
+> Task :android:app:processDebugJavaRes
+> Task :android:app:checkDebugDuplicateClasses
+> Task :android:app:desugarDebugFileDependencies FROM-CACHE
+> Task :android:app:mergeExtDexDebug FROM-CACHE
+> Task :android:app:mergeLibDexDebug FROM-CACHE
+> Task :android:app:checkDebugAarMetadata
+> Task :android:app:mapDebugSourceSetPaths
+> Task :android:app:compileDebugNavigationResources FROM-CACHE
+> Task :android:app:mergeDebugResources FROM-CACHE
+> Task :android:app:createDebugCompatibleScreenManifests
+> Task :android:app:extractDeepLinksDebug FROM-CACHE
+> Task :android:app:mergeDebugJavaResource
+> Task :android:app:processDebugMainManifest FROM-CACHE
+> Task :android:app:processDebugManifest FROM-CACHE
+> Task :android:app:processDebugManifestForPackage FROM-CACHE
+> Task :android:app:processDebugResources FROM-CACHE
+> Task :android:app:dexBuilderDebug FROM-CACHE
+> Task :android:app:mergeProjectDexDebug FROM-CACHE
+> Task :android:app:mergeDebugJniLibFolders
+> Task :android:app:mergeDebugNativeLibs
+> Task :android:app:validateSigningDebug
+> Task :android:app:writeDebugAppMetadata
+> Task :android:app:writeDebugSigningConfigVersions
+> Task :android:app:stripDebugDebugSymbols
+> Task :android:app:bundleDebugClassesToCompileJar
+> Task :android:app:preDebugAndroidTestBuild SKIPPED
+> Task :android:app:mergeDebugAndroidTestManifest
+> Task :android:app:processDebugAndroidTestManifest
+> Task :android:app:generateDebugAndroidTestBuildConfig FROM-CACHE
+> Task :android:app:generateDebugAndroidTestResources FROM-CACHE
+> Task :android:app:packageDebugAndroidTestResources FROM-CACHE
+> Task :android:app:processDebugAndroidTestNavigationResources FROM-CACHE
+> Task :android:app:parseDebugAndroidTestLocalResources FROM-CACHE
+> Task :android:app:generateDebugAndroidTestRFile FROM-CACHE
+> Task :android:app:packageDebug
+> Task :android:app:createDebugApkListingFileRedirect
+> Task :android:app:assembleDebug
+> Task :android:app:javaPreCompileDebugAndroidTest FROM-CACHE
+> Task :android:app:generateDebugAndroidTestAssets UP-TO-DATE
+> Task :android:app:mergeDebugAndroidTestAssets
+> Task :android:app:compressDebugAndroidTestAssets FROM-CACHE
+> Task :android:app:generateDebugAndroidTestGlobalSynthetics FROM-CACHE
+> Task :android:app:checkDebugAndroidTestDuplicateClasses
+> Task :android:app:desugarDebugAndroidTestFileDependencies FROM-CACHE
+> Task :android:app:mergeExtDexDebugAndroidTest FROM-CACHE
+> Task :android:app:mergeLibDexDebugAndroidTest FROM-CACHE
+> Task :android:app:checkDebugAndroidTestAarMetadata
+> Task :android:app:mapDebugAndroidTestSourceSetPaths
+> Task :android:app:compileDebugAndroidTestNavigationResources FROM-CACHE
+> Task :android:app:mergeDebugAndroidTestResources FROM-CACHE
+> Task :android:app:processDebugAndroidTestResources FROM-CACHE
+> Task :android:app:mergeDebugAndroidTestJniLibFolders
+> Task :android:app:mergeDebugAndroidTestNativeLibs NO-SOURCE
+> Task :android:app:stripDebugAndroidTestDebugSymbols NO-SOURCE
+> Task :android:app:validateSigningDebugAndroidTest
+> Task :android:app:writeDebugAndroidTestSigningConfigVersions
+> Task :server:compileTestKotlin
+> Task :core:compileTestKotlin
+> Task :server:compileTestJava NO-SOURCE
+> Task :server:testClasses UP-TO-DATE
+> Task :core:compileTestJava NO-SOURCE
+> Task :core:testClasses UP-TO-DATE
+> Task :android:app:kspDebugAndroidTestKotlin
+> Task :core:test
+
+> Task :android:app:compileDebugAndroidTestKotlin
+w: file:///home/runner/work/Veltrix-Hom-VNext/Veltrix-Hom-VNext/android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/PersistenceInstrumentedTest.kt:15:29 'fun <reified A : ComponentActivity> createAndroidComposeRule(effectContext: CoroutineContext = ...): AndroidComposeTestRule<ActivityScenarioRule<A>, A>' is deprecated. Use `androidx.compose.ui.test.junit4.v2.createAndroidComposeRule` instead. The v2 APIs use StandardTestDispatcher instead of UnconfinedTestDispatcher, which aligns with standard coroutine behavior by queuing tasks rather than executing them immediately. Tests relying on immediate execution may require explicit synchronization. Please refer to the migration guide for more details.
+w: file:///home/runner/work/Veltrix-Hom-VNext/Veltrix-Hom-VNext/android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/ShellInstrumentedTest.kt:11:29 'fun <reified A : ComponentActivity> createAndroidComposeRule(effectContext: CoroutineContext = ...): AndroidComposeTestRule<ActivityScenarioRule<A>, A>' is deprecated. Use `androidx.compose.ui.test.junit4.v2.createAndroidComposeRule` instead. The v2 APIs use StandardTestDispatcher instead of UnconfinedTestDispatcher, which aligns with standard coroutine behavior by queuing tasks rather than executing them immediately. Tests relying on immediate execution may require explicit synchronization. Please refer to the migration guide for more details.
+
+> Task :android:app:compileDebugAndroidTestJavaWithJavac
+> Task :android:app:processDebugAndroidTestJavaRes
+> Task :android:app:mergeDebugAndroidTestJavaResource
+> Task :android:app:dexBuilderDebugAndroidTest
+> Task :android:app:mergeProjectDexDebugAndroidTest
+> Task :android:app:packageDebugAndroidTest
+> Task :android:app:createDebugAndroidTestApkListingFileRedirect
+> Task :android:app:assembleDebugAndroidTest
+> Task :server:test
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1786632961996.json
+
+BUILD SUCCESSFUL in 38s
+82 actionable tasks: 39 executed, 39 from cache, 4 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.1/userguide/configuration_cache_enabling.html
+--- server-run.txt ---
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.5.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :server:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :server:processResources
+> Task :core:compileKotlin FROM-CACHE
+> Task :core:compileJava NO-SOURCE
+> Task :core:processResources NO-SOURCE
+> Task :core:classes UP-TO-DATE
+> Task :core:jar
+> Task :server:compileKotlin FROM-CACHE
+> Task :server:compileJava NO-SOURCE
+> Task :server:classes
+
+> Task :server:run
+SLF4J(W): No SLF4J providers were found.
+SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+2026-08-13T14:55:55.324194230Z main ERROR Log4j API could not find a logging provider.
