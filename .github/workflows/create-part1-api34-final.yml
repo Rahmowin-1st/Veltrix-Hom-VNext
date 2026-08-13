@@ -1,0 +1,29 @@
+name: Create Part1 API34 Final
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  create:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Derive stable API34 proof from exact API35 controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          src=.github/workflows/part1-current-product-api35-final.yml
+          dst=.github/workflows/part1-current-product-api34-final.yml
+          cp "$src" "$dst"
+          sed -i 's/Current Product API35 Final/Current Product API34 Final/g; s/current-product-api35-final/current-product-api34-final/g; s/android-35;google_apis/android-34;google_apis/g; s/API35/API34/g; s/api-level: 35/api-level: 34/g; s/test "$API" = 35/test "$API" = 34/g; s/Android_15_API_35/Android_14_API_34/g; s/api35-final/api34-final/g' "$dst"
+          grep -q 'api-level: 34' "$dst"
+          grep -q 'system-images;android-34;google_apis;x86_64' "$dst"
+          grep -q 'test "$API" = 34' "$dst"
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$dst"
+          git commit -m 'ci: add stable API34 exact-product final runtime proof'
+          git push origin HEAD:main
