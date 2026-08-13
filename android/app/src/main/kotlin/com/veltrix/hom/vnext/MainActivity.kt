@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -28,6 +27,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -48,25 +48,22 @@ private fun DeveloperShell(vm: AppViewModel = viewModel()) {
     var destination by remember { mutableStateOf(PrimaryDestination.HOME) }
     var capability by remember { mutableStateOf<CapabilityRoute?>(null) }
     val projects by vm.projects.collectAsStateWithLifecycle()
-
-    Scaffold(
-        bottomBar = {
-            NavigationBar {
-                listOf(PrimaryDestination.HOME, PrimaryDestination.PERSONAL, PrimaryDestination.STORE, PrimaryDestination.PROJECTS).forEach { dest ->
-                    NavigationBarItem(
-                        selected = destination == dest && capability == null,
-                        onClick = { destination = dest; capability = null },
-                        icon = { Text(dest.name.take(1)) },
-                        label = { Text(dest.name.lowercase().replaceFirstChar { it.uppercase() }) },
-                    )
-                }
+    Scaffold(bottomBar = {
+        NavigationBar {
+            listOf(PrimaryDestination.HOME, PrimaryDestination.PERSONAL, PrimaryDestination.STORE, PrimaryDestination.PROJECTS).forEach { dest ->
+                NavigationBarItem(
+                    selected = destination == dest && capability == null,
+                    onClick = { destination = dest; capability = null },
+                    icon = { Text(dest.name.take(1)) },
+                    label = { Text(dest.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                )
             }
         }
-    ) { padding ->
+    }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Veltrix Hom vNext — Part 1 developer harness", style = MaterialTheme.typography.titleMedium)
-                Button(onClick = { capability = CapabilityRoute.CHAT }) { Text("Capabilities") }
+                Button(onClick = { capability = CapabilityRoute.CHAT }, modifier = Modifier.testTag("open-capabilities")) { Text("Capabilities") }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -115,16 +112,17 @@ private fun ProjectsDeveloperScreen(projects: List<LocalProjectEntity>, create: 
 
 @Composable
 private fun CapabilityScreen(current: CapabilityRoute, onSelect: (CapabilityRoute) -> Unit) {
-    Row(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.weight(0.42f)) {
+    Column(Modifier.fillMaxSize()) {
+        Text(current.name, modifier = Modifier.testTag("capability-current"), style = MaterialTheme.typography.headlineSmall)
+        Text("Route contract reachable. Feature business logic belongs to repositories/domain services, not this composable.")
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("capability-list")) {
             items(CapabilityRoute.entries) { item ->
-                Button(onClick = { onSelect(item) }, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) { Text(item.name) }
+                Button(
+                    onClick = { onSelect(item) },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp).testTag("capability-${item.name}"),
+                ) { Text(item.name) }
             }
-        }
-        Spacer(Modifier.padding(8.dp))
-        Column(Modifier.weight(0.58f)) {
-            Text(current.name, style = MaterialTheme.typography.headlineSmall)
-            Text("Route contract reachable. Feature business logic belongs to repositories/domain services, not this composable.")
         }
     }
 }
