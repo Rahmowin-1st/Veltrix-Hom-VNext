@@ -46,18 +46,17 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun DeveloperShell(vm: AppViewModel = viewModel()) {
-    var destinationName by rememberSaveable { mutableStateOf(PrimaryDestination.HOME.name) }
-    var capabilityName by rememberSaveable { mutableStateOf<String?>(null) }
-    val destination = PrimaryDestination.valueOf(destinationName)
-    val capability = capabilityName?.let(CapabilityRoute::valueOf)
+    var activeRouteName by rememberSaveable { mutableStateOf(PrimaryDestination.HOME.name) }
+    val destination = PrimaryDestination.entries.firstOrNull { it.name == activeRouteName }
+    val capability = CapabilityRoute.entries.firstOrNull { it.name == activeRouteName }
     val projects by vm.projects.collectAsStateWithLifecycle()
 
     Scaffold(bottomBar = {
         NavigationBar {
             listOf(PrimaryDestination.HOME, PrimaryDestination.PERSONAL, PrimaryDestination.STORE, PrimaryDestination.PROJECTS).forEach { dest ->
                 NavigationBarItem(
-                    selected = destination == dest && capability == null,
-                    onClick = { destinationName = dest.name; capabilityName = null },
+                    selected = activeRouteName == dest.name,
+                    onClick = { activeRouteName = dest.name },
                     icon = { Text(dest.name.take(1)) },
                     label = { Text(dest.name.lowercase().replaceFirstChar { it.uppercase() }) },
                 )
@@ -67,15 +66,18 @@ private fun DeveloperShell(vm: AppViewModel = viewModel()) {
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Veltrix Hom vNext — Part 1 developer harness", style = MaterialTheme.typography.titleMedium)
-                Button(onClick = { capabilityName = CapabilityRoute.CHAT.name }, modifier = Modifier.testTag("open-capabilities")) { Text("Capabilities") }
+                Button(
+                    onClick = { activeRouteName = CapabilityRoute.CHAT.name },
+                    modifier = Modifier.testTag("open-capabilities"),
+                ) { Text("Capabilities") }
             }
-            Text(capabilityName ?: destinationName, modifier = Modifier.testTag("active-route"), style = MaterialTheme.typography.labelMedium)
+            Text(activeRouteName, modifier = Modifier.testTag("active-route"), style = MaterialTheme.typography.labelMedium)
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (capability != null) {
-                    CapabilityScreen(capability, onSelect = { capabilityName = it.name })
+                    CapabilityScreen(capability, onSelect = { activeRouteName = it.name })
                 } else {
-                    when (destination) {
+                    when (destination ?: PrimaryDestination.HOME) {
                         PrimaryDestination.HOME -> HomeDeveloperScreen(projects.size)
                         PrimaryDestination.PERSONAL -> Placeholder("Personal backend contract shell")
                         PrimaryDestination.STORE -> Placeholder("Store: NOT_AVAILABLE / COMING_IN_PART_2 — no fake economy")
