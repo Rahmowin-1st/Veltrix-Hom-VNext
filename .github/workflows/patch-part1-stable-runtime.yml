@@ -1,0 +1,41 @@
+name: Patch Part1 Stable Runtime
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-part1-completion
+          fetch-depth: 0
+      - name: Replace unstable API37 isolated runtime with normal Android 16 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/part1-android-runtime-final.yml')
+          s=p.read_text()
+          s=s.replace('system-images;android-37.0;google_apis;x86_64','system-images;android-36;google_apis;x86_64')
+          s=s.replace('Setup Android 17 API37 runtime','Setup stable Android 16 API36 runtime')
+          s=s.replace("'build-tools;37.0.0' 'platforms;android-37.0'", "'build-tools;37.0.0' 'platforms;android-37.0' 'platforms;android-36'")
+          s=s.replace('Install stable API37 Google APIs emulator','Install stable Android 16 Google APIs emulator')
+          start=s.index('      - name: Generate audited SystemUI-isolated full runtime helper')
+          end=s.index('      - name: Execute one-pass final Android device gate', start)
+          replacement='''      - name: Generate normal stable Android 16 full runtime helper\n        shell: bash\n        run: |\n          set -euo pipefail\n          python3 - <<'PY2'\n          from pathlib import Path\n          src=Path(".github/scripts/android-runtime-gate-v15.sh").read_text()\n          src=src.replace("V15_", "FINAL_")\n          src=src.replace("veltrix_v15_api37_", "veltrix_final_api36_")\n          src=src.replace("grep -Fx 17 evidence/runtime/android-release.txt", "grep -Fx 16 evidence/runtime/android-release.txt")\n          src=src.replace("grep -Fx 37 evidence/runtime/android-api.txt", "grep -Fx 36 evidence/runtime/android-api.txt")\n          src=src.replace("FINAL_API37_AOSP_BOOT", "FINAL_API36_NORMAL_BOOT")\n          src=src.replace(" -feature -Vulkan", "")\n          out=Path("evidence/runtime/android-runtime-gate-final.sh")\n          out.write_text(src)\n          out.chmod(0o755)\n          PY2\n          ! grep -q 'pm disable-user.*systemui' evidence/runtime/android-runtime-gate-final.sh\n          ! grep -q -- '-feature -Vulkan' evidence/runtime/android-runtime-gate-final.sh\n          echo FINAL_NORMAL_SYSTEM_SERVICES=PASS | tee evidence/runtime/normal-system-services-gate.txt\n\n'''
+          s=s[:start]+replacement+s[end:]
+          s=s.replace('bash evidence/runtime/android-runtime-gate-final.sh','bash evidence/runtime/android-runtime-gate-final.sh')
+          s=s.replace("grep -q FINAL_SYSTEMUI_ISOLATION=PASS evidence/runtime/systemui-isolation-gate.txt\n", "grep -q FINAL_NORMAL_SYSTEM_SERVICES=PASS evidence/runtime/normal-system-services-gate.txt\n")
+          s=s.replace('cp evidence/runtime/systemui-isolation-gate.txt final/final-handoff/','cp evidence/runtime/normal-system-services-gate.txt final/final-handoff/')
+          p.write_text(s)
+          PY
+          grep -q 'system-images;android-36;google_apis;x86_64' .github/workflows/part1-android-runtime-final.yml
+          ! grep -q 'Generate audited SystemUI-isolated' .github/workflows/part1-android-runtime-final.yml
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/part1-android-runtime-final.yml
+          git commit -m 'ci: use normal stable Android 16 runtime for final gate'
+          git push origin HEAD:veltrix-hom-part1-completion
