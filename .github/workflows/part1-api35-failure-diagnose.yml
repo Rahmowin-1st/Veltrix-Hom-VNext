@@ -1,0 +1,48 @@
+name: Part1 API35 Failure Diagnose
+on:
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Download failed API35 artifact and persist sanitized diagnosis
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILED_RUN: '31712512092'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/api35diag && mkdir -p /tmp/api35diag
+          gh run download "$FAILED_RUN" -n "veltrix-hom-part1-current-product-api35-final-$FAILED_RUN" -D /tmp/api35diag
+          mkdir -p provenance
+          OUT=provenance/PART1_API35_FAILURE_DIAGNOSIS_31712512092.txt
+          {
+            echo "failed_run=$FAILED_RUN"
+            echo "diagnosed_from_artifact=PASS"
+            echo "product_sha_expected=4e19f719688235b868add5a40f611b77ad909c96"
+            echo "present_files:"
+            find /tmp/api35diag -maxdepth 4 -type f | sed 's#^/tmp/api35diag/##' | sort
+            echo "gate_markers:"
+            for f in product-commit.txt source-zip-sha256.txt server-gate.txt build-and-tests.txt runtime-environment.txt app-apk-sha256.txt test-apk-sha256.txt runtime/normal-system-services.txt runtime/install-app.txt runtime/install-test.txt runtime/resolve.txt runtime/cold-launch.txt runtime/shell-test.txt runtime/server-device-test.txt runtime/process-death-gate.txt runtime/offline-gate.txt runtime/reconnect-gate.txt runtime/all-instrumentation.txt runtime/connected-gradle.txt runtime/final-launch.txt runtime/runtime-all.txt; do
+              p="/tmp/api35diag/evidence/$f"
+              if [ -f "$p" ]; then echo "$f=PRESENT"; else echo "$f=ABSENT"; fi
+            done
+            echo "first_failure_signals:"
+            grep -RIEh 'FAILURE:|FAILED|Failure \[|INSTALL_FAILED|FATAL EXCEPTION|AssertionError|Process .* died|device offline|broken pipe|dead object|emulator.*(panic|fatal)|ERROR|Exception' /tmp/api35diag 2>/dev/null | head -120 | sed -E 's/(password|token|secret|key)=([^ ]+)/\1=[REDACTED]/Ig' || true
+            echo "tails:"
+            for f in build-and-tests.txt server-run.txt runtime/connected-gradle.txt runtime/all-instrumentation.txt runtime/final-launch.txt; do
+              p="/tmp/api35diag/evidence/$f"; [ ! -f "$p" ] || { echo "--- $f ---"; tail -100 "$p"; }
+            done
+          } > "$OUT"
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$OUT"
+          git commit -m "ci: persist API35 final failure diagnosis" || exit 0
+          git push origin HEAD:main
