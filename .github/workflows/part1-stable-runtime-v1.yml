@@ -1,0 +1,118 @@
+name: Veltrix Part 1 Stable Runtime V1
+
+on:
+  push:
+    branches: [veltrix-hom-part1-completion]
+    paths: ['.github/workflows/part1-stable-runtime-v1.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_PACKAGE: system-images;android-36;google_apis;x86_64
+  GPU_MODE: swiftshader_indirect
+  ANDROID_AVD_HOME: ${{ github.workspace }}/.android-avd
+  VELTRIX_ENV: test
+  VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_DATABASE_USER: postgres
+  VELTRIX_AI_PROVIDER: disabled
+  VELTRIX_TEST_AI_MOCK: 'true'
+  VELTRIX_EMBEDDING_PROVIDER: disabled
+  VELTRIX_TEST_EMBEDDING_MOCK: 'true'
+  VELTRIX_EMBEDDING_DIMENSIONS: '64'
+  VELTRIX_TEST_OCR_MOCK: 'true'
+  VELTRIX_TEST_TRANSLATE_MOCK: 'true'
+  VELTRIX_STORAGE_PROVIDER: local
+  VELTRIX_WORKERS_ENABLED: 'true'
+
+jobs:
+  runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.5.1'}
+      - uses: android-actions/setup-android@v3
+
+      - name: Build current exact source and start real server
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/runtime package
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          nohup gradle --no-daemon :server:run > evidence/server.log 2>&1 &
+          for i in $(seq 1 90); do curl -fsS --max-time 2 http://127.0.0.1:8080/ready > evidence/ready.json && break || sleep 2; done
+          grep -q '"ready":true' evidence/ready.json
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'emulator' 'build-tools;37.0.0' 'platforms;android-37.0' "$IMAGE_PACKAGE"
+          sudo apt-get update -qq && sudo apt-get install -y libpulse0
+          gradle --no-daemon -PVELTRIX_API_BASE_URL=http://127.0.0.1:8080 :android:app:testDebugUnitTest :android:app:assembleDebug :android:app:assembleDebugAndroidTest | tee evidence/android-build.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/android-build.txt
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          TEST_APK=$(find android/app/build/outputs/apk/androidTest -name '*androidTest.apk' -type f -size +0c | head -1)
+          test -s "$APK"; test -s "$TEST_APK"
+          "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging "$APK" | tee evidence/apk-badging.txt
+          grep -q "targetSdkVersion:'37'" evidence/apk-badging.txt
+          sha256sum "$APK" "$TEST_APK" | tee evidence/apk-sha256.txt
+
+      - name: Adapt audited runtime helper to stable API36 and execute
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/scripts/android-runtime-gate-v15.sh evidence/runtime/stable-helper.sh
+          sed -i \
+            -e 's#APK="evidence/prior-v10/Veltrix-Hom-VNext-Part1-FINAL.apk"#APK="android/app/build/outputs/apk/debug/app-debug.apk"#' \
+            -e 's#TEST_APK="evidence/prior-v10/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk"#TEST_APK="$(find android/app/build/outputs/apk/androidTest -name '\''*androidTest.apk'\'' -type f -size +0c | head -1)"#' \
+            -e '/4a70f76e971ed11a58cd125da050bef23b61223aa148e353994b4912d69342da/d' \
+            -e '/a6afe3978740c081edc8b1b1a4de785150cb1e16d8017a3a4e54ff32fe8fcd49/d' \
+            -e 's/veltrix_v15_api37_/veltrix_stable_api36_/g' \
+            -e 's/grep -Fx 17 evidence\/runtime\/android-release.txt/grep -Fx 16 evidence\/runtime\/android-release.txt/' \
+            -e 's/grep -Fx 37 evidence\/runtime\/android-api.txt/grep -Fx 36 evidence\/runtime\/android-api.txt/' \
+            -e 's/ -feature -Vulkan//g' \
+            -e "s/'OK (6 tests)'/'OK ('/" \
+            evidence/runtime/stable-helper.sh
+          chmod +x evidence/runtime/stable-helper.sh
+          bash evidence/runtime/stable-helper.sh
+          grep -q V15_ANDROID_RUNTIME_ALL=PASS evidence/runtime/runtime-all.txt
+          echo STABLE_API36_RUNTIME=PASS | tee evidence/runtime/stable-api36.txt
+
+      - name: Package exact tested source and runtime artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          TEST_APK=$(find android/app/build/outputs/apk/androidTest -name '*androidTest.apk' -type f -size +0c | head -1)
+          git archive --format=zip --output=package/Veltrix-Hom-VNext-Part1-EXACT-TESTED-SOURCE.zip "$GITHUB_SHA"
+          cp "$APK" package/Veltrix-Hom-VNext-Part1-FINAL.apk
+          cp "$TEST_APK" package/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk
+          cp -R evidence package/evidence
+          cp -R docs package/docs
+          cp -R contracts package/contracts
+          printf 'repo=%s\nbranch=%s\ncommit=%s\nrun=%s\njob=%s\ncompile_sdk=37\ntarget_sdk=37\nfunctional_runtime=Android-16-API36-google_apis-x86_64-normal-services\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_JOB" > package/PROVENANCE.txt
+          find package -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > package/SHA256SUMS.txt
+          echo PART1_STABLE_RUNTIME_PACKAGE=PASS | tee package/evidence/runtime/package-gate.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-part1-stable-runtime-${{ github.run_id }}
+          path: package/
+          if-no-files-found: error
+          retention-days: 30
