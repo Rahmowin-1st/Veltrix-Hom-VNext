@@ -1,0 +1,46 @@
+name: Part1 Final Failure Diagnose
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-part1-completion
+          fetch-depth: 0
+      - name: Download failed final-gate artifact and summarize
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILED_RUN: '31710016959'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/faildiag && mkdir -p /tmp/faildiag
+          gh run download "$FAILED_RUN" -n "veltrix-hom-part1-final-gate-failure-$FAILED_RUN" -D /tmp/faildiag
+          mkdir -p provenance
+          OUT=provenance/PART1_FINAL_FAILURE_DIAGNOSIS_31710016959.txt
+          {
+            echo "failed_run=$FAILED_RUN"
+            echo "diagnosed_from_artifact=PASS"
+            echo "runtime_markers:"
+            for f in systemui-isolation-gate resolve-gate install-gate cold-gate shell-gate server-device-gate process-gate offline-gate connected-gate final-launch-gate runtime-all; do
+              p=$(find /tmp/faildiag -type f -name "$f.txt" | head -1 || true)
+              if [ -n "$p" ]; then echo "$f=PRESENT"; else echo "$f=ABSENT"; fi
+            done
+            echo "key_failure_signals:"
+            grep -RIEh 'APP_LAUNCH_FAILED|TEST_FAILED|Failure \[|INSTALL_FAILED|FATAL EXCEPTION|Process .* died|device offline|broken pipe|dead object|emulator.*(panic|fatal)|SurfaceFlinger.*(crash|died)|system_server.*(crash|died)' /tmp/faildiag 2>/dev/null | head -80 | sed -E 's/(password|token|secret|key)=([^ ]+)/\1=[REDACTED]/Ig' || true
+            echo "emulator_tail:"
+            p=$(find /tmp/faildiag -type f -name emulator.log | head -1 || true); [ -z "$p" ] || tail -80 "$p"
+          } > "$OUT"
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$OUT"
+          git commit -m "ci: persist Part 1 final failure diagnosis" || exit 0
+          git push origin HEAD:veltrix-hom-part1-completion
