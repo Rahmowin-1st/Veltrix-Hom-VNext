@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -68,12 +69,14 @@ private fun DeveloperShell(vm: AppViewModel = viewModel()) {
                 Button(onClick = { capability = CapabilityRoute.CHAT }) { Text("Capabilities") }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            if (capability != null) CapabilityScreen(capability!!, onSelect = { capability = it })
-            else when (destination) {
-                PrimaryDestination.HOME -> HomeDeveloperScreen(projects.size)
-                PrimaryDestination.PERSONAL -> Placeholder("Personal backend contract shell")
-                PrimaryDestination.STORE -> Placeholder("Store: NOT_AVAILABLE / COMING_IN_PART_2 — no fake economy")
-                PrimaryDestination.PROJECTS -> ProjectsDeveloperScreen(projects, vm::createProject)
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (capability != null) CapabilityScreen(capability!!, onSelect = { capability = it })
+                else when (destination) {
+                    PrimaryDestination.HOME -> HomeDeveloperScreen(projects.size)
+                    PrimaryDestination.PERSONAL -> Placeholder("Personal backend contract shell")
+                    PrimaryDestination.STORE -> Placeholder("Store: NOT_AVAILABLE / COMING_IN_PART_2 — no fake economy")
+                    PrimaryDestination.PROJECTS -> ProjectsDeveloperScreen(projects, vm::createProject)
+                }
             }
         }
     }
