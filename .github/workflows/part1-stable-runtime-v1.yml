@@ -1,4 +1,4 @@
-# retrigger after capability reachability test fix
+# retrigger after bounded viewport fix
 name: Veltrix Part 1 Stable Runtime V1
 
 on:
