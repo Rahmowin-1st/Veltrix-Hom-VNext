@@ -1,7 +1,9 @@
 package com.veltrix.hom.vnext
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -18,14 +20,22 @@ class ShellInstrumentedTest {
         compose.onNodeWithText("Personal").assertIsDisplayed()
         compose.onNodeWithText("Store").assertIsDisplayed()
         compose.onNodeWithText("Projects").performClick()
+        compose.onNodeWithTag("active-route").assertTextEquals("PROJECTS").assertIsDisplayed()
         compose.onNodeWithText("Projects — functional local persistence harness").assertIsDisplayed()
-        val required = listOf("CHAT", "LIBRARY", "TESTING", "PRACTICE", "QUIZZES", "FLASHCARDS", "MISTAKES", "CALCULATOR", "TRANSLATE", "NOTIFICATIONS", "SETTINGS")
+
+        val required = listOf(
+            "CHAT", "LIBRARY", "TESTING", "PRACTICE", "QUIZZES", "FLASHCARDS",
+            "MISTAKES", "CALCULATOR", "TRANSLATE", "NOTIFICATIONS", "SETTINGS",
+        )
         assertEquals(required, CapabilityRoute.entries.map { it.name })
-        compose.onNodeWithText("Capabilities").performClick()
-        compose.onNodeWithText("Route contract reachable. Feature business logic belongs to repositories/domain services, not this composable.").assertIsDisplayed()
+
+        compose.onNodeWithTag("open-capabilities").performClick()
+        compose.onNodeWithTag("active-route").assertTextEquals("CHAT").assertIsDisplayed()
+        compose.onNodeWithTag("capability-CHAT").assertIsDisplayed()
+
         CapabilityRoute.entries.drop(1).forEach { route ->
-            compose.onNodeWithText(route.name).performScrollTo().performClick()
-            compose.onNodeWithText("Route contract reachable. Feature business logic belongs to repositories/domain services, not this composable.").assertIsDisplayed()
+            compose.onNodeWithTag("capability-${route.name}").performScrollTo().performClick()
+            compose.onNodeWithTag("active-route").assertTextEquals(route.name).assertIsDisplayed()
         }
     }
 }
