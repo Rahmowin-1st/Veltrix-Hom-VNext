@@ -24,7 +24,7 @@ class VeltrixApiClient(private val baseUrl:String = BuildConfig.VELTRIX_API_BASE
         val body=JSONObject().put("mutations",org.json.JSONArray().put(m)).toString();val(code,text)=request("POST","/v1/sync/mutations",token,body);require(code==200){"sync HTTP $code $text"};return JSONObject(text).getJSONArray("results").getJSONObject(0)
     }
     private fun project(o:JSONObject)=ApiProject(o.getString("id"),o.getString("title"),o.getLong("revision"))
-    private fun request(method:String,path:String,token:String?,body:String?):Pair<Int,String>{
+    internal fun request(method:String,path:String,token:String?,body:String?):Pair<Int,String>{
         val c=(URL(baseUrl.trimEnd('/')+path).openConnection() as HttpURLConnection).apply{requestMethod=method;connectTimeout=7000;readTimeout=30000;setRequestProperty("Accept","application/json");setRequestProperty("X-Request-ID","android-${UUID.randomUUID()}");token?.let{setRequestProperty("Authorization","Bearer $it")};if(body!=null){doOutput=true;setRequestProperty("Content-Type","application/json")}}
         if(body!=null)c.outputStream.bufferedWriter().use{it.write(body)};val code=c.responseCode;val stream=if(code in 200..299)c.inputStream else c.errorStream;val text=stream?.bufferedReader()?.use{it.readText()}?:"";c.disconnect();return code to text
     }
