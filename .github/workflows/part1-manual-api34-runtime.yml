@@ -1,0 +1,132 @@
+name: Part1 Manual API34 Runtime
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U postgres -d veltrix_vnext_test" --health-interval 5s --health-timeout 5s --health-retries 30
+    env:
+      PRODUCT_SHA: 4e19f719688235b868add5a40f611b77ad909c96
+      VELTRIX_ENV: test
+      VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_DATABASE_USER: postgres
+      VELTRIX_DATABASE_PASSWORD: postgres
+      VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_TEST_DATABASE_USER: postgres
+      VELTRIX_TEST_DATABASE_PASSWORD: postgres
+      VELTRIX_AI_PROVIDER: disabled
+      VELTRIX_TEST_AI_MOCK: 'true'
+      VELTRIX_EMBEDDING_PROVIDER: disabled
+      VELTRIX_TEST_EMBEDDING_MOCK: 'true'
+      VELTRIX_EMBEDDING_DIMENSIONS: '64'
+      VELTRIX_TEST_OCR_MOCK: 'true'
+      VELTRIX_TEST_TRANSLATE_MOCK: 'true'
+      VELTRIX_STORAGE_PROVIDER: local
+      VELTRIX_WORKERS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PRODUCT_SHA }}
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.5.1'}
+      - uses: android-actions/setup-android@v3
+      - name: Build server and Android artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence package
+          test "$(git rev-parse HEAD)" = "$PRODUCT_SHA"
+          git archive --format=zip --output=package/Veltrix-Hom-VNext-Part1-EXACT-TESTED-SOURCE.zip HEAD
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          nohup gradle --no-daemon :server:run > evidence/server.log 2>&1 &
+          for i in $(seq 1 90); do curl -fsS http://127.0.0.1:8080/health > evidence/health.json && break || sleep 2; done
+          grep -q '"status":"ok"' evidence/health.json
+          gradle --no-daemon :core:test :server:test :android:app:assembleDebug :android:app:assembleDebugAndroidTest | tee evidence/build.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/build.txt
+          cp android/app/build/outputs/apk/debug/app-debug.apk package/Veltrix-Hom-VNext-Part1-FINAL.apk
+          cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk package/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk
+      - name: Boot API34 manually and execute device gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/runtime
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'emulator' 'system-images;android-34;google_apis;x86_64'
+          echo no | avdmanager create avd -n veltrix_api34 -k 'system-images;android-34;google_apis;x86_64' --force
+          nohup emulator -avd veltrix_api34 -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -memory 2048 > evidence/runtime/emulator.log 2>&1 &
+          adb wait-for-device
+          boot=0
+          for i in $(seq 1 180); do
+            v=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
+            if [ "$v" = 1 ]; then boot=1; break; fi
+            sleep 2
+          done
+          test "$boot" = 1
+          adb devices -l | tee evidence/runtime/adb.txt
+          test "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" = 34
+          SYS=$(adb shell pidof system_server | tr -d '\r'); SF=$(adb shell pidof surfaceflinger | tr -d '\r'); UI=$(adb shell pidof com.android.systemui | tr -d '\r')
+          test -n "$SYS" && test -n "$SF" && test -n "$UI"
+          echo NORMAL_ESSENTIAL_SYSTEM_SERVICES=PASS | tee evidence/runtime/system-services.txt
+          APP=android/app/build/outputs/apk/debug/app-debug.apk
+          TEST=android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          PKG=com.veltrix.hom.vnext.dev
+          adb install -r -t "$APP" | tee evidence/runtime/install-app.txt; grep -q Success evidence/runtime/install-app.txt
+          adb install -r -t "$TEST" | tee evidence/runtime/install-test.txt; grep -q Success evidence/runtime/install-test.txt
+          I=$(adb shell pm list instrumentation | sed -n 's/^instrumentation:\([^ ]*\).*target=com.veltrix.hom.vnext.dev.*/\1/p' | head -1 | tr -d '\r'); test -n "$I"
+          RES=$(adb shell cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" | tr -d '\r')
+          echo "$RES" | tee evidence/runtime/resolve.txt; echo "$RES" | grep -q MainActivity
+          adb shell am force-stop "$PKG"; adb shell am start -W -n "$RES" | tee evidence/runtime/cold.txt; grep -q 'Status: ok' evidence/runtime/cold.txt
+          adb reverse tcp:8080 tcp:8080
+          adb shell am instrument -w -e class com.veltrix.hom.vnext.ShellInstrumentedTest "$I" | tee evidence/runtime/shell.txt; grep -q 'OK (1 test)' evidence/runtime/shell.txt
+          adb shell am instrument -w -e class com.veltrix.hom.vnext.ServerIntegrationInstrumentedTest "$I" | tee evidence/runtime/server-device.txt; grep -q 'OK (1 test)' evidence/runtime/server-device.txt
+          adb shell am instrument -w -e class 'com.veltrix.hom.vnext.PersistenceInstrumentedTest#aSeedProjectForProcessRestart' "$I" | tee evidence/runtime/process-seed.txt; grep -q 'OK (1 test)' evidence/runtime/process-seed.txt
+          adb shell am force-stop "$PKG"
+          adb shell am instrument -w -e class 'com.veltrix.hom.vnext.PersistenceInstrumentedTest#zVerifyProjectAfterProcessRestart' "$I" | tee evidence/runtime/process-verify.txt; grep -q 'OK (1 test)' evidence/runtime/process-verify.txt
+          echo PROCESS_DEATH_PERSISTENCE=PASS | tee evidence/runtime/process-death.txt
+          adb shell cmd connectivity airplane-mode enable || adb shell settings put global airplane_mode_on 1
+          adb shell svc wifi disable || true; sleep 3
+          adb shell am instrument -w -e class 'com.veltrix.hom.vnext.OfflineDataInstrumentedTest#aSeedOfflineDurableState' "$I" | tee evidence/runtime/offline-seed.txt; grep -q 'OK (1 test)' evidence/runtime/offline-seed.txt
+          adb shell am force-stop "$PKG"
+          adb shell am instrument -w -e class 'com.veltrix.hom.vnext.OfflineDataInstrumentedTest#zVerifyOfflineDurableStateAfterProcessRestart' "$I" | tee evidence/runtime/offline-verify.txt; grep -q 'OK (1 test)' evidence/runtime/offline-verify.txt
+          echo OFFLINE_PROCESS_RESTART=PASS | tee evidence/runtime/offline.txt
+          adb shell cmd connectivity airplane-mode disable || adb shell settings put global airplane_mode_on 0
+          adb shell svc wifi enable || true; sleep 5; adb reverse tcp:8080 tcp:8080
+          adb shell am instrument -w -e class com.veltrix.hom.vnext.ServerIntegrationInstrumentedTest "$I" | tee evidence/runtime/reconnect.txt; grep -q 'OK (1 test)' evidence/runtime/reconnect.txt
+          echo RECONNECT=PASS | tee evidence/runtime/reconnect-gate.txt
+          adb shell pm clear "$PKG" >/dev/null
+          adb install -r -t "$APP" >/dev/null; adb install -r -t "$TEST" >/dev/null
+          I=$(adb shell pm list instrumentation | sed -n 's/^instrumentation:\([^ ]*\).*target=com.veltrix.hom.vnext.dev.*/\1/p' | head -1 | tr -d '\r')
+          adb reverse tcp:8080 tcp:8080
+          adb shell am instrument -w "$I" | tee evidence/runtime/all.txt; grep -q 'OK (6 tests)' evidence/runtime/all.txt
+          gradle --no-daemon :android:app:connectedDebugAndroidTest | tee evidence/runtime/connected.txt; grep -q 'BUILD SUCCESSFUL' evidence/runtime/connected.txt
+          adb shell am force-stop "$PKG"; adb shell am start -W -n com.veltrix.hom.vnext.dev/com.veltrix.hom.vnext.MainActivity | tee evidence/runtime/final-launch.txt; grep -q 'Status: ok' evidence/runtime/final-launch.txt
+          echo PART1_API34_RUNTIME_ALL=PASS | tee evidence/runtime/runtime-all.txt
+      - name: Package provenance
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p package/evidence
+          cp -a evidence/. package/evidence/ 2>/dev/null || true
+          printf 'repository=%s\nproduct_sha=%s\ncontroller_sha=%s\nrun_id=%s\nruntime=Android_14_API34_google_apis_x86_64_normal_system_services\n' "$GITHUB_REPOSITORY" "$PRODUCT_SHA" "$GITHUB_SHA" "$GITHUB_RUN_ID" > package/PROVENANCE.txt
+          (cd package && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: veltrix-part1-manual-api34-${{ github.run_id }}
+          path: package/
+          if-no-files-found: error
+          retention-days: 30
