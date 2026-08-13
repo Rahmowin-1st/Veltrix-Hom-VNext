@@ -1,0 +1,48 @@
+name: Part 1 Exact Kotlin Syntax Repair
+
+on:
+  push:
+    branches: [veltrix-hom-part1-completion]
+    paths:
+      - '.github/workflows/part1-self-heal-kotlin.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply exact compiler-proven syntax repair
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          targets = [
+            Path('server/src/main/kotlin/com/veltrix/hom/vnext/server/LearningRepositories.kt'),
+            Path('server/src/main/kotlin/com/veltrix/hom/vnext/server/PracticeFlashcardMistakeRepositories.kt'),
+          ]
+          expected = {
+            targets[0]: 3,
+            targets[1]: 2,
+          }
+          for path in targets:
+            text = path.read_text()
+            count = text.count('>=')
+            if count != expected[path]:
+              raise SystemExit(f'{path}: expected {expected[path]} compact generic assignments, got {count}')
+            path.write_text(text.replace('>=', '> ='))
+          print('KOTLIN_GENERIC_ASSIGNMENT_REPAIR=PASS')
+          PY
+          git diff --check
+      - name: Persist durable fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server/src/main/kotlin/com/veltrix/hom/vnext/server/LearningRepositories.kt \
+                  server/src/main/kotlin/com/veltrix/hom/vnext/server/PracticeFlashcardMistakeRepositories.kt
+          git commit -m 'fix: separate Kotlin generic closers from assignment'
+          git push origin HEAD:veltrix-hom-part1-completion
+          echo "REPAIRED_HEAD=$(git rev-parse HEAD)"
