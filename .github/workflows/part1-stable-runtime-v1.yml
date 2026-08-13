@@ -88,6 +88,7 @@ jobs:
             -e 's/grep -Fx 37 evidence\/runtime\/android-api.txt/grep -Fx 36 evidence\/runtime\/android-api.txt/' \
             -e 's/ -feature -Vulkan//g' \
             -e "s/'OK (6 tests)'/'OK ('/" \
+            -e 's#echo "$state" | grep -q "$PKG"#grep -q "$PKG" "evidence/runtime/activity-${label}-${attempt}.txt" "evidence/runtime/window-${label}-${attempt}.txt"#' \
             evidence/runtime/stable-helper.sh
           chmod +x evidence/runtime/stable-helper.sh
           bash evidence/runtime/stable-helper.sh
