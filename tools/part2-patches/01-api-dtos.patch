@@ -1,0 +1,19 @@
+--- a/server/src/main/kotlin/com/veltrix/hom/vnext/server/ApiDtos.kt
++++ b/server/src/main/kotlin/com/veltrix/hom/vnext/server/ApiDtos.kt
+@@ -32,7 +32,7 @@
+ @Serializable data class SearchRequest(val query: String, val projectId: String? = null, val limit: Int = 30)
+ @Serializable data class SearchResultResponse(val type: String, val id: String, val title: String, val snippet: String, val projectId: String?, val score: Double, val deepLink: String)
+ 
+-@Serializable data class HomeSnapshotResponse(val accountId: String, val displayName: String, val defaultAvatarId: String, val recentProjects: List<ProjectResponse>, val currentFocus: String?, val memoryMaturity: String, val mapState: String, val unreadNotificationCount: Int, val syncState: String, val schemaVersion: Int)
++@Serializable data class HomeSnapshotResponse(val accountId: String, val displayName: String, val defaultAvatarId: String, val recentProjects: List<ProjectResponse>, val currentFocus: String?, val memoryMaturity: String, val mapState: String, val unreadNotificationCount: Int, val syncState: String, val schemaVersion: Int, val level:Int=1, val lifetimeXp:Long=0, val coinBalance:Long=0, val currentConsistency:Int=0, val currentSeasonId:String?=null, val gameRevision:Long=0)
+ 
+ @Serializable data class AiStreamRequest(val conversationId: String, val projectId: String? = null, val sourceIds: List<String> = emptyList(), val attachmentIds: List<String> = emptyList(), val text: String, val learningMode: String = "DEFAULT", val memoryEnabled: Boolean = true, val projectMemoryEnabled: Boolean = true, val toolIds: List<String> = emptyList(), val toolInputs: Map<String,Map<String,String>> = emptyMap(), val originFeature: String? = null, val idempotencyKey: String)
+ @Serializable data class AiStreamEvent(val type: String, val messageId: String? = null, val segment: String? = null, val error: ErrorBody? = null, val final: Boolean = false)
+@@ -91,7 +91,7 @@
+ @Serializable data class AiCancelRequest(val requestId:String)
+ @Serializable data class AiCancelResponse(val cancelled:Boolean)
+ @Serializable data class ActivityEventResponse(val eventId:String,val type:String,val occurredAt:String,val projectId:String?,val objectId:String?,val meaningful:Boolean)
+-@Serializable data class PersonalSnapshotResponse(val accountId:String,val displayName:String,val preferredLanguage:String,val timezone:String,val memoryMaturity:String,val activeProjects:Int,val completedAssessments:Int,val activeMistakes:Int,val dueFlashcards:Int,val recentActivity:List<ActivityEventResponse>,val schemaVersion:Int=1)
++@Serializable data class PersonalSnapshotResponse(val accountId:String,val displayName:String,val preferredLanguage:String,val timezone:String,val memoryMaturity:String,val activeProjects:Int,val completedAssessments:Int,val activeMistakes:Int,val dueFlashcards:Int,val recentActivity:List<ActivityEventResponse>,val schemaVersion:Int=1,val game:GameProfileSnapshotResponse?=null)
+ @Serializable data class ProjectInstructionPutRequest(val body:String,val structuredJson:String="{}")
+ @Serializable data class ProjectInstructionResponse(val id:String,val projectId:String,val body:String,val structuredJson:String,val version:Int,val active:Boolean,val updatedAt:String)
