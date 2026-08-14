@@ -1,0 +1,2 @@
+Exact final verification trigger after PostgreSQL nullable retest-duration fix.
+The parent source contains the narrow product fix; this commit intentionally changes no runtime behavior.
