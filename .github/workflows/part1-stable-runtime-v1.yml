@@ -1,4 +1,4 @@
-# retrigger exact current source after route and AI stream verification
+# retrigger after synchronized capability route instrumentation fix
 name: Veltrix Part 1 Stable Runtime V1
 
 on:
