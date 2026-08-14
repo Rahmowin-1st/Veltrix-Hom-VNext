@@ -1,4 +1,4 @@
-name: Veltrix Backend Part 3 Retest Null Duration Fix
+name: Veltrix Backend Part 3 Narrow SQL Fixes
 on:
   push:
     branches: [veltrix-hom-backend-part3-final]
@@ -8,7 +8,7 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: veltrix-part3-retest-null-duration-fix
+  group: veltrix-part3-narrow-sql-fixes
   cancel-in-progress: true
 jobs:
   patch:
@@ -24,10 +24,11 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python3 scripts/part3_fix_retest_null_duration.py
           git diff --check
-          git diff --exit-code --quiet && { echo PART3_RETEST_NULL_DURATION_NO_CHANGE=PASS; exit 0; }
+          git diff --exit-code --quiet && { echo PART3_NARROW_SQL_FIX_NO_CHANGE=PASS; exit 0; }
           git config user.name veltrix-backend-master
           git config user.email actions@users.noreply.github.com
-          git add server/src/main/kotlin/com/veltrix/hom/vnext/server/Part3CompletionRepository.kt
-          git commit -m 'fix(part3): type nullable retest duration in PostgreSQL'
+          git add server/src/main/kotlin/com/veltrix/hom/vnext/server/Part3CompletionRepository.kt \
+                  server/src/main/kotlin/com/veltrix/hom/vnext/server/SearchAggregators.kt
+          git commit -m 'fix(part3): apply narrow final SQL fixes'
           git push origin HEAD:veltrix-hom-backend-part3-final
-          echo PART3_RETEST_NULL_DURATION_PUSH=PASS
+          echo PART3_NARROW_SQL_FIX_PUSH=PASS
