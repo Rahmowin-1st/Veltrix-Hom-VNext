@@ -61,7 +61,7 @@ jobs:
         uses: actions/checkout@v4
         with: {fetch-depth: 0}
 
-      - name: Prove source provenance and Android runtime reuse boundary
+      - name: Prove provenance and unchanged Android runtime inputs
         shell: bash
         run: |
           set -euo pipefail
@@ -86,7 +86,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with: {gradle-version: '9.5.1'}
 
-      - name: Verify handoff completeness, OpenAPI, policy and stale-truth audit
+      - name: Verify handoff docs, generated OpenAPI, policy and stale truth
         shell: bash
         run: |
           set -euo pipefail
@@ -101,7 +101,7 @@ jobs:
           grep -q PART2_PROGRESSION_POLICY_CHECK=PASS evidence/progression-policy.txt
           echo PART2_DOCS_AND_CONTRACTS=PASS | tee evidence/docs-contracts-gate.txt
 
-      - name: Run affected exact core/server tests on real PostgreSQL
+      - name: Run affected core/server and Manager E2E on real PostgreSQL
         shell: bash
         run: |
           set -euo pipefail
@@ -127,14 +127,14 @@ jobs:
             'part2AccountExportIncludesOwnedGameStateAndDeleteRevokesRelogin',
             'avatarOwnershipEquipSurvivesServerRestartAndRelogin',
           }
-          got={x.attrib['name'] for x in root.findall('testcase')}
+          got={x.attrib['name'].removesuffix('()') for x in root.findall('testcase')}
           assert expected <= got, (expected-got, got)
           print('PART2_MANAGER_E2E_5_OF_5=PASS')
           PY
           echo PART2_BACKEND_REAL_POSTGRES=PASS | tee evidence/backend-gate.txt
           echo PART2_MANAGER_E2E=PASS | tee evidence/manager-e2e-gate.txt
 
-      - name: Start exact Ktor source and run HTTP/account/performance smoke
+      - name: Run exact Ktor account/export/delete and performance smoke
         shell: bash
         run: |
           set -euo pipefail
@@ -160,12 +160,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          curl -fsSL \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$BASE_RUNTIME_ARTIFACT_ID/zip" \
-            -o prior-artifact.zip
+          curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$BASE_RUNTIME_ARTIFACT_ID/zip" -o prior-artifact.zip
           echo "$BASE_OUTER_ARTIFACT_SHA256  prior-artifact.zip" | sha256sum -c -
           unzip -q prior-artifact.zip -d prior-artifact
           PRIOR_INNER=prior-artifact/Veltrix-Hom-VNext-Part2-VERIFIED-PACKAGE.zip
@@ -191,59 +187,63 @@ jobs:
             "$BASE_RUNTIME_SHA" "$BASE_RUNTIME_RUN" "$BASE_RUNTIME_JOB" "$BASE_RUNTIME_ARTIFACT_ID" "$BASE_APK_SHA256" "$BASE_ANDROID_TEST_SHA256" > evidence/preserved-android/PROVENANCE.txt
           echo PART2_PRESERVED_ANDROID_RUNTIME=PASS | tee evidence/preserved-android-gate.txt
 
-      - name: Emit exact A-S execution closure
+      - name: Emit exact A-S closure evidence
         shell: bash
         run: |
           set -euo pipefail
-          cat > evidence/E2E_EXECUTION_STATUS.tsv <<EOF
-          ID	behavior	exact_test_or_gate	source_sha	environment	result	evidence	run	job
-          A	Part1 baseline/regression	check_part1_structure + full core/server regression	$GITHUB_SHA	Ubuntu24+PostgreSQL17	PASS	evidence/part1-structure.txt;evidence/backend-tests.txt	$GITHUB_RUN_ID	$GITHUB_JOB
-          B	Meaningful activity exactly-once XP/Coins	Part2PostgresIntegrationTest.meaningfulEventRewardsExactlyOnceAndSemanticDuplicateIsRejected	$GITHUB_SHA	real PostgreSQL	PASS	evidence/test-results/server	$GITHUB_RUN_ID	$GITHUB_JOB
-          C	Anti-farming/caps/duplicates	Part2GameSystemsTest anti-farming cases + Part2PostgresIntegrationTest	$GITHUB_SHA	JVM+PostgreSQL	PASS	evidence/test-results/core;evidence/test-results/server	$GITHUB_RUN_ID	$GITHUB_JOB
-          D	Level curve/simulation	Part2GameSystemsTest.levelCurveIsMonotonicAndHasExactBoundaries + Part2CompletionSystemsTest.progressionSimulationCoversRequiredHorizonsAndAbuseCap	$GITHUB_SHA	JVM	PASS	evidence/test-results/core;evidence/progression-policy.txt	$GITHUB_RUN_ID	$GITHUB_JOB
-          E	Coin ledger/reconcile/refund	Part2CompletionIntegrationTest.ledgersStoreRefundSeasonAndNotificationsAreDurableAndIdempotent	$GITHUB_SHA	real PostgreSQL	PASS	evidence/test-results/server	$GITHUB_RUN_ID	$GITHUB_JOB
-          F	Concurrent purchase/no overspend	Part2ManagerAcceptanceIntegrationTest.concurrentPurchaseRaceAllowsNoOverspendAndReconciles	$GITHUB_SHA	real PostgreSQL concurrent workers	PASS	evidence/manager-e2e.xml	$GITHUB_RUN_ID	$GITHUB_JOB
-          G	Achievements/durability	Part2CompletionIntegrationTest.ledgersStoreRefundSeasonAndNotificationsAreDurableAndIdempotent	$GITHUB_SHA	real PostgreSQL	PASS	evidence/test-results/server	$GITHUB_RUN_ID	$GITHUB_JOB
-          H	Avatar ownership/equip/restart/relogin	Part2ManagerAcceptanceIntegrationTest.avatarOwnershipEquipSurvivesServerRestartAndRelogin	$GITHUB_SHA	real PostgreSQL DB restart+login	PASS	evidence/manager-e2e.xml	$GITHUB_RUN_ID	$GITHUB_JOB
-          I	Personal Map eligibility	Part2GameSystemsTest.personalMapRequiresLevelAndMemoryGate + HTTP smoke	$GITHUB_SHA	JVM+Ktor/PostgreSQL	PASS	evidence/test-results/core;evidence/http-smoke.txt	$GITHUB_RUN_ID	$GITHUB_JOB
-          J	Map generation/fallback	Part2CompletionSystemsTest.invalidAiMapFallsBackAndAiHasNoEconomicAuthority	$GITHUB_SHA	JVM	PASS	evidence/test-results/core	$GITHUB_RUN_ID	$GITHUB_JOB
-          K	Sequential Map units	Part2GameSystemsTest.mapUnitProgressOnlyExposesTheNextUnit + deterministic map structural test	$GITHUB_SHA	JVM	PASS	evidence/test-results/core	$GITHUB_RUN_ID	$GITHUB_JOB
-          L	Consistency semantics	Part2GameSystemsTest.consistencyCountsQualifiedLocalDaysNotAppOpens	$GITHUB_SHA	JVM	PASS	evidence/test-results/core	$GITHUB_RUN_ID	$GITHUB_JOB
-          M	Season rollover/lifetime preservation	Part2ManagerAcceptanceIntegrationTest.seasonRolloverPreservesLifetimeProgressionCoinsInventoryAndClosesSeasonProgress	$GITHUB_SHA	real PostgreSQL	PASS	evidence/manager-e2e.xml	$GITHUB_RUN_ID	$GITHUB_JOB
-          N	Gaming stats/events/notifications	Part2CompletionIntegrationTest.ledgersStoreRefundSeasonAndNotificationsAreDurableAndIdempotent	$GITHUB_SHA	real PostgreSQL	PASS	evidence/test-results/server	$GITHUB_RUN_ID	$GITHUB_JOB
-          O	Offline/cache stale revision	Part2GameInstrumentedTest.gameCacheSurvivesDatabaseReopenAndRejectsStaleRevision	$BASE_RUNTIME_SHA	Android16/API36	PASS	evidence/preserved-android/connected-15-tests.txt	$BASE_RUNTIME_RUN	$BASE_RUNTIME_JOB
-          P	Process death	Part2GameProcessDeathInstrumentedTest seed+verify	$BASE_RUNTIME_SHA	Android16/API36	PASS	evidence/preserved-android/part2-process-seed.txt;evidence/preserved-android/part2-process-verify.txt	$BASE_RUNTIME_RUN	$BASE_RUNTIME_JOB
-          Q	Multi-device concurrency consistency	Part2ManagerAcceptanceIntegrationTest.multiDeviceConcurrentAvatarEquipHasSingleWinnerAndConverges	$GITHUB_SHA	real PostgreSQL concurrent clients	PASS	evidence/manager-e2e.xml	$GITHUB_RUN_ID	$GITHUB_JOB
-          R	Part2 account export/delete	Part2ManagerAcceptanceIntegrationTest.part2AccountExportIncludesOwnedGameStateAndDeleteRevokesRelogin + HTTP smoke	$GITHUB_SHA	real PostgreSQL+Ktor auth	PASS	evidence/manager-e2e.xml;evidence/http-smoke.txt	$GITHUB_RUN_ID	$GITHUB_JOB
-          S	Full integration/runtime/package closure	current core/server+HTTP plus preserved unchanged Android 15-test runtime	$GITHUB_SHA	GitHub CI+preserved API36	PASS	evidence/backend-tests.txt;evidence/preserved-android-gate.txt	$GITHUB_RUN_ID	$GITHUB_JOB
-          EOF
-          test "$(tail -n +2 evidence/E2E_EXECUTION_STATUS.tsv | wc -l)" -eq 19
-          test "$(tail -n +2 evidence/E2E_EXECUTION_STATUS.tsv | cut -f1 | sort -u | wc -l)" -eq 19
+          python3 - <<'PY'
+          import os
+          sha=os.environ['GITHUB_SHA']; run=os.environ['GITHUB_RUN_ID']; job=os.environ['GITHUB_JOB']
+          base=os.environ['BASE_RUNTIME_SHA']; brun=os.environ['BASE_RUNTIME_RUN']; bjob=os.environ['BASE_RUNTIME_JOB']
+          rows=[
+          ('A','Part1 baseline/regression','check_part1_structure + full core/server regression',sha,'Ubuntu24+PostgreSQL17','evidence/part1-structure.txt;evidence/backend-tests.txt',run,job),
+          ('B','Meaningful activity exactly-once XP/Coins','Part2PostgresIntegrationTest.meaningfulEventRewardsExactlyOnceAndSemanticDuplicateIsRejected',sha,'real PostgreSQL','evidence/test-results/server',run,job),
+          ('C','Anti-farming/caps/duplicates','Part2GameSystemsTest anti-farming cases + Part2PostgresIntegrationTest',sha,'JVM+PostgreSQL','evidence/test-results/core;evidence/test-results/server',run,job),
+          ('D','Level curve/simulation','level curve boundary + progression simulation tests',sha,'JVM','evidence/test-results/core;evidence/progression-policy.txt',run,job),
+          ('E','Coin ledger/reconcile/refund','Part2CompletionIntegrationTest ledger/refund/reconciliation',sha,'real PostgreSQL','evidence/test-results/server',run,job),
+          ('F','Concurrent purchase/no overspend','Part2ManagerAcceptanceIntegrationTest.concurrentPurchaseRaceAllowsNoOverspendAndReconciles',sha,'real PostgreSQL concurrent workers','evidence/manager-e2e.xml',run,job),
+          ('G','Achievements/durability','Part2CompletionIntegrationTest derived achievements',sha,'real PostgreSQL','evidence/test-results/server',run,job),
+          ('H','Avatar ownership/equip/restart/relogin','Part2ManagerAcceptanceIntegrationTest.avatarOwnershipEquipSurvivesServerRestartAndRelogin',sha,'real PostgreSQL DB restart+login','evidence/manager-e2e.xml',run,job),
+          ('I','Personal Map eligibility','personalMapRequiresLevelAndMemoryGate + HTTP smoke',sha,'JVM+Ktor/PostgreSQL','evidence/test-results/core;evidence/http-smoke.txt',run,job),
+          ('J','Map generation/fallback','invalidAiMapFallsBackAndAiHasNoEconomicAuthority',sha,'JVM','evidence/test-results/core',run,job),
+          ('K','Sequential Map units','mapUnitProgressOnlyExposesTheNextUnit + structural map test',sha,'JVM','evidence/test-results/core',run,job),
+          ('L','Consistency semantics','consistencyCountsQualifiedLocalDaysNotAppOpens',sha,'JVM','evidence/test-results/core',run,job),
+          ('M','Season rollover/lifetime preservation','Part2ManagerAcceptanceIntegrationTest.seasonRolloverPreservesLifetimeProgressionCoinsInventoryAndClosesSeasonProgress',sha,'real PostgreSQL','evidence/manager-e2e.xml',run,job),
+          ('N','Gaming stats/events/notifications','Part2CompletionIntegrationTest statistics/events/notifications',sha,'real PostgreSQL','evidence/test-results/server',run,job),
+          ('O','Offline/cache stale revision','Part2GameInstrumentedTest.gameCacheSurvivesDatabaseReopenAndRejectsStaleRevision',base,'Android16/API36','evidence/preserved-android/connected-15-tests.txt',brun,bjob),
+          ('P','Process death','Part2GameProcessDeathInstrumentedTest seed+fresh-process verify',base,'Android16/API36','evidence/preserved-android/part2-process-seed.txt;evidence/preserved-android/part2-process-verify.txt',brun,bjob),
+          ('Q','Multi-device concurrency consistency','Part2ManagerAcceptanceIntegrationTest.multiDeviceConcurrentAvatarEquipHasSingleWinnerAndConverges',sha,'real PostgreSQL concurrent clients','evidence/manager-e2e.xml',run,job),
+          ('R','Part2 account export/delete','Part2ManagerAcceptanceIntegrationTest.part2AccountExportIncludesOwnedGameStateAndDeleteRevokesRelogin + HTTP smoke',sha,'real PostgreSQL+Ktor auth','evidence/manager-e2e.xml;evidence/http-smoke.txt',run,job),
+          ('S','Full integration/runtime/package closure','current core/server+HTTP + preserved unchanged Android 15-test runtime',sha,'GitHub CI+preserved API36','evidence/backend-tests.txt;evidence/preserved-android-gate.txt',run,job),
+          ]
+          with open('evidence/E2E_EXECUTION_STATUS.tsv','w') as f:
+              f.write('ID\tbehavior\texact_test_or_gate\tsource_sha\tenvironment\tresult\tevidence\trun\tjob\n')
+              for r in rows: f.write('\t'.join((*r[:5],'PASS',*r[5:]))+'\n')
+          assert len(rows)==19 and [r[0] for r in rows]==list('ABCDEFGHIJKLMNOPQRS')
+          print('PART2_E2E_A_TO_S=PASS')
+          PY
+          grep -q PART2_MANAGER_E2E=PASS evidence/manager-e2e-gate.txt
           test "$(grep -c $'\tPASS\t' evidence/E2E_EXECUTION_STATUS.tsv)" -eq 19
           echo PART2_E2E_A_TO_S=PASS | tee evidence/e2e-gate.txt
 
-      - name: Resolve current numeric job id
+      - name: Resolve numeric job id
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          curl -fsSL \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
+          curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" > evidence/current-run-jobs.json
-          FINAL_JOB_ID=$(python3 - <<'PY'
+          python3 - <<'PY' > evidence/final-job-id.txt
           import json
           d=json.load(open('evidence/current-run-jobs.json'))
           jobs=[j for j in d.get('jobs',[]) if j.get('name')=='final']
-          if len(jobs)!=1: raise SystemExit(f'expected one final job, got {len(jobs)}')
+          assert len(jobs)==1, len(jobs)
           print(jobs[0]['id'])
           PY
-          )
-          echo "$FINAL_JOB_ID" | tee evidence/final-job-id.txt
+          test -s evidence/final-job-id.txt
 
-      - name: Package exact source, preserved runtime APKs, current docs and evidence
+      - name: Package exact source, preserved APKs, current docs and evidence
         shell: bash
         run: |
           set -euo pipefail
@@ -262,9 +262,9 @@ jobs:
           grep -q PART2_MANAGER_HANDOFF_CHECK=PASS package/evidence/final-package-truth-audit.txt
           mkdir -p source-check
           unzip -q package/Veltrix-Hom-VNext-Part2-EXACT-TESTED-SOURCE.zip -d source-check
-          python3 source-check/scripts/generate_openapi_contract.py | tee package/evidence/source-archive-openapi-generate.txt
+          python3 source-check/scripts/generate_openapi_contract.py > package/evidence/source-archive-openapi-generate.txt
           cp source-check/contracts/openapi.yaml source-check/docs/API_Contract.openapi.yaml
-          python3 source-check/scripts/verify_part2_manager_handoff.py | tee package/evidence/source-archive-truth-audit.txt
+          python3 source-check/scripts/verify_part2_manager_handoff.py > package/evidence/source-archive-truth-audit.txt
           grep -q PART2_MANAGER_HANDOFF_CHECK=PASS package/evidence/source-archive-truth-audit.txt
           find package -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > package/SHA256SUMS.txt
           (cd package && sha256sum -c SHA256SUMS.txt) | tee evidence/package-sha-recompute.txt
