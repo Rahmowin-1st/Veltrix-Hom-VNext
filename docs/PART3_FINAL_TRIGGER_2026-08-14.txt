@@ -1,2 +1,2 @@
-Exact final verification trigger after PostgreSQL nullable retest-duration and mistake search-order fixes.
+Exact final verification trigger after PostgreSQL nullable retest-duration, mistake search-order, and Store canonical-schema search fixes.
 The parent source contains the narrow product fixes; this commit intentionally changes no runtime behavior.
