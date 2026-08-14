@@ -62,6 +62,8 @@ jobs:
         run: gradle --no-daemon --stacktrace :core:test :server:test
       - name: Frozen Part 1 deterministic regression
         run: bash scripts/run_local_regressions.sh
+      - name: Generate authoritative OpenAPI for structure audit
+        run: python3 scripts/generate_openapi_contract.py
       - name: Structure check
         run: bash scripts/verify_structure.sh
       - name: Part 2 static authority checks
