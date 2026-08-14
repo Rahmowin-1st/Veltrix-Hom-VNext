@@ -6,7 +6,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import com.veltrix.hom.vnext.core.CapabilityRoute
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -33,11 +33,13 @@ class ShellInstrumentedTest {
         waitForActiveRoute("CHAT")
         compose.onNodeWithTag("capability-CHAT").assertIsDisplayed()
 
-        CapabilityRoute.entries.drop(1).forEach { route ->
+        CapabilityRoute.entries.drop(1).forEachIndexed { offset, route ->
+            val index = offset + 1
             val tag = "capability-${route.name}"
-            compose.onNodeWithTag(tag).performScrollTo()
+            // Drive the LazyColumn through its own scroll semantics. Child performScrollTo()
+            // can decide an item is visible enough while its clickable bounds remain clipped.
+            compose.onNodeWithTag("capability-list").performScrollToIndex(index)
             compose.waitForIdle()
-            // Re-query after scrolling/recomposition so the click never uses a stale semantics node.
             compose.onNodeWithTag(tag).assertIsDisplayed().performClick()
             waitForActiveRoute(route.name)
         }
