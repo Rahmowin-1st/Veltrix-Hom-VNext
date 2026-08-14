@@ -133,7 +133,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$ANDROID_AVD_HOME"
           echo no | avdmanager create avd -n veltrix_part2_api36 -k "$IMAGE_PACKAGE" -d pixel_6 --force >/dev/null
-          nohup "$ANDROID_HOME/emulator/emulator" -avd veltrix_part2_api36 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > evidence/emulator.log 2>&1 &
+          nohup "$ANDROID_HOME/emulator/emulator" -avd veltrix_part2_api36 -no-window -no-audio -no-boot-anim -no-snapshot -gpu software > evidence/emulator.log 2>&1 &
           timeout 300s adb wait-for-device
           booted=0
           for i in $(seq 1 120); do
