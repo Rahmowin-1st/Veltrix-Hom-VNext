@@ -43,7 +43,7 @@ class Part3RemoteDataSource(private val api:VeltrixApiClient=VeltrixApiClient())
     fun personal(session:ApiSession)=get(session,"/v1/personal")
     fun workspace(session:ApiSession,projectId:String)=get(session,"/v1/projects/$projectId/workspace")
     fun contextCarry(session:ApiSession):JSONObject? {
-        val(code,text)=api.request("GET","/v1/context-carry",session.token,null)
+        val(code,text)=api.request("GET","/v1/context-carry",session.accessToken,null)
         if(code==204)return null
         require(code==200){"context carry HTTP $code $text"}
         return JSONObject(text)
@@ -52,24 +52,24 @@ class Part3RemoteDataSource(private val api:VeltrixApiClient=VeltrixApiClient())
         val body=JSONObject().put("projectId",value.projectId).put("sourceIds",JSONArray(value.sourceIds)).put("conversationId",value.conversationId)
             .put("assessmentId",value.assessmentId).put("topic",value.topic).put("learningMode",value.learningMode).put("origin",value.origin)
             .put("returnDestination",value.returnDestination).put("expectedRevision",value.contextRevision.takeIf{it>0}).toString()
-        val(code,text)=api.request("PUT","/v1/context-carry",session.token,body)
+        val(code,text)=api.request("PUT","/v1/context-carry",session.accessToken,body)
         require(code==200){"context carry PUT HTTP $code $text"};return JSONObject(text)
     }
     fun resolveCommand(session:ApiSession,text:String,projectId:String?=null,sourceId:String?=null):JSONObject {
         val body=JSONObject().put("text",text).put("projectId",projectId).put("sourceId",sourceId).toString()
-        val(code,response)=api.request("POST","/v1/commands/resolve",session.token,body)
+        val(code,response)=api.request("POST","/v1/commands/resolve",session.accessToken,body)
         require(code==200){"command HTTP $code $response"};return JSONObject(response)
     }
     fun search(session:ApiSession,query:String,projectId:String?=null,limit:Int=50):JSONArray {
         val body=JSONObject().put("query",query).put("projectId",projectId).put("limit",limit.coerceIn(1,100)).toString()
-        val(code,response)=api.request("POST","/v1/search",session.token,body)
+        val(code,response)=api.request("POST","/v1/search",session.accessToken,body)
         require(code==200){"search HTTP $code $response"};return JSONArray(response)
     }
     fun frontendEvents(session:ApiSession,limit:Int=100):JSONArray {
-        val(code,text)=api.request("GET","/v1/frontend-events?limit=${limit.coerceIn(1,200)}",session.token,null)
+        val(code,text)=api.request("GET","/v1/frontend-events?limit=${limit.coerceIn(1,200)}",session.accessToken,null)
         require(code==200){"frontend events HTTP $code $text"};return JSONArray(text)
     }
-    private fun get(session:ApiSession,path:String):JSONObject { val(code,text)=api.request("GET",path,session.token,null);require(code==200){"$path HTTP $code $text"};return JSONObject(text) }
+    private fun get(session:ApiSession,path:String):JSONObject { val(code,text)=api.request("GET",path,session.accessToken,null);require(code==200){"$path HTTP $code $text"};return JSONObject(text) }
 }
 
 class Part3AndroidRepository(
