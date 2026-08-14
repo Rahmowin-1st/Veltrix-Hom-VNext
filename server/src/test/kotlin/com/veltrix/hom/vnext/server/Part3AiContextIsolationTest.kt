@@ -85,8 +85,8 @@ class Part3AiContextIsolationTest {
             assertEquals("GLOBAL", global.diagnostics.scope)
             assertEquals(null, global.diagnostics.projectId)
             assertEquals(setOf(globalSignal.id), global.diagnostics.studentSignals.map { it.id }.toSet())
-            assertFalse(global.request.systemPrompt.contains("kinematics"))
-            assertFalse(global.request.systemPrompt.contains("vocabulary"))
+            assertFalse(global.request.systemPrompt.orEmpty().contains("kinematics"))
+            assertFalse(global.request.systemPrompt.orEmpty().contains("vocabulary"))
 
             val project = router.prepare(
                 account.accountId,
@@ -101,8 +101,8 @@ class Part3AiContextIsolationTest {
             assertTrue(project.diagnostics.studentSignals.any { it.id == globalSignal.id })
             assertTrue(project.diagnostics.studentSignals.any { it.id == physicsSignal.id })
             assertFalse(project.diagnostics.studentSignals.any { it.id == cefrSignal.id })
-            assertTrue(project.request.systemPrompt.contains("kinematics"))
-            assertFalse(project.request.systemPrompt.contains("vocabulary"))
+            assertTrue(project.request.systemPrompt.orEmpty().contains("kinematics"))
+            assertFalse(project.request.systemPrompt.orEmpty().contains("vocabulary"))
             assertTrue(project.diagnostics.studentSignals.all { it.evidenceObjectIds.isNotEmpty() })
             assertTrue(project.diagnostics.selectionCaps["studentSignals"] == 6)
 
