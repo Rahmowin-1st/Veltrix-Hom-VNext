@@ -1,0 +1,134 @@
+openapi: 3.1.0
+info:
+  title: Veltrix Hom vNext Part 2 Backend Contract
+  version: 0.2.0-part2
+  description: Semantic backend contract for Part 3. The existing Part 1 OpenAPI remains authoritative for unchanged Part 1 routes.
+servers:
+  - url: /v1
+security:
+  - bearerAuth: []
+paths:
+  /game/profile:
+    get:
+      operationId: getGameProfile
+      responses:
+        '200': {description: Authoritative game profile snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/GameProfile'}}}}
+  /game/xp:
+    get:
+      operationId: getXpLedger
+      responses: {'200': {description: XP ledger}}
+  /game/coins:
+    get:
+      operationId: getCoinLedger
+      responses: {'200': {description: Coin ledger}}
+  /game/coins/reconciliation:
+    get:
+      operationId: reconcileCoins
+      responses: {'200': {description: Projection/ledger reconciliation}}
+  /game/stats:
+    get:
+      operationId: getGamingStatistics
+      responses: {'200': {description: Server-derived lifetime statistics}}
+  /game/events:
+    get:
+      operationId: getGameStateEvents
+      responses: {'200': {description: Observable game state transitions}}
+  /achievements:
+    get:
+      operationId: getAchievements
+      responses: {'200': {description: Deterministic achievement progress}}
+  /inventory:
+    get:
+      operationId: getInventory
+      responses: {'200': {description: Durable account inventory}}
+  /avatars:
+    get:
+      operationId: getAvatars
+      responses: {'200': {description: Avatar catalog and ownership}}
+  /avatars/equip:
+    post:
+      operationId: equipAvatar
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/EquipAvatarRequest'}}}}
+      responses: {'200': {description: Equipped avatar state}, '409': {description: Revision conflict}, '403': {description: Avatar not owned}}
+  /store:
+    get:
+      operationId: getStore
+      responses: {'200': {description: Server-authoritative Coin catalog and balance}}
+  /store/purchase:
+    post:
+      operationId: purchaseStoreItem
+      description: Atomic Coin spend + purchase + ownership. Retry with the same idempotency key returns the same logical result.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PurchaseRequest'}}}}
+      responses: {'201': {description: Committed or idempotently replayed purchase}, '409': {description: Insufficient Coins/already owned/idempotency conflict}}
+  /personal/map:
+    get:
+      operationId: getPersonalMap
+      responses: {'200': {description: Map eligibility/state and semantic units}}
+  /personal/map/unlock:
+    post:
+      operationId: unlockPersonalMap
+      description: Server checks Level >=5 AND Memory Maturity SUFFICIENT/STRONG. Client provides no gate truth.
+      responses: {'200': {description: Current/new Map state}}
+  /personal/map/units/{unitId}/start:
+    post:
+      operationId: startMapUnit
+      parameters:
+        - {in: path, name: unitId, required: true, schema: {type: string}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExpectedRevision'}}}}
+      responses: {'200': {description: Unit transitioned to IN_PROGRESS}}
+  /seasons/current:
+    get:
+      operationId: getCurrentSeason
+      responses: {'200': {description: Active season and account seasonal progress}}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer}
+  schemas:
+    GameProfile:
+      type: object
+      required: [accountId,level,lifetimeXp,currentLevelXp,nextLevelXp,xpProgress,levelCurveVersion,rewardPolicyVersion,coinBalance,currentConsistency,longestConsistency,mapEligibility,mapState,gamingStatsSummary,revision]
+      properties:
+        accountId: {type: string, format: uuid}
+        level: {type: integer, minimum: 1, maximum: 50}
+        lifetimeXp: {type: integer, minimum: 0}
+        currentLevelXp: {type: integer, minimum: 0}
+        nextLevelXp: {type: integer, minimum: 0}
+        xpProgress: {type: number, minimum: 0, maximum: 1}
+        levelCurveVersion: {type: string}
+        rewardPolicyVersion: {type: string}
+        coinBalance: {type: integer, minimum: 0}
+        currentConsistency: {type: integer, minimum: 0}
+        longestConsistency: {type: integer, minimum: 0}
+        mapEligibility: {$ref: '#/components/schemas/MapEligibility'}
+        mapState: {type: string}
+        revision: {type: integer, minimum: 1}
+    MapEligibility:
+      type: object
+      required: [eligible,levelRequirement,memoryRequirement,levelSatisfied,memorySatisfied,unlockState]
+      properties:
+        eligible: {type: boolean}
+        levelRequirement: {const: 5}
+        memoryRequirement: {const: SUFFICIENT_OR_STRONG}
+        levelSatisfied: {type: boolean}
+        memorySatisfied: {type: boolean}
+        unlockState: {type: string}
+    PurchaseRequest:
+      type: object
+      additionalProperties: false
+      required: [itemId,idempotencyKey]
+      properties:
+        itemId: {type: string}
+        idempotencyKey: {type: string, minLength: 8, maxLength: 180}
+    EquipAvatarRequest:
+      type: object
+      additionalProperties: false
+      required: [avatarId,expectedRevision]
+      properties:
+        avatarId: {type: string}
+        expectedRevision: {type: integer, minimum: 1}
+    ExpectedRevision:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision]
+      properties:
+        expectedRevision: {type: integer, minimum: 1}
