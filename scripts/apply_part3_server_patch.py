@@ -70,6 +70,14 @@ if "private fun effectiveLevel" not in text:
     if anchor not in text:
         raise SystemExit("Part2 effective-level insertion anchor missing")
     text = text.replace(anchor, '    private fun effectiveLevel(c:Connection,a:String):Int=c.prepareStatement("SELECT effective_level FROM progression_profile WHERE account_id=?::uuid").use{ps->ps.setString(1,a);ps.executeQuery().use{rs->rs.next();rs.getInt(1)}}\n' + anchor, 1)
+
+# Stored projection may lag XP mutation paths; derive the authoritative gated level from level + qualified days at read time.
+old_effective = '    private fun effectiveLevel(c:Connection,a:String):Int=c.prepareStatement("SELECT effective_level FROM progression_profile WHERE account_id=?::uuid").use{ps->ps.setString(1,a);ps.executeQuery().use{rs->rs.next();rs.getInt(1)}}'
+new_effective = '    private fun effectiveLevel(c:Connection,a:String):Int=c.prepareStatement("SELECT LEAST(level,part3_max_level_for_days(qualified_active_days)) FROM progression_profile WHERE account_id=?::uuid").use{ps->ps.setString(1,a);ps.executeQuery().use{rs->rs.next();rs.getInt(1)}}'
+if old_effective in text:
+    text = text.replace(old_effective, new_effective, 1)
+elif new_effective not in text:
+    raise SystemExit("Part2 effective-level helper anchor missing")
 part2.write_text(text, encoding="utf-8")
 
 print("PART3_SERVER_PATCH=PASS")
