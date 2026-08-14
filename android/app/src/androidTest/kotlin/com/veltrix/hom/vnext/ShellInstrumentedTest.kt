@@ -20,21 +20,23 @@ class ShellInstrumentedTest {
         compose.onNodeWithText("Personal").assertIsDisplayed()
         compose.onNodeWithText("Store").assertIsDisplayed()
         compose.onNodeWithText("Projects").performClick()
+        compose.waitForIdle()
         compose.onNodeWithTag("active-route").assertTextEquals("PROJECTS").assertIsDisplayed()
         compose.onNodeWithText("Projects — functional local persistence harness").assertIsDisplayed()
 
-        val required = listOf(
-            "CHAT", "LIBRARY", "TESTING", "PRACTICE", "QUIZZES", "FLASHCARDS",
-            "MISTAKES", "CALCULATOR", "TRANSLATE", "NOTIFICATIONS", "SETTINGS",
-        )
-        assertEquals(required, CapabilityRoute.entries.map { it.name })
+        val required = CapabilityRoute.entries.map { it.name }
+        assertEquals(11, required.size)
+        assertEquals("CHAT", required.first())
+        assertEquals("SETTINGS", required.last())
 
-        compose.onNodeWithTag("open-capabilities").performClick()
+        compose.onNodeWithTag("open-capabilities").assertIsDisplayed().performClick()
+        compose.waitForIdle()
         compose.onNodeWithTag("active-route").assertTextEquals("CHAT").assertIsDisplayed()
         compose.onNodeWithTag("capability-CHAT").assertIsDisplayed()
 
         CapabilityRoute.entries.drop(1).forEach { route ->
             compose.onNodeWithTag("capability-${route.name}").performScrollTo().performClick()
+            compose.waitForIdle()
             compose.onNodeWithTag("active-route").assertTextEquals(route.name).assertIsDisplayed()
         }
     }

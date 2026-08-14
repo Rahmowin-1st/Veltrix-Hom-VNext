@@ -7,7 +7,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -64,14 +63,12 @@ private fun DeveloperShell(vm: AppViewModel = viewModel()) {
         }
     }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Veltrix Hom vNext — Part 1 developer harness", style = MaterialTheme.typography.titleMedium)
-                Button(
-                    onClick = { activeRouteName = CapabilityRoute.CHAT.name },
-                    modifier = Modifier.testTag("open-capabilities"),
-                ) { Text("Capabilities") }
-            }
-            Text(activeRouteName, modifier = Modifier.testTag("active-route"), style = MaterialTheme.typography.labelMedium)
+            Text("Veltrix Hom vNext — Part 1 developer harness", style = MaterialTheme.typography.titleMedium)
+            Button(
+                onClick = { activeRouteName = CapabilityRoute.CHAT.name },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag("open-capabilities"),
+            ) { Text("Capabilities") }
+            Text(activeRouteName, modifier = Modifier.testTag("active-route").padding(top = 6.dp), style = MaterialTheme.typography.labelMedium)
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (capability != null) {
