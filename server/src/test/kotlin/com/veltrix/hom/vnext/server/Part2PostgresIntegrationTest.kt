@@ -1,6 +1,7 @@
 package com.veltrix.hom.vnext.server
 
 import kotlin.test.*
+import java.sql.SQLException
 import java.util.UUID
 
 class Part2PostgresIntegrationTest {
@@ -17,6 +18,15 @@ class Part2PostgresIntegrationTest {
         )
     }
 
+    private fun createProjectWithSqlDiagnostics(projects: ProjectRepository, accountId: String, title: String, purpose: String): ProjectResponse =
+        try {
+            projects.create(accountId, CreateProjectRequest(title, purpose))
+        } catch (e: SQLException) {
+            val chain = generateSequence(e as SQLException?) { it.nextException }
+                .joinToString(" | ") { "sqlState=${it.sqlState}; errorCode=${it.errorCode}; message=${it.message}" }
+            fail("PROJECT_PRODUCER_SQL_FAILURE: $chain", e)
+        }
+
     @Test fun meaningfulEventRewardsExactlyOnceAndSemanticDuplicateIsRejected() {
         val cfg = config() ?: return
         Database(cfg).use { db ->
@@ -32,21 +42,18 @@ class Part2PostgresIntegrationTest {
             assertEquals(0, before.lifetimeXp)
             assertEquals(0, before.coinBalance)
 
-            val project = projects.create(account.accountId, CreateProjectRequest("Meaningful project", "A durable learning purpose"))
+            val project = createProjectWithSqlDiagnostics(projects, account.accountId, "Meaningful project", "A durable learning purpose")
             assertTrue(game.processPending(50) >= 1)
             val afterFirst = game.profile(account.accountId)
             assertTrue(afterFirst.lifetimeXp > 0)
             assertTrue(afterFirst.coinBalance > 0)
             assertTrue(afterFirst.gamingStatsSummary.meaningfulActivities >= 1)
 
-            // Queue processing is replay-safe after the original event is DONE.
             game.processPending(50)
             val afterReplay = game.profile(account.accountId)
             assertEquals(afterFirst.lifetimeXp, afterReplay.lifetimeXp)
             assertEquals(afterFirst.coinBalance, afterReplay.coinBalance)
 
-            // A new event with a different delivery idempotency key but the same semantic object
-            // must not create a second reward grant.
             db.tx { c ->
                 c.prepareStatement("""
                     INSERT INTO activity_event(account_id,event_type,project_id,object_id,metadata,idempotency_key,meaningful,evidence)
@@ -77,7 +84,6 @@ class Part2PostgresIntegrationTest {
             }
             assertEquals(1, duplicateRejected)
 
-            // Non-meaningful navigation noise is never enqueued for progression.
             db.tx { c ->
                 c.prepareStatement("""
                     INSERT INTO activity_event(account_id,event_type,object_id,metadata,idempotency_key,meaningful,evidence)
@@ -107,7 +113,7 @@ class Part2PostgresIntegrationTest {
             val a = auth.register(RegisterRequest("part2-a-$suffix@example.test", "testing-password-12345", "A"))
             val b = auth.register(RegisterRequest("part2-b-$suffix@example.test", "testing-password-12345", "B"))
 
-            projects.create(a.accountId, CreateProjectRequest("A project", "Only account A should earn this"))
+            createProjectWithSqlDiagnostics(projects, a.accountId, "A project", "Only account A should earn this")
             game.processPending(50)
             val aProfile = game.profile(a.accountId)
             val bProfile = game.profile(b.accountId)
