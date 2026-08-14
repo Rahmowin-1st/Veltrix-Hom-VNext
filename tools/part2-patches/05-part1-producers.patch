@@ -25,7 +25,7 @@
      }
  
      private fun setInstruction(c:Connection,accountId:String,projectId:String,body:String){
-@@ -285,5 +290,7 @@
+@@ -285,6 +290,8 @@
              c.prepareStatement("INSERT INTO source_chunk(id,account_id,source_id,source_version,offset_start,offset_end,chunk_text,text_hash) VALUES (?::uuid,?::uuid,?::uuid,1,?,?,?,?)").use{ps->
                  for(ch in chunks){ps.setString(1,ch.id);ps.setString(2,accountId);ps.setString(3,sourceId);ps.setInt(4,ch.offsetStart);ps.setInt(5,ch.offsetEnd);ps.setString(6,ch.text);ps.setString(7,ch.textHash);ps.addBatch()};ps.executeBatch()
              }
@@ -35,7 +35,6 @@
 +            updated
          }
      }
- 
 @@ -297,6 +304,8 @@
              c.prepareStatement("INSERT INTO source_version(source_id,account_id,version,content_hash,extraction_metadata) VALUES (?::uuid,?::uuid,1,?,?::jsonb) ON CONFLICT (source_id,version) DO UPDATE SET content_hash=excluded.content_hash,extraction_metadata=excluded.extraction_metadata").use{ps->ps.setString(1,sourceId);ps.setString(2,accountId);ps.setString(3,owned.contentHash);ps.setString(4,"{\"processor\":\"server-extraction\"}");ps.executeUpdate()}
              c.prepareStatement("DELETE FROM source_chunk WHERE source_id=?::uuid AND source_version=1").use{ps->ps.setString(1,sourceId);ps.executeUpdate()}
