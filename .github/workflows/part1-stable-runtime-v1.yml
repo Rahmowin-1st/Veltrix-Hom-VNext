@@ -1,4 +1,4 @@
-# retrigger after synchronized capability route instrumentation fix
+# retrigger after parent LazyColumn index scroll fix
 name: Veltrix Part 1 Stable Runtime V1
 
 on:
