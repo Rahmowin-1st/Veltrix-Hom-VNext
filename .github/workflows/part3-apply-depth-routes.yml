@@ -1,0 +1,39 @@
+name: Veltrix Backend Part 3 Apply Depth Routes
+
+on:
+  push:
+    branches: [veltrix-hom-backend-part3-final]
+    paths:
+      - scripts/apply_part3_depth_routes.py
+      - .github/workflows/part3-apply-depth-routes.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: veltrix-part3-apply-depth-routes
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-backend-part3-final
+          fetch-depth: 0
+      - name: Apply final depth route patch
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 scripts/apply_part3_depth_routes.py
+          git diff --check
+          git diff --exit-code --quiet && { echo PART3_DEPTH_PATCH_ALREADY_APPLIED=PASS; exit 0; }
+          git config user.name "veltrix-backend-master"
+          git config user.email "actions@users.noreply.github.com"
+          git add server/src/main/kotlin/com/veltrix/hom/vnext/server/Main.kt \
+                  server/src/main/kotlin/com/veltrix/hom/vnext/server/SettingsAccountRepositories.kt
+          git commit -m "feat(part3): wire final learning goals assessment and export routes"
+          git push origin HEAD:veltrix-hom-backend-part3-final
+          echo PART3_DEPTH_ROUTE_PUSH=PASS
