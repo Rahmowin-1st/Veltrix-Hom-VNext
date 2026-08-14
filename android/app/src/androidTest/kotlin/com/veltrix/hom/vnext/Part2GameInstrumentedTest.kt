@@ -11,27 +11,29 @@ import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
 class Part2GameInstrumentedTest {
-    @Test fun gameCacheSurvivesDatabaseReopenAndRejectsStaleRevision() = runBlocking {
-        val context=ApplicationProvider.getApplicationContext<Context>()
-        val name="part2-game-test-${UUID.randomUUID()}.db"
-        context.deleteDatabase(name)
-        var db=Part2GameCacheDatabase.open(context,name)
-        var store=Part2GameLocalStore(db)
-        val account="cache-account"
-        store.save(account,"PROFILE","{\"revision\":4,\"level\":5}",4)
-        db.close()
+    @Test fun gameCacheSurvivesDatabaseReopenAndRejectsStaleRevision() {
+        runBlocking {
+            val context=ApplicationProvider.getApplicationContext<Context>()
+            val name="part2-game-test-${UUID.randomUUID()}.db"
+            context.deleteDatabase(name)
+            var db=Part2GameCacheDatabase.open(context,name)
+            var store=Part2GameLocalStore(db)
+            val account="cache-account"
+            store.save(account,"PROFILE","{\"revision\":4,\"level\":5}",4)
+            db.close()
 
-        db=Part2GameCacheDatabase.open(context,name)
-        store=Part2GameLocalStore(db)
-        val restored=store.load(account,"PROFILE")
-        assertNotNull(restored)
-        assertEquals(4,restored!!.serverRevision)
-        store.save(account,"PROFILE","{\"revision\":3,\"level\":4}",3)
-        val afterStale=store.load(account,"PROFILE")
-        assertEquals(4,afterStale!!.serverRevision)
-        assertTrue(afterStale.payload.contains("\"level\":5"))
-        db.close()
-        context.deleteDatabase(name)
+            db=Part2GameCacheDatabase.open(context,name)
+            store=Part2GameLocalStore(db)
+            val restored=store.load(account,"PROFILE")
+            assertNotNull(restored)
+            assertEquals(4,restored!!.serverRevision)
+            store.save(account,"PROFILE","{\"revision\":3,\"level\":4}",3)
+            val afterStale=store.load(account,"PROFILE")
+            assertEquals(4,afterStale!!.serverRevision)
+            assertTrue(afterStale.payload.contains("\"level\":5"))
+            db.close()
+            context.deleteDatabase(name)
+        }
     }
 
     @Test fun androidClientReachesRealPart2ServerAndStoreIsNotPlaceholder() = runBlocking {
