@@ -1,4 +1,4 @@
-# retry v2 after patch hunk repair
+# retry v3 after producer and aggregator hunk repairs
 name: Part 2 One-Time Integration Apply
 
 on:
