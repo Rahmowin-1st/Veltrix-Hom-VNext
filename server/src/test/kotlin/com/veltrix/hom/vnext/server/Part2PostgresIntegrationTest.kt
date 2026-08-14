@@ -57,7 +57,7 @@ class Part2PostgresIntegrationTest {
             db.tx { c ->
                 c.prepareStatement("""
                     INSERT INTO activity_event(account_id,event_type,project_id,object_id,metadata,idempotency_key,meaningful,evidence)
-                    VALUES (?::uuid,'PROJECT_CREATED',?::uuid,?,'{}'::jsonb,?,true,'{\"semanticEvidence\":true}'::jsonb)
+                    VALUES (?::uuid,'PROJECT_CREATED',?::uuid,?,'{}'::jsonb,?,true,'{"semanticEvidence":true}'::jsonb)
                 """.trimIndent()).use { ps ->
                     ps.setString(1, account.accountId)
                     ps.setString(2, project.id)
