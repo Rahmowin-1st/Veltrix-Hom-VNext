@@ -9,7 +9,7 @@ class PostgresIntegrationTest {
         val url=System.getenv("VELTRIX_TEST_DATABASE_URL") ?: return
         val cfg=ServerConfig("test",url,System.getenv("VELTRIX_TEST_DATABASE_USER")?:"postgres",System.getenv("VELTRIX_TEST_DATABASE_PASSWORD")?:"postgres",8080,"disabled",null)
         Database(cfg).use { db ->
-            val auth=AuthRepository(db);val projects=ProjectRepository(db);val memory=MemoryRepository(db);val sources=SourceRepository(db)
+            val auth=AuthRepository(db);val projects=ProjectRepository(db);val memory=MemoryRepository(db);val sources=SourceRepository(db);val assessments=AssessmentRepository(db)
             val suffix=UUID.randomUUID().toString().take(8)
             val a=auth.register(RegisterRequest("a-$suffix@example.test","testing-password-12345","A"))
             val b=auth.register(RegisterRequest("b-$suffix@example.test","testing-password-12345","B"))
@@ -26,6 +26,23 @@ class PostgresIntegrationTest {
             assertTrue(hits.isNotEmpty());assertEquals(src.id,hits.first().sourceId);assertTrue(hits.first().textHash.isNotBlank())
             sources.linkProject(a.accountId,src.id,p.id);sources.unlinkProject(a.accountId,src.id,p.id)
             assertEquals(src.id,sources.search(a.accountId,SourceSearchRequest("colour",listOf(src.id),8)).first().sourceId)
+
+            // Regression: all assessment_question JSON payloads, including options,
+            // must bind successfully against real PostgreSQL jsonb columns.
+            val quiz=assessments.create(a.accountId,CreateAssessmentRequest(
+                kind="QUIZ",
+                title="JSONB options regression",
+                projectId=p.id,
+                questions=listOf(QuestionRequest(
+                    prompt="Choose the British spelling",
+                    type="SINGLE_CHOICE",
+                    options=listOf("colour","color"),
+                    expectedAnswers=listOf("colour")
+                ))
+            ))
+            assertEquals(1,quiz.questionCount)
+            val detail=assessments.get(a.accountId,quiz.id)
+            assertEquals(listOf("colour","color"),detail.questions.single().options)
         }
     }
 }
