@@ -166,4 +166,4 @@ class Part3AndroidRepository(
 }
 
 private fun JSONObject.optNullableString(key:String):String?=if(!has(key)||isNull(key))null else optString(key).takeIf{it.isNotBlank()}
-private fun JSONArray.stringList():List<String>=List(length()){i->getString(i)}
+private fun JSONArray.stringList():List<String> = List(length()) { i -> getString(i) }
