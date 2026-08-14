@@ -1,4 +1,4 @@
-# retrigger after assessment jsonb fix and postgres regression
+# retrigger after corrected assessment jsonb placeholder count
 name: Veltrix Part 1 Stable Runtime V1
 
 on:
