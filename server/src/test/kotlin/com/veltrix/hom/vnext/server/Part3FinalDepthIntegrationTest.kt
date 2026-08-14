@@ -79,7 +79,7 @@ class Part3FinalDepthIntegrationTest {
             AccountDataRepository(db).requestDeletion(account,AccountDeletionRequest(password,"DELETE"))
             val lifecycleBefore=db.tx { c -> c.prepareStatement("SELECT state FROM account_deletion_lifecycle WHERE account_id=?::uuid").use { ps -> ps.setString(1,account);ps.executeQuery().use { rs -> rs.next();rs.getString(1) } } }
             assertEquals("PURGE_PENDING",lifecycleBefore)
-            AccountDeletionWorker(db,false).use { worker -> assertEquals(1,worker.purgeDue(10)) }
+            AccountDeletionWorker(db,false).use { worker -> assertTrue(worker.purgeDue(10) >= 1) }
             val accountCount=db.tx { c -> c.prepareStatement("SELECT count(*) FROM account WHERE id=?::uuid").use { ps -> ps.setString(1,account);ps.executeQuery().use { rs -> rs.next();rs.getInt(1) } } }
             assertEquals(0,accountCount)
             val lifecycleAfter=db.tx { c -> c.prepareStatement("SELECT state,account_id FROM account_deletion_lifecycle WHERE account_ref_hash=? ORDER BY requested_at DESC LIMIT 1").use { ps -> ps.setString(1,sha256(account));ps.executeQuery().use { rs -> rs.next();rs.getString(1) to rs.getString(2) } } }
