@@ -221,8 +221,14 @@ object LongTermLevelGate {
 
     fun maxLevelForQualifiedDays(days: Int): Int {
         require(days >= 0)
-        if (days >= MIN_QUALIFIED_DAYS_LEVEL_50) return 50
-        return (1 + floor(days.toDouble() * 49.0 / MIN_QUALIFIED_DAYS_LEVEL_50).toInt()).coerceIn(1, 49)
+        return when {
+            days >= 90 -> 50
+            days >= 75 -> 49
+            days >= 60 -> 48
+            days >= 45 -> 46
+            days >= 30 -> 44
+            else -> 40
+        }
     }
 
     fun effectiveLevel(lifetimeXp: Long, qualifiedActiveDays: Int): Int = min(LevelCurveV1.levelForXp(lifetimeXp), maxLevelForQualifiedDays(qualifiedActiveDays))

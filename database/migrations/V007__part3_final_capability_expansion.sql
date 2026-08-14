@@ -75,7 +75,7 @@ ALTER TABLE progression_profile ADD COLUMN IF NOT EXISTS qualified_active_days i
 ALTER TABLE progression_profile ADD COLUMN IF NOT EXISTS effective_level smallint NOT NULL DEFAULT 1 CHECK(effective_level BETWEEN 1 AND 50);
 ALTER TABLE progression_profile ADD COLUMN IF NOT EXISTS level_gate_version text NOT NULL DEFAULT 'long-term-level-gate-v1';
 CREATE FUNCTION part3_max_level_for_days(p_days int) RETURNS smallint LANGUAGE sql IMMUTABLE AS $$
- SELECT CASE WHEN p_days>=90 THEN 50 ELSE GREATEST(1,LEAST(49,1+floor(GREATEST(p_days,0)::numeric*49/90)::int)) END::smallint $$;
+ SELECT CASE WHEN p_days>=90 THEN 50 WHEN p_days>=75 THEN 49 WHEN p_days>=60 THEN 48 WHEN p_days>=45 THEN 46 WHEN p_days>=30 THEN 44 ELSE 40 END::smallint $$;
 CREATE FUNCTION part3_refresh_effective_level(p_account uuid) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE v_xp int;v_days int;v_eff int;BEGIN
  SELECT level,qualified_active_days INTO v_xp,v_days FROM progression_profile WHERE account_id=p_account FOR UPDATE;

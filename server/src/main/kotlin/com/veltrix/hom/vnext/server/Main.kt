@@ -29,7 +29,7 @@ import java.io.File
 import java.util.UUID
 
 private const val API_VERSION = "v1"
-private const val SERVICE_VERSION = "0.2.0-part2"
+private const val SERVICE_VERSION = "0.3.0-backend-part3"
 
 fun main() {
     val config = ServerConfig.fromEnv()
@@ -67,6 +67,7 @@ fun Application.veltrixModule(config: ServerConfig) {
     val timeline = ActivityTimelineRepository(db)
     val personal = PersonalAggregatorRepository(db,memory,timeline,game)
     val projectInstructions = ProjectInstructionRepository(db)
+    val part3 = Part3FinalRepository(db, projects, chats, memory, projectInstructions)
     val ai = AiExecutionService(config)
     val aiContext = AiContextOrchestrator(projects, chats, memory, projectInstructions, chatIntelligence, sourceProcessing.rag)
     val memoryAutomation = MemoryAutomationService(db, config.workerEnabled)
@@ -105,9 +106,21 @@ fun Application.veltrixModule(config: ServerConfig) {
 
             get("/profile") { val p=call.principal(auth,limiter); call.respond(blocking { profile.get(p.accountId) }) }
             patch("/profile") { val p=call.principal(auth,limiter); call.respond(blocking { profile.update(p.accountId,call.receive()) }) }
-            get("/home") { val p=call.principal(auth,limiter); call.respond(blocking { home.snapshot(p.accountId) }) }
-            get("/personal") { val p=call.principal(auth,limiter); call.respond(blocking{personal.snapshot(p.accountId)}) }
-            get("/activity") { val p=call.principal(auth,limiter); call.respond(blocking{timeline.list(p.accountId,call.request.queryParameters["projectId"],call.intQuery("limit",50,1,200),call.intQuery("offset",0,0,1_000_000))}) }
+            get("/home") { val p=call.principal(auth,limiter); call.respond(blocking { part3.homeSnapshot(p.accountId) }) }
+            get("/personal") { val p=call.principal(auth,limiter); call.respond(blocking { part3.personalSnapshot(p.accountId) }) }
+            get("/activity") { val p=call.principal(auth,limiter); call.respond(blocking { part3.timeline(p.accountId,call.request.queryParameters["projectId"],call.request.queryParameters["type"],call.request.queryParameters["from"],call.request.queryParameters["to"],call.request.queryParameters["q"],call.intQuery("limit",50,1,200),call.intQuery("offset",0,0,1_000_000)) }) }
+            get("/frontend-events") { val p=call.principal(auth,limiter); call.respond(blocking { part3.frontendEvents(p.accountId,call.intQuery("limit",100,1,200),call.intQuery("offset",0,0,1_000_000)) }) }
+            get("/student-model") { val p=call.principal(auth,limiter); call.respond(blocking { part3.studentModel(p.accountId,call.request.queryParameters["projectId"],call.intQuery("limit",200,1,500)) }) }
+            post("/student-model/signals") { val p=call.principal(auth,limiter); call.respond(HttpStatusCode.Created,blocking { part3.createSignal(p.accountId,call.receive()) }) }
+            post("/student-model/signals/{id}/correct") { val p=call.principal(auth,limiter); call.respond(blocking { part3.correctSignal(p.accountId,call.id(),call.receive()) }) }
+            post("/student-model/signals/{id}/state") { val p=call.principal(auth,limiter); call.respond(blocking { part3.setSignalState(p.accountId,call.id(),call.receive()) }) }
+            delete("/student-model/signals/{id}") { val p=call.principal(auth,limiter); val rev=call.request.queryParameters["expectedRevision"]?.toLongOrNull() ?: throw validation("expectedRevision required"); blocking { part3.deleteSignal(p.accountId,call.id(),rev) }; call.respond(ApiAck()) }
+            get("/personalization/recommendations") { val p=call.principal(auth,limiter); call.respond(blocking { part3.recommendations(p.accountId,call.request.queryParameters["projectId"],call.intQuery("limit",5,1,10)) }) }
+            get("/context-carry") { val p=call.principal(auth,limiter); val value=blocking { part3.getContextCarry(p.accountId) }; if(value==null) call.respond(HttpStatusCode.NoContent) else call.respond(value) }
+            put("/context-carry") { val p=call.principal(auth,limiter); call.respond(blocking { part3.putContextCarry(p.accountId,call.receive()) }) }
+            post("/commands/resolve") { val p=call.principal(auth,limiter); call.respond(blocking { part3.resolveCommand(p.accountId,call.receive()) }) }
+            get("/avatars/catalog") { val p=call.principal(auth,limiter); call.respond(blocking { part3.avatarCatalog(p.accountId) }) }
+            get("/seasons/history") { val p=call.principal(auth,limiter); call.respond(blocking { part3.seasonHistory(p.accountId,call.intQuery("limit",30,1,100)) }) }
 
             route("/game") {
                 get("/profile") { val p=call.principal(auth,limiter); call.respond(blocking{game.profile(p.accountId)}) }
@@ -127,6 +140,7 @@ fun Application.veltrixModule(config: ServerConfig) {
                 get { val p=call.principal(auth,limiter); call.respond(blocking{game.map(p.accountId,false)}) }
                 post("/unlock") { val p=call.principal(auth,limiter); call.respond(blocking{game.map(p.accountId,true)}) }
                 post("/units/{unitId}/start") { val p=call.principal(auth,limiter); val id=call.parameters["unitId"]?:throw validation("unitId required"); call.respond(blocking{game.startUnit(p.accountId,id,call.receive())}) }
+                get("/units/{unitId}/stages") { val p=call.principal(auth,limiter); val id=call.parameters["unitId"]?:throw validation("unitId required"); call.respond(blocking { part3.mapStages(p.accountId,id) }) }
             }
             get("/seasons/current") { val p=call.principal(auth,limiter); val s=blocking{game.currentSeason(p.accountId)}; call.respond(CurrentSeasonResponse(s.first,s.second)) }
 
@@ -156,14 +170,15 @@ fun Application.veltrixModule(config: ServerConfig) {
             get("/account/export") { val p=call.principal(auth,limiter); call.respond(blocking{accountData.export(p.accountId)}) }
             post("/account/delete") { val p=call.principal(auth,limiter); blocking{accountData.requestDeletion(p.accountId,call.receive())}; call.respond(ApiAck()) }
 
-            get("/project-templates") { call.principal(auth,limiter); call.respond(extensions.templates()) }
+            get("/project-templates") { call.principal(auth,limiter); call.respond(blocking { part3.templates() }) }
 
             route("/projects") {
                 get { val p=call.principal(auth,limiter); call.respond(blocking { projects.list(p.accountId,call.intQuery("limit",50,1,100),call.intQuery("offset",0,0,1_000_000)) }) }
                 post { val p=call.principal(auth,limiter); call.respond(HttpStatusCode.Created,blocking{projects.create(p.accountId,call.receive())}) }
                 get("/{id}") { val p=call.principal(auth,limiter); call.respond(blocking{projects.get(p.accountId,call.id())}) }
                 patch("/{id}") { val p=call.principal(auth,limiter); call.respond(blocking{projects.update(p.accountId,call.id(),call.receive())}) }
-                get("/{id}/workspace") { val p=call.principal(auth,limiter); call.respond(blocking{workspace.snapshot(p.accountId,call.id())}) }
+                get("/{id}/workspace") { val p=call.principal(auth,limiter); call.respond(blocking { part3.workspace(p.accountId,call.id()) }) }
+                put("/{id}/customization") { val p=call.principal(auth,limiter); call.respond(blocking { part3.customizeProject(p.accountId,call.id(),call.receive()) }) }
                 get("/{id}/instructions") { val p=call.principal(auth,limiter); val value=blocking{projectInstructions.active(p.accountId,call.id())}; if(value==null) call.respond(HttpStatusCode.NoContent) else call.respond(value) }
                 put("/{id}/instructions") { val p=call.principal(auth,limiter); call.respond(blocking{projectInstructions.put(p.accountId,call.id(),call.receive())}) }
                 delete("/{id}/instructions") { val p=call.principal(auth,limiter); blocking{projectInstructions.reset(p.accountId,call.id())}; call.respond(ApiAck()) }
@@ -205,6 +220,8 @@ fun Application.veltrixModule(config: ServerConfig) {
                 get { val p=call.principal(auth,limiter); call.respond(blocking{sources.list(p.accountId,call.intQuery("limit",100,1,200),call.intQuery("offset",0,0,1_000_000))}) }
                 post { val p=call.principal(auth,limiter); call.respond(HttpStatusCode.Created,blocking{sources.createMetadata(p.accountId,call.receive())}) }
                 get("/{id}") { val p=call.principal(auth,limiter); call.respond(blocking{sources.get(p.accountId,call.id())}) }
+                get("/{id}/relationships") { val p=call.principal(auth,limiter); call.respond(blocking { part3.sourceRelationships(p.accountId,call.id()) }) }
+                post("/{id}/relationships") { val p=call.principal(auth,limiter); call.respond(HttpStatusCode.Created,blocking { part3.createSourceRelationship(p.accountId,call.id(),call.receive()) }) }
                 patch("/{id}") { val p=call.principal(auth,limiter); call.respond(blocking{sources.update(p.accountId,call.id(),call.receive())}) }
                 delete("/{id}") { val p=call.principal(auth,limiter); val rev=call.request.queryParameters["expectedRevision"]?.toLongOrNull() ?: throw validation("expectedRevision required"); blocking{sources.delete(p.accountId,call.id(),rev)}; call.respond(ApiAck()) }
                 get("/{id}/annotations") { val p=call.principal(auth,limiter); call.respond(blocking{extensions.annotations(p.accountId,call.id())}) }
