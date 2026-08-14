@@ -108,8 +108,9 @@ class MapContentOrchestrator(
     private val ai: MapContentProvider? = null,
 ) {
     fun resolve(context: MapGenerationContext, allowAi: Boolean): MapContentResolution {
-        if (allowAi && ai != null) {
-            val proposed = runCatching { ai.generate(context) }.getOrNull()
+        val aiProvider = ai
+        if (allowAi && aiProvider != null) {
+            val proposed = runCatching { aiProvider.generate(context) }.getOrNull()
             if (proposed != null) {
                 val errors = StructuredMapValidator.validate(proposed)
                 if (errors.isEmpty()) return MapContentResolution(proposed, MapContentSource.AI, false, emptyList())
@@ -121,7 +122,7 @@ class MapContentOrchestrator(
         val fallback = deterministic.generate(context)
         val errors = StructuredMapValidator.validate(fallback)
         check(errors.isEmpty()) { "Deterministic map template invalid: $errors" }
-        return MapContentResolution(fallback, MapContentSource.DETERMINISTIC, allowAi && ai != null, emptyList())
+        return MapContentResolution(fallback, MapContentSource.DETERMINISTIC, allowAi && aiProvider != null, emptyList())
     }
 }
 
