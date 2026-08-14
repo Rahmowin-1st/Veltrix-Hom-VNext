@@ -1,0 +1,48 @@
+--- a/server/src/main/kotlin/com/veltrix/hom/vnext/server/Repositories.kt
++++ b/server/src/main/kotlin/com/veltrix/hom/vnext/server/Repositories.kt
+@@ -127,9 +127,12 @@
+     fun create(accountId: String, req: CreateProjectRequest): ProjectResponse {
+         val title=req.title.trim(); require(title.length in 1..120)
+         return db.tx { c ->
+-            c.prepareStatement("INSERT INTO project(account_id,title,purpose,template_type,priority) VALUES (?::uuid,?,?,?,?) RETURNING *").use { ps ->
++            val created=c.prepareStatement("INSERT INTO project(account_id,title,purpose,template_type,priority) VALUES (?::uuid,?,?,?,?) RETURNING *").use { ps ->
+                 ps.setString(1,accountId); ps.setString(2,title); ps.setString(3,req.purpose?.trim()?.take(1000)); ps.setString(4,req.template.take(40)); ps.setInt(5,req.priority.coerceIn(-100,100)); ps.executeQuery().use { rs -> rs.next(); mapProject(rs, null) }
+             }
++            val meaningful=(created.purpose?.trim()?.length ?: 0)>=8
++            insertActivity(c,accountId,"PROJECT_CREATED",created.id,created.id,"project-created:${created.id}",meaningful)
++            created
+         }
+     }
+ 
+@@ -172,7 +175,9 @@
+         val core=Goal(id=current.id,accountId=accountId,projectId=projectId,title=current.title,description=current.description,priority=current.priority,status=GoalStatus.valueOf(current.status),completedAt=current.completedAt?.let(Instant::parse),revision=current.revision)
+         val next=GoalEngine.transition(core,GoalStatus.valueOf(target))
+         c.prepareStatement("UPDATE goal SET status=?::goal_status,completed_at=?,updated_at=now(),revision=revision+1 WHERE id=?::uuid AND account_id=?::uuid AND revision=?").use { ps -> ps.setString(1,next.status.name); ps.setObject(2,next.completedAt?.let{java.time.OffsetDateTime.ofInstant(it,java.time.ZoneOffset.UTC)}); ps.setString(3,goalId); ps.setString(4,accountId); ps.setLong(5,expectedRevision); if(ps.executeUpdate()!=1) throw DomainException(DomainError("CONFLICT",ErrorCategory.CONFLICT,"Goal transition conflict")) }
+-        c.prepareStatement("SELECT * FROM goal WHERE id=?::uuid").use { ps -> ps.setString(1,goalId); ps.executeQuery().use {rs->rs.next();mapGoal(rs)} }
++        val result=c.prepareStatement("SELECT * FROM goal WHERE id=?::uuid").use { ps -> ps.setString(1,goalId); ps.executeQuery().use {rs->rs.next();mapGoal(rs)} }
++        if(result.status=="COMPLETED") insertActivity(c,accountId,"GOAL_COMPLETED",projectId,goalId,"goal-completed:$goalId:${result.revision}",true)
++        result
+     }
+ 
+     private fun setInstruction(c:Connection,accountId:String,projectId:String,body:String){
+@@ -285,7 +290,9 @@
+             c.prepareStatement("INSERT INTO source_chunk(id,account_id,source_id,source_version,offset_start,offset_end,chunk_text,text_hash) VALUES (?::uuid,?::uuid,?::uuid,1,?,?,?,?)").use{ps->
+                 for(ch in chunks){ps.setString(1,ch.id);ps.setString(2,accountId);ps.setString(3,sourceId);ps.setInt(4,ch.offsetStart);ps.setInt(5,ch.offsetEnd);ps.setString(6,ch.text);ps.setString(7,ch.textHash);ps.addBatch()};ps.executeBatch()
+             }
+-            c.prepareStatement("UPDATE source SET state='PROCESSING',processing_progress=75,updated_at=now(),revision=revision+1 WHERE id=?::uuid RETURNING *").use{ps->ps.setString(1,sourceId);ps.executeQuery().use{rs->rs.next();mapSource(rs)}}
++            val updated=c.prepareStatement("UPDATE source SET state='PROCESSING',processing_progress=75,updated_at=now(),revision=revision+1 WHERE id=?::uuid RETURNING *").use{ps->ps.setString(1,sourceId);ps.executeQuery().use{rs->rs.next();mapSource(rs)}}
++            insertActivity(c,accountId,"SOURCE_ADDED",null,sourceId,"source-added:$sourceId",true)
++            updated
+         }
+     }
+ 
+@@ -297,7 +304,9 @@
+             c.prepareStatement("INSERT INTO source_version(source_id,account_id,version,content_hash,extraction_metadata) VALUES (?::uuid,?::uuid,1,?,?::jsonb) ON CONFLICT (source_id,version) DO UPDATE SET content_hash=excluded.content_hash,extraction_metadata=excluded.extraction_metadata").use{ps->ps.setString(1,sourceId);ps.setString(2,accountId);ps.setString(3,owned.contentHash);ps.setString(4,"{\"processor\":\"server-extraction\"}");ps.executeUpdate()}
+             c.prepareStatement("DELETE FROM source_chunk WHERE source_id=?::uuid AND source_version=1").use{ps->ps.setString(1,sourceId);ps.executeUpdate()}
+             c.prepareStatement("INSERT INTO source_chunk(id,account_id,source_id,source_version,offset_start,offset_end,chunk_text,text_hash) VALUES (?::uuid,?::uuid,?::uuid,1,?,?,?,?)").use{ps->for(ch in chunks){ps.setString(1,ch.id);ps.setString(2,accountId);ps.setString(3,sourceId);ps.setInt(4,ch.offsetStart);ps.setInt(5,ch.offsetEnd);ps.setString(6,ch.text);ps.setString(7,ch.textHash);ps.addBatch()};ps.executeBatch()}
+-            c.prepareStatement("UPDATE source SET state='PROCESSING',processing_progress=75,updated_at=now(),revision=revision+1 WHERE id=?::uuid AND account_id=?::uuid RETURNING *").use{ps->ps.setString(1,sourceId);ps.setString(2,accountId);ps.executeQuery().use{rs->rs.next();mapSource(rs)}}
++            val updated=c.prepareStatement("UPDATE source SET state='PROCESSING',processing_progress=75,updated_at=now(),revision=revision+1 WHERE id=?::uuid AND account_id=?::uuid RETURNING *").use{ps->ps.setString(1,sourceId);ps.setString(2,accountId);ps.executeQuery().use{rs->rs.next();mapSource(rs)}}
++            insertActivity(c,accountId,"SOURCE_ADDED",null,sourceId,"source-added:$sourceId",true)
++            updated
+         }
+     }
