@@ -1,6 +1,5 @@
 name: Veltrix Backend Part 3 Room Schema Seal
 
-# Canonical Android ApiSession uses accountId + token.
 on:
   workflow_dispatch:
   push:
@@ -42,10 +41,9 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           gradle --no-daemon :android:app:testDebugUnitTest :android:app:assembleDebug :android:app:assembleDebugAndroidTest
-          test -d android/app/schemas
+          test -s android/app/schemas/com.veltrix.hom.vnext.Part3LocalDatabase/1.json
+          test -s android/app/schemas/com.veltrix.hom.vnext.VeltrixLocalDatabase/2.json
           find android/app/schemas -type f -name '*.json' -print | sort | tee /tmp/room-schemas.txt
-          test -s /tmp/room-schemas.txt
-          grep -R -q 'Part3LocalDatabase' android/app/schemas
           echo PART3_ANDROID_COMPILE=PASS
           echo PART3_ROOM_SCHEMA_EXPORT=PASS
       - name: Commit generated schemas if changed
