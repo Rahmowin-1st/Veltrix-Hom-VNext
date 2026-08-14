@@ -1,4 +1,4 @@
-# retrigger after parent LazyColumn index scroll fix
+# retrigger after valid SHA-256 source metadata fixture fix
 name: Veltrix Part 1 Stable Runtime V1
 
 on:
