@@ -1,0 +1,29 @@
+name: Veltrix Backend Part 3 Fix Android Session Token
+on:
+  push:
+    branches: [veltrix-hom-backend-part3-final]
+    paths: [scripts/part3_fix_android_session_token.py, .github/workflows/part3-fix-android-session-token.yml]
+permissions:
+  contents: write
+concurrency:
+  group: veltrix-part3-fix-android-session-token
+  cancel-in-progress: true
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: veltrix-hom-backend-part3-final, fetch-depth: 0}
+      - run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 scripts/part3_fix_android_session_token.py
+          git diff --check
+          git diff --exit-code --quiet && { echo PART3_ANDROID_SESSION_TOKEN_NO_CHANGE=PASS; exit 0; }
+          git config user.name veltrix-backend-master
+          git config user.email actions@users.noreply.github.com
+          git add android/app/src/main/kotlin/com/veltrix/hom/vnext/Part3AndroidContracts.kt
+          git commit -m 'fix(part3): use ApiSession accessToken in Android contracts'
+          git push origin HEAD:veltrix-hom-backend-part3-final
+          echo PART3_ANDROID_SESSION_TOKEN_PUSH=PASS
