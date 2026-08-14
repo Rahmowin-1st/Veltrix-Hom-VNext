@@ -11,7 +11,9 @@ import java.util.concurrent.TimeUnit
 class SyncWorker(appContext:Context,params:WorkerParameters):CoroutineWorker(appContext,params){
     override suspend fun doWork():Result {
         val session=SessionStore(applicationContext).read() ?: return Result.success()
-        val dao=VeltrixLocalDatabase.get(applicationContext).sync()
+        val db=VeltrixLocalDatabase.get(applicationContext)
+        val dao=db.sync()
+        val part3=Part3LocalDatabase.get(applicationContext)
         val batch=dao.nextBatch(session.accountId,50);if(batch.isEmpty())return Result.success()
         val body=JSONObject().put("mutations",JSONArray().apply{batch.forEach{m->
             val payload=runCatching{JSONObject(m.payload)}.getOrElse{JSONObject()}
@@ -25,7 +27,13 @@ class SyncWorker(appContext:Context,params:WorkerParameters):CoroutineWorker(app
         for(i in 0 until results.length()){
             val r=results.getJSONObject(i);val id=r.getString("mutationId");val current=batch.firstOrNull{it.id==id}?:continue
             when(r.getString("status")){
-                "APPLIED"->dao.updateState(id,"ACKED",current.attemptCount+1)
+                "APPLIED"->{
+                    dao.updateState(id,"ACKED",current.attemptCount+1)
+                    if(current.entityType.equals("CONTEXT_CARRY",true)) {
+                        val serverRevision=if(r.has("serverRevision")&&!r.isNull("serverRevision"))r.optLong("serverRevision",current.expectedRevision?:1) else current.expectedRevision?:1
+                        part3.contextCarry().markAcked(session.accountId,serverRevision,System.currentTimeMillis())
+                    }
+                }
                 "CONFLICT"->dao.updateState(id,"CONFLICT",current.attemptCount+1)
                 "REJECTED"->dao.updateState(id,"REJECTED",current.attemptCount+1)
                 "RETRY"->{dao.updateState(id,"PENDING",current.attemptCount+1);retry=true}
