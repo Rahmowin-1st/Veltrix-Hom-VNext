@@ -266,10 +266,10 @@ jobs:
           cp source-check/contracts/openapi.yaml source-check/docs/API_Contract.openapi.yaml
           python3 source-check/scripts/verify_part2_manager_handoff.py > package/evidence/source-archive-truth-audit.txt
           grep -q PART2_MANAGER_HANDOFF_CHECK=PASS package/evidence/source-archive-truth-audit.txt
-          find package -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > package/SHA256SUMS.txt
+          (cd package && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
           (cd package && sha256sum -c SHA256SUMS.txt) | tee evidence/package-sha-recompute.txt
-          grep -q 'Veltrix-Hom-VNext-Part2-FINAL.apk: OK' evidence/package-sha-recompute.txt
-          grep -q 'Veltrix-Hom-VNext-Part2-ANDROID-TEST.apk: OK' evidence/package-sha-recompute.txt
+          grep -q './Veltrix-Hom-VNext-Part2-FINAL.apk: OK' evidence/package-sha-recompute.txt
+          grep -q './Veltrix-Hom-VNext-Part2-ANDROID-TEST.apk: OK' evidence/package-sha-recompute.txt
           (cd package && zip -qr ../Veltrix-Hom-VNext-Part2-MANAGER-ACCEPTANCE-PACKAGE.zip .)
           sha256sum package/Veltrix-Hom-VNext-Part2-EXACT-TESTED-SOURCE.zip | tee artifact/SOURCE_SHA256.txt
           sha256sum package/Veltrix-Hom-VNext-Part2-FINAL.apk | tee artifact/APK_SHA256.txt
