@@ -29,7 +29,7 @@
      fun snapshot(accountId:String):PersonalSnapshotResponse=db.tx{c->
          val profile=c.prepareStatement("SELECT display_name,preferred_language,timezone FROM user_profile WHERE account_id=?::uuid").use{ps->ps.setString(1,accountId);ps.executeQuery().use{rs->if(!rs.next())throw DomainException(DomainError("PROFILE_NOT_FOUND",ErrorCategory.NOT_FOUND,"Profile not found"));Triple(rs.getString(1),rs.getString(2),rs.getString(3))}}
          fun count(sql:String):Int=c.prepareStatement(sql).use{ps->ps.setString(1,accountId);ps.executeQuery().use{rs->rs.next();rs.getInt(1)}}
-@@ -23,7 +23,7 @@
+@@ -23,6 +23,6 @@
          val assessments=count("SELECT count(*) FROM assessment_attempt WHERE account_id=?::uuid AND state='GRADED'")
          val mistakes=count("SELECT count(*) FROM mistake WHERE account_id=?::uuid AND status IN ('ACTIVE','IMPROVING','RECURRED') AND deleted_at IS NULL")
          val due=count("SELECT count(*) FROM flashcard_schedule WHERE account_id=?::uuid AND due_at<=now()")
