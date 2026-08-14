@@ -19,7 +19,7 @@ class SyncWorker(appContext:Context,params:WorkerParameters):CoroutineWorker(app
             val payload=runCatching{JSONObject(m.payload)}.getOrElse{JSONObject()}
             put(JSONObject().put("mutationId",m.id).put("entityType",m.entityType).put("entityId",m.entityId).put("operation",m.operation).apply{m.expectedRevision?.let{put("expectedRevision",it)}}.put("idempotencyKey",m.idempotencyKey).put("payload",payload))
         }}).toString()
-        val response=try{post("${BuildConfig.VELTRIX_API_BASE_URL}/v1/sync/mutations",session.accessToken,body)}catch(_:Exception){return Result.retry()}
+        val response=try{post("${BuildConfig.VELTRIX_API_BASE_URL}/v1/sync/mutations",session.token,body)}catch(_:Exception){return Result.retry()}
         if(response.first==401){SessionStore(applicationContext).clear();return Result.failure()}
         if(response.first !in 200..299)return if(response.first>=500||response.first==429)Result.retry() else Result.failure()
         val results=runCatching{JSONObject(response.second).getJSONArray("results")}.getOrElse{return Result.retry()}
