@@ -69,7 +69,7 @@ fun Application.veltrixModule(config: ServerConfig) {
     val projectInstructions = ProjectInstructionRepository(db)
     val part3 = Part3FinalRepository(db, projects, chats, memory, projectInstructions)
     val ai = AiExecutionService(config)
-    val aiContext = AiContextOrchestrator(projects, chats, memory, projectInstructions, chatIntelligence, sourceProcessing.rag)
+    val aiContext = AiContextOrchestrator(projects, chats, memory, projectInstructions, chatIntelligence, sourceProcessing.rag, part3)
     val memoryAutomation = MemoryAutomationService(db, config.workerEnabled)
     environment.monitor.subscribe(ApplicationStopped) { memoryAutomation.close() }
     val artifactDrafts = GeneratedArtifactService(db, ai, config.environment)
@@ -253,6 +253,7 @@ fun Application.veltrixModule(config: ServerConfig) {
                 post("/{id}/messages/{messageId}/save-note") { val p=call.principal(auth,limiter); call.respond(HttpStatusCode.Created,blocking{extensions.noteFromMessage(p.accountId,call.parameters["id"]!!,call.parameters["messageId"]!!,call.receive())}) }
             }
 
+            post("/ai/context-debug") { val p=call.principal(auth,limiter); val req=call.receive<AiStreamRequest>(); call.respond(blocking { aiContext.prepare(p.accountId,req).diagnostics }) }
             post("/ai/stream") {
                 val p=call.principal(auth,limiter)
                 val req=call.receive<AiStreamRequest>()
