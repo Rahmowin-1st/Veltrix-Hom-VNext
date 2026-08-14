@@ -201,7 +201,12 @@ object UniversalCommandEngine {
         require(text.isNotBlank())
         val q = text.lowercase()
         return when {
-            q.startsWith("open my ") && q.endsWith(" project") -> UniversalCommandResolution(UniversalCommandKind.OPEN_PROJECT, true, false, targetHint = text.substringAfter("open my ").substringBeforeLast(" project").trim())
+            q.startsWith("open my ") && q.endsWith(" project") -> UniversalCommandResolution(
+                UniversalCommandKind.OPEN_PROJECT,
+                true,
+                false,
+                targetHint = q.removePrefix("open my ").removeSuffix(" project").trim(),
+            )
             "show my mistakes" in q -> UniversalCommandResolution(UniversalCommandKind.SHOW_MISTAKES, true, false)
             q.startsWith("continue this source") || q.startsWith("continue source") -> UniversalCommandResolution(UniversalCommandKind.CONTINUE_SOURCE, true, false)
             "make flashcards" in q -> UniversalCommandResolution(UniversalCommandKind.CREATE_FLASHCARDS, true, false, query = text)
