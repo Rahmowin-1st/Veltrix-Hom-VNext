@@ -36,7 +36,8 @@ class GlobalSearchRepository(private val db:Database){
         val allowed=setOf("project","conversation","note","flashcard","mistake","goal");require(table in allowed)
         val deleted=" AND deleted_at IS NULL"
         val projectFilter=if(p!=null && projectCol!=null)" AND $projectCol=?::uuid" else if(p!=null && table=="project")" AND id=?::uuid" else ""
-        val sql="SELECT $idCol id,$titleCol title,coalesce($snippetCol,'') snippet"+(if(projectCol!=null) ",$projectCol project_id" else ",NULL::uuid project_id")+" FROM $table WHERE account_id=?::uuid $deleted $projectFilter AND (lower($titleCol) LIKE lower(?) OR lower(coalesce($snippetCol,'')) LIKE lower(?)) ORDER BY updated_at DESC NULLS LAST LIMIT ?"
+        val orderCol=if(table=="mistake")"last_seen_at" else "updated_at"
+        val sql="SELECT $idCol id,$titleCol title,coalesce($snippetCol,'') snippet"+(if(projectCol!=null) ",$projectCol project_id" else ",NULL::uuid project_id")+" FROM $table WHERE account_id=?::uuid $deleted $projectFilter AND (lower($titleCol) LIKE lower(?) OR lower(coalesce($snippetCol,'')) LIKE lower(?)) ORDER BY $orderCol DESC NULLS LAST LIMIT ?"
         return c.prepareStatement(sql).use{ps->var i=1;ps.setString(i++,a);if(p!=null&&(projectCol!=null||table=="project"))ps.setString(i++,p);val like="%${q.take(200)}%";ps.setString(i++,like);ps.setString(i++,like);ps.setInt(i,limit);ps.executeQuery().use{rs->buildList{while(rs.next()){val title=rs.getString("title")?:"";val snip=rs.getString("snippet")?:"";val exact=score(title,snip,q);val id=rs.getObject("id").toString();add(TypedSearchResult(type,id,title,snip.take(240),rs.getObject("project_id")?.toString(),exact,prefix+rs.getObject(deepId).toString()))}}}}
     }
 
