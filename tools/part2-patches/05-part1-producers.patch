@@ -25,7 +25,7 @@
      }
  
      private fun setInstruction(c:Connection,accountId:String,projectId:String,body:String){
-@@ -285,7 +290,9 @@
+@@ -285,5 +290,7 @@
              c.prepareStatement("INSERT INTO source_chunk(id,account_id,source_id,source_version,offset_start,offset_end,chunk_text,text_hash) VALUES (?::uuid,?::uuid,?::uuid,1,?,?,?,?)").use{ps->
                  for(ch in chunks){ps.setString(1,ch.id);ps.setString(2,accountId);ps.setString(3,sourceId);ps.setInt(4,ch.offsetStart);ps.setInt(5,ch.offsetEnd);ps.setString(6,ch.text);ps.setString(7,ch.textHash);ps.addBatch()};ps.executeBatch()
              }
