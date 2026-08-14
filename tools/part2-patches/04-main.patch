@@ -1,0 +1,78 @@
+--- a/server/src/main/kotlin/com/veltrix/hom/vnext/server/Main.kt
++++ b/server/src/main/kotlin/com/veltrix/hom/vnext/server/Main.kt
+@@ -29,7 +29,7 @@
+ import java.util.UUID
+ 
+ private const val API_VERSION = "v1"
+-private const val SERVICE_VERSION = "0.1.0-part1"
++private const val SERVICE_VERSION = "0.2.0-part2"
+ 
+ fun main() {
+     val config = ServerConfig.fromEnv()
+@@ -43,6 +43,9 @@
+     val profile = ProfileRepository(db)
+     val projects = ProjectRepository(db)
+     val memory = MemoryRepository(db)
++    val game = Part2GameRepository(db,memory)
++    val gameWorker = Part2GameWorker(game,config.workerEnabled)
++    environment.monitor.subscribe(ApplicationStopped) { gameWorker.close() }
+     val sources = SourceRepository(db)
+     val sourceProcessing = SourceProcessingService(config, db, sources)
+     environment.monitor.subscribe(ApplicationStopped) { sourceProcessing.close() }
+@@ -55,14 +58,14 @@
+     val flashcards = FlashcardRepository(db)
+     val mistakes = MistakeRepository(db)
+     val search = GlobalSearchRepository(db)
+-    val home = HomeAggregatorRepository(db, projects, memory)
++    val home = HomeAggregatorRepository(db, projects, memory, game)
+     val workspace = ProjectWorkspaceRepository(db, projects, chats, memory)
+     val tools = ToolRepository(db)
+     val settings = SettingsRepository(db)
+     val notifications = NotificationRepository(db)
+     val accountData = AccountDataRepository(db)
+     val timeline = ActivityTimelineRepository(db)
+-    val personal = PersonalAggregatorRepository(db,memory,timeline)
++    val personal = PersonalAggregatorRepository(db,memory,timeline,game)
+     val projectInstructions = ProjectInstructionRepository(db)
+     val ai = AiExecutionService(config)
+     val aiContext = AiContextOrchestrator(projects, chats, memory, projectInstructions, chatIntelligence, sourceProcessing.rag)
+@@ -106,6 +109,27 @@
+             get("/personal") { val p=call.principal(auth,limiter); call.respond(blocking{personal.snapshot(p.accountId)}) }
+             get("/activity") { val p=call.principal(auth,limiter); call.respond(blocking{timeline.list(p.accountId,call.request.queryParameters["projectId"],call.intQuery("limit",50,1,200),call.intQuery("offset",0,0,1_000_000))}) }
+ 
++            route("/game") {
++                get("/profile") { val p=call.principal(auth,limiter); call.respond(blocking{game.profile(p.accountId)}) }
++                get("/xp") { val p=call.principal(auth,limiter); call.respond(blocking{game.xpHistory(p.accountId,call.intQuery("limit",50,1,200),call.intQuery("offset",0,0,1_000_000))}) }
++                get("/coins") { val p=call.principal(auth,limiter); call.respond(blocking{game.coinHistory(p.accountId,call.intQuery("limit",50,1,200),call.intQuery("offset",0,0,1_000_000))}) }
++                get("/coins/reconciliation") { val p=call.principal(auth,limiter); call.respond(blocking{game.reconcileCoins(p.accountId)}) }
++                get("/stats") { val p=call.principal(auth,limiter); call.respond(blocking{game.gamingStats(p.accountId)}) }
++                get("/events") { val p=call.principal(auth,limiter); call.respond(blocking{game.stateEvents(p.accountId,call.intQuery("limit",50,1,200),call.intQuery("offset",0,0,1_000_000))}) }
++            }
++            get("/achievements") { val p=call.principal(auth,limiter); call.respond(blocking{game.achievements(p.accountId)}) }
++            get("/inventory") { val p=call.principal(auth,limiter); call.respond(blocking{game.inventory(p.accountId,call.intQuery("limit",100,1,200),call.intQuery("offset",0,0,1_000_000))}) }
++            route("/avatars") {
++                get { val p=call.principal(auth,limiter); call.respond(blocking{game.avatars(p.accountId)}) }
++                post("/equip") { val p=call.principal(auth,limiter); call.respond(blocking{game.equipAvatar(p.accountId,call.receive())}) }
++            }
++            route("/personal/map") {
++                get { val p=call.principal(auth,limiter); call.respond(blocking{game.map(p.accountId,false)}) }
++                post("/unlock") { val p=call.principal(auth,limiter); call.respond(blocking{game.map(p.accountId,true)}) }
++                post("/units/{unitId}/start") { val p=call.principal(auth,limiter); val id=call.parameters["unitId"]?:throw validation("unitId required"); call.respond(blocking{game.startUnit(p.accountId,id,call.receive())}) }
++            }
++            get("/seasons/current") { val p=call.principal(auth,limiter); val s=blocking{game.currentSeason(p.accountId)}; call.respond(CurrentSeasonResponse(s.first,s.second)) }
++
+             route("/settings") {
+                 get { val p=call.principal(auth,limiter); call.respond(blocking{settings.list(p.accountId,call.request.queryParameters["category"])}) }
+                 put { val p=call.principal(auth,limiter); call.respond(blocking{settings.put(p.accountId,call.receive())}) }
+@@ -310,7 +334,10 @@
+             post("/search") { val p=call.principal(auth,limiter); call.respond(blocking{search.search(p.accountId,call.receive())}) }
+             post("/tools/invoke") { val p=call.principal(auth,limiter); call.respond(blocking{tools.invoke(p.accountId,call.receive())}) }
+             post("/translate") { val p=call.principal(auth,limiter); call.respond(blocking{translation.translate(p.accountId,call.receive())}) }
+-            get("/store") { call.principal(auth,limiter); call.respond(HttpStatusCode.NotImplemented,ErrorEnvelope(ErrorBody("PART2_NOT_AVAILABLE","NOT_FOUND","Store economy is intentionally not implemented in Part 1",false,call.callId))) }
++            route("/store") {
++                get { val p=call.principal(auth,limiter); call.respond(blocking{game.store(p.accountId)}) }
++                post("/purchase") { val p=call.principal(auth,limiter); call.respond(HttpStatusCode.Created,blocking{game.purchase(p.accountId,call.receive())}) }
++            }
+         }
+     }
+ }
