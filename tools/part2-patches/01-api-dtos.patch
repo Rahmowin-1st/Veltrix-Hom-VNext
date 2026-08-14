@@ -9,7 +9,7 @@
  
  @Serializable data class AiStreamRequest(val conversationId: String, val projectId: String? = null, val sourceIds: List<String> = emptyList(), val attachmentIds: List<String> = emptyList(), val text: String, val learningMode: String = "DEFAULT", val memoryEnabled: Boolean = true, val projectMemoryEnabled: Boolean = true, val toolIds: List<String> = emptyList(), val toolInputs: Map<String,Map<String,String>> = emptyMap(), val originFeature: String? = null, val idempotencyKey: String)
  @Serializable data class AiStreamEvent(val type: String, val messageId: String? = null, val segment: String? = null, val error: ErrorBody? = null, val final: Boolean = false)
-@@ -91,7 +91,7 @@
+@@ -91,6 +91,6 @@
  @Serializable data class AiCancelRequest(val requestId:String)
  @Serializable data class AiCancelResponse(val cancelled:Boolean)
  @Serializable data class ActivityEventResponse(val eventId:String,val type:String,val occurredAt:String,val projectId:String?,val objectId:String?,val meaningful:Boolean)
