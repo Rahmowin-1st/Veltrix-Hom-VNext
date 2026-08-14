@@ -80,4 +80,16 @@ elif new_effective not in text:
     raise SystemExit("Part2 effective-level helper anchor missing")
 part2.write_text(text, encoding="utf-8")
 
+# Part 3 AI Context Router consumes only the same facade-enforced scoped Student Model and exposes safe diagnostics.
+replace_required(
+    "server/src/main/kotlin/com/veltrix/hom/vnext/server/Main.kt",
+    '    val aiContext = AiContextOrchestrator(projects, chats, memory, projectInstructions, chatIntelligence, sourceProcessing.rag)',
+    '    val aiContext = AiContextOrchestrator(projects, chats, memory, projectInstructions, chatIntelligence, sourceProcessing.rag, part3)',
+)
+replace_required(
+    "server/src/main/kotlin/com/veltrix/hom/vnext/server/Main.kt",
+    '            post("/ai/stream") {',
+    '            post("/ai/context-debug") { val p=call.principal(auth,limiter); val req=call.receive<AiStreamRequest>(); call.respond(blocking { aiContext.prepare(p.accountId,req).diagnostics }) }\n            post("/ai/stream") {',
+)
+
 print("PART3_SERVER_PATCH=PASS")
