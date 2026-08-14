@@ -1,4 +1,4 @@
-# retrigger after capability viewport assertion fix
+# retrigger after assessment jsonb fix and postgres regression
 name: Veltrix Part 1 Stable Runtime V1
 
 on:
