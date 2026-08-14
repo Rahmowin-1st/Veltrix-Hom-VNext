@@ -64,6 +64,8 @@ fun Application.veltrixModule(config: ServerConfig) {
     val settings = SettingsRepository(db)
     val notifications = NotificationRepository(db)
     val accountData = AccountDataRepository(db)
+    val accountDeletionWorker = AccountDeletionWorker(db,config.workerEnabled)
+    environment.monitor.subscribe(ApplicationStopped) { accountDeletionWorker.close() }
     val timeline = ActivityTimelineRepository(db)
     val personal = PersonalAggregatorRepository(db,memory,timeline,game)
     val projectInstructions = ProjectInstructionRepository(db)
@@ -153,21 +155,8 @@ fun Application.veltrixModule(config: ServerConfig) {
                 put("/preferences") { val p=call.principal(auth,limiter); call.respond(blocking{notifications.putPreference(p.accountId,call.receive())}) }
                 get("/intents") { val p=call.principal(auth,limiter); call.respond(blocking{notifications.listIntents(p.accountId,call.intQuery("limit",100,1,200))}) }
             }
-            get("/learning-modes") {
-                call.principal(auth,limiter)
-                call.respond(listOf(
-                    LearningModeResponse("DEFAULT","balanced",false,true,"when-useful","direct"),
-                    LearningModeResponse("TUTOR","adaptive",true,false,"when-useful","teaching"),
-                    LearningModeResponse("SOCRATIC","guided",true,false,"when-useful","questions-first"),
-                    LearningModeResponse("EXPLAIN_SIMPLE","simple",false,true,"low","simple"),
-                    LearningModeResponse("DEEP_DIVE","deep",false,true,"high","detailed"),
-                    LearningModeResponse("PRACTICE_COACH","concise",true,false,"low","coach"),
-                    LearningModeResponse("EXAM_PREP","exam",true,false,"medium","exam"),
-                    LearningModeResponse("RESEARCH","deep",false,true,"high","research"),
-                    LearningModeResponse("WRITING_HELP","adaptive",true,true,"medium","editorial")
-                ))
-            }
-            get("/account/export") { val p=call.principal(auth,limiter); call.respond(blocking{accountData.export(p.accountId)}) }
+            get("/learning-modes") { call.principal(auth,limiter); call.respond(blocking { part3.learningModes() }) }
+            get("/account/export") { val p=call.principal(auth,limiter); call.respond(blocking { part3.accountExport(p.accountId) }) }
             post("/account/delete") { val p=call.principal(auth,limiter); blocking{accountData.requestDeletion(p.accountId,call.receive())}; call.respond(ApiAck()) }
 
             get("/project-templates") { call.principal(auth,limiter); call.respond(blocking { part3.templates() }) }
@@ -187,6 +176,13 @@ fun Application.veltrixModule(config: ServerConfig) {
                 post("/{id}/goals/{goalId}/transition") { val p=call.principal(auth,limiter); val req=call.receive<GoalTransitionRequest>(); call.respond(blocking{projects.transitionGoal(p.accountId,call.parameters["id"]!!,call.parameters["goalId"]!!,req.target,req.expectedRevision)}) }
                 patch("/{id}/goals/{goalId}") { val p=call.principal(auth,limiter); call.respond(blocking{extensions.updateGoal(p.accountId,call.parameters["id"]!!,call.parameters["goalId"]!!,call.receive())}) }
                 delete("/{id}/goals/{goalId}") { val p=call.principal(auth,limiter); val rev=call.request.queryParameters["expectedRevision"]?.toLongOrNull() ?: throw validation("expectedRevision required"); blocking{extensions.deleteGoal(p.accountId,call.parameters["id"]!!,call.parameters["goalId"]!!,rev)};call.respond(ApiAck()) }
+                get("/{id}/goals/{goalId}/dependencies") { val p=call.principal(auth,limiter); call.respond(blocking { part3.goalDependencies(p.accountId,call.parameters["id"]!!,call.parameters["goalId"]!!) }) }
+                post("/{id}/goals/{goalId}/dependencies") { val p=call.principal(auth,limiter); call.respond(HttpStatusCode.Created,blocking { part3.addGoalDependency(p.accountId,call.parameters["id"]!!,call.parameters["goalId"]!!,call.receive()) }) }
+                delete("/{id}/goals/{goalId}/dependencies/{dependsOnGoalId}") { val p=call.principal(auth,limiter); blocking { part3.removeGoalDependency(p.accountId,call.parameters["id"]!!,call.parameters["goalId"]!!,call.parameters["dependsOnGoalId"]!!) }; call.respond(ApiAck()) }
+                get("/{id}/goals/{goalId}/links") { val p=call.principal(auth,limiter); call.respond(blocking { part3.goalLinks(p.accountId,call.parameters["id"]!!,call.parameters["goalId"]!!) }) }
+                post("/{id}/goals/{goalId}/links") { val p=call.principal(auth,limiter); call.respond(HttpStatusCode.Created,blocking { part3.addGoalLink(p.accountId,call.parameters["id"]!!,call.parameters["goalId"]!!,call.receive()) }) }
+                post("/{id}/goal-suggestions") { val p=call.principal(auth,limiter); call.respond(HttpStatusCode.Created,blocking { part3.proposeGoalSuggestion(p.accountId,call.parameters["id"]!!,call.receive()) }) }
+                post("/{id}/goal-suggestions/{suggestionId}/decision") { val p=call.principal(auth,limiter); call.respond(blocking { part3.decideGoalSuggestion(p.accountId,call.parameters["id"]!!,call.parameters["suggestionId"]!!,call.receive()) }) }
             }
 
             route("/memory") {
@@ -310,6 +306,8 @@ fun Application.veltrixModule(config: ServerConfig) {
                 post { val p=call.principal(auth,limiter); call.respond(HttpStatusCode.Created,blocking{assessments.create(p.accountId,call.receive())}) }
                 get("/{id}") { val p=call.principal(auth,limiter); call.respond(blocking{assessments.get(p.accountId,call.id())}) }
                 post("/{id}/attempts") { val p=call.principal(auth,limiter); call.respond(HttpStatusCode.Created,blocking{assessments.startAttempt(p.accountId,call.id())}) }
+                get("/{id}/history") { val p=call.principal(auth,limiter); call.respond(blocking { part3.assessmentHistory(p.accountId,call.id(),call.intQuery("limit",50,1,200)) }) }
+                post("/{id}/retest") { val p=call.principal(auth,limiter); call.respond(HttpStatusCode.Created,blocking { part3.startRetest(p.accountId,call.id(),call.receive()) }) }
                 put("/attempts/{attemptId}/answer") { val p=call.principal(auth,limiter); call.respond(blocking{assessments.saveAnswer(p.accountId,call.parameters["attemptId"]!!,call.receive())}) }
                 post("/attempts/{attemptId}/submit") { val p=call.principal(auth,limiter); call.respond(blocking{assessments.submit(p.accountId,call.parameters["attemptId"]!!)}) }
             }

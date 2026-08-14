@@ -97,6 +97,7 @@ class AccountDataRepository(private val db: Database) {
             if(!PasswordHasher.verify(req.password.toCharArray(),hash)) throw DomainException(DomainError("AUTH_INVALID",ErrorCategory.AUTH,"Re-authentication failed"))
             c.prepareStatement("UPDATE account SET deleted_at=now(),updated_at=now(),revision=revision+1 WHERE id=?::uuid AND deleted_at IS NULL").use { ps -> ps.setString(1,accountId); if(ps.executeUpdate()!=1) throw DomainException(DomainError("CONFLICT",ErrorCategory.CONFLICT,"Account is already deleted")) }
             c.prepareStatement("UPDATE device_session SET revoked_at=COALESCE(revoked_at,now()) WHERE account_id=?::uuid").use { ps -> ps.setString(1,accountId);ps.executeUpdate() }
+            c.prepareStatement("INSERT INTO account_deletion_lifecycle(account_id,account_ref_hash,state,purge_after) VALUES (?::uuid,?,'PURGE_PENDING',now())").use { ps -> ps.setString(1,accountId);ps.setString(2,sha256(accountId));ps.executeUpdate() }
         }
     }
 
