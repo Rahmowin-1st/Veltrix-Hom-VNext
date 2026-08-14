@@ -39,7 +39,7 @@ class SettingsRepository(private val db: Database) {
     }
 
     companion object {
-        val allowedCategories = setOf("ACCOUNT", "AI", "MEMORY", "LEARNING", "NOTIFICATIONS", "DATA", "ACCESSIBILITY", "PRIVACY", "PROJECT_DEFAULTS")
+        val allowedCategories = setOf("ACCOUNT", "AI", "MEMORY", "LEARNING", "NOTIFICATIONS", "DATA", "ACCESSIBILITY", "PRIVACY", "PROJECT_DEFAULTS", "VELTRIX_WORLD")
     }
 }
 
@@ -71,7 +71,12 @@ class NotificationRepository(private val db: Database) {
         }
     }
 
-    companion object { val allowedCategories=setOf("PROCESSING_COMPLETE","PROJECT_REMINDER","ASSESSMENT_REMINDER","FLASHCARD_DUE","SYSTEM_NOTICE","ACCOUNT_SECURITY") }
+    companion object {
+        val allowedCategories=setOf(
+            "PROCESSING_COMPLETE","PROJECT_REMINDER","ASSESSMENT_REMINDER","FLASHCARD_DUE","ACHIEVEMENT",
+            "MAP_UNIT","SEASON","STORE","SYSTEM_NOTICE","ACCOUNT_SECURITY"
+        )
+    }
 }
 
 class AccountDataRepository(private val db: Database) {
@@ -107,7 +112,6 @@ class AccountDataRepository(private val db: Database) {
             "mistakes" to "mistake",
             "memories" to "memory_item",
             "activityEvents" to "activity_event",
-            // Part 2 account-owned state. Definition/catalog tables are intentionally excluded because they are global product data.
             "progressionProfiles" to "progression_profile",
             "xpLedger" to "xp_ledger",
             "coinAccounts" to "coin_account_projection",
@@ -129,6 +133,15 @@ class AccountDataRepository(private val db: Database) {
             "seasonProgress" to "season_progress",
             "gamingStatistics" to "gaming_statistics",
             "gameStateEvents" to "game_state_event",
+            // Part 3 account-owned persistent identity/personalization/control state.
+            "studentSignals" to "student_signal",
+            "studentSignalEvidence" to "student_signal_evidence",
+            "personalizationRecommendations" to "personalization_recommendation",
+            "contextCarry" to "context_carry_state",
+            "sourceRelationships" to "source_relationship",
+            "frontendSemanticEvents" to "frontend_semantic_event",
+            "qualifiedActiveDays" to "qualified_active_day",
+            "mapCheckpointRewards" to "map_checkpoint_reward"
         )
     }
 }
