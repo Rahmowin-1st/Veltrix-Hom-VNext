@@ -78,7 +78,7 @@ class GlobalSearchRepository(private val db:Database){
     }
 
     private fun searchStore(c:Connection,a:String,q:String,limit:Int):List<TypedSearchResult>{
-        val sql="""SELECT si.item_id,coalesce(si.category,ic.item_type),coalesce(si.description,ic.metadata::text),si.price_coins FROM store_item si JOIN store_catalog sc ON sc.catalog_version=si.catalog_version AND sc.active=true JOIN inventory_catalog ic ON ic.item_id=si.item_id WHERE si.active=true AND (lower(si.item_id) LIKE lower(?) OR lower(coalesce(si.category,ic.item_type)) LIKE lower(?) OR lower(coalesce(si.description,ic.metadata::text)) LIKE lower(?)) ORDER BY si.price_coins,si.item_id LIMIT ?"""
+        val sql="""SELECT si.item_id,ic.item_type,ic.metadata::text,si.price_coins FROM store_item si JOIN store_catalog sc ON sc.catalog_version=si.catalog_version AND sc.active=true JOIN inventory_catalog ic ON ic.item_id=si.item_id AND ic.active=true WHERE si.active=true AND (lower(si.item_id) LIKE lower(?) OR lower(ic.item_type) LIKE lower(?) OR lower(ic.metadata::text) LIKE lower(?)) ORDER BY si.price_coins,si.item_id LIMIT ?"""
         return c.prepareStatement(sql).use{ps->val like="%${q.take(200)}%";repeat(3){ps.setString(1+it,like)};ps.setInt(4,limit);ps.executeQuery().use{rs->buildList{while(rs.next()){val id=rs.getString(1);val category=rs.getString(2);val description=rs.getString(3);val price=rs.getLong(4);add(TypedSearchResult("STORE_ITEM",id,id,"$category • $price Coins • ${description.take(160)}",null,score(id,"$category $description",q),"veltrix://store/item/$id"))}}}}
     }
 
