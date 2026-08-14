@@ -40,6 +40,7 @@ class SyncRepository(private val db:Database) {
                 "GOAL:UPSERT"->syncGoal(c,accountId,m)
                 "ASSESSMENT_ANSWER:UPSERT"->syncAssessmentAnswer(c,accountId,m)
                 "FLASHCARD:REVIEW"->syncFlashcardReview(c,accountId,m)
+                "CONTEXT_CARRY:UPSERT"->syncContextCarry(c,accountId,m)
                 else->throw validation("Unsupported sync operation ${m.entityType}:${m.operation}")
             }
             val body="{\"status\":\"APPLIED\",\"serverRevision\":$revision}"
@@ -80,6 +81,27 @@ class SyncRepository(private val db:Database) {
         val next=FlashcardScheduler.review(pair.first,rating,Instant.now())
         return c.prepareStatement("UPDATE flashcard_schedule SET interval_days=?,ease=?,repetitions=?,lapses=?,due_at=?,last_reviewed_at=?,revision=revision+1 WHERE card_id=?::uuid AND account_id=?::uuid AND revision=? RETURNING revision").use{ps->ps.setInt(1,next.intervalDays);ps.setDouble(2,next.ease);ps.setInt(3,next.repetitions);ps.setInt(4,next.lapses);ps.setObject(5,OffsetDateTime.ofInstant(next.dueAt,ZoneOffset.UTC));ps.setObject(6,OffsetDateTime.ofInstant(next.lastReviewedAt?:Instant.now(),ZoneOffset.UTC));ps.setString(7,m.entityId);ps.setString(8,a);ps.setLong(9,pair.second);ps.executeQuery().use{rs->if(!rs.next())throw conflict("Flashcard schedule sync conflict");rs.getLong(1)}}
     }
+    private fun syncContextCarry(c:Connection,a:String,m:SyncMutationRequest):Long {
+        if(m.entityId!=a)throw validation("ContextCarry entityId must equal accountId")
+        val project=m.payload["projectId"]?.takeIf{it.isNotBlank()};project?.let{owned(c,"project",a,it)}
+        val conversation=m.payload["conversationId"]?.takeIf{it.isNotBlank()};conversation?.let{ownedScoped(c,"conversation",a,it)}
+        val assessment=m.payload["assessmentId"]?.takeIf{it.isNotBlank()};assessment?.let{ownedScoped(c,"assessment",a,it)}
+        val sourceIds=m.payload["sourceIdsJson"]?.takeIf{it.isNotBlank()}?:"[]"
+        validateSourceIds(c,a,sourceIds)
+        val topic=m.payload["topic"]?.take(500);val mode=(m.payload["learningMode"]?:"DEFAULT").take(80);val origin=(m.payload["origin"]?:"UNKNOWN").take(120);val ret=m.payload["returnDestination"]?.take(500)
+        val active=c.prepareStatement("SELECT id,context_revision FROM context_carry_state WHERE account_id=?::uuid AND state='ACTIVE' FOR UPDATE").use{ps->ps.setString(1,a);ps.executeQuery().use{rs->if(rs.next())rs.getString(1) to rs.getLong(2) else null}}
+        if(active==null){
+            if((m.expectedRevision?:0)>0)throw conflict("ContextCarry sync revision conflict")
+            return c.prepareStatement("INSERT INTO context_carry_state(account_id,project_id,source_ids,conversation_id,assessment_id,topic,learning_mode,origin,return_destination,context_revision,state) VALUES (?::uuid,?::uuid,?::jsonb,?::uuid,?::uuid,?,?,?,?,1,'ACTIVE') RETURNING context_revision").use{ps->ps.setString(1,a);ps.setString(2,project);ps.setString(3,sourceIds);ps.setString(4,conversation);ps.setString(5,assessment);ps.setString(6,topic);ps.setString(7,mode);ps.setString(8,origin);ps.setString(9,ret);ps.executeQuery().use{rs->rs.next();rs.getLong(1)}}
+        }
+        if(m.expectedRevision!=null && active.second!=m.expectedRevision)throw conflict("ContextCarry sync revision conflict")
+        return c.prepareStatement("UPDATE context_carry_state SET project_id=?::uuid,source_ids=?::jsonb,conversation_id=?::uuid,assessment_id=?::uuid,topic=?,learning_mode=?,origin=?,return_destination=?,context_revision=context_revision+1,updated_at=now() WHERE id=?::uuid AND account_id=?::uuid AND context_revision=? RETURNING context_revision").use{ps->ps.setString(1,project);ps.setString(2,sourceIds);ps.setString(3,conversation);ps.setString(4,assessment);ps.setString(5,topic);ps.setString(6,mode);ps.setString(7,origin);ps.setString(8,ret);ps.setString(9,active.first);ps.setString(10,a);ps.setLong(11,active.second);ps.executeQuery().use{rs->if(!rs.next())throw conflict("ContextCarry sync revision conflict");rs.getLong(1)}}
+    }
+    private fun validateSourceIds(c:Connection,a:String,json:String){
+        val invalid=runCatching{c.prepareStatement("SELECT count(*) FROM jsonb_array_elements_text(?::jsonb) j(id) LEFT JOIN source s ON s.id::text=j.id AND s.account_id=?::uuid AND s.deleted_at IS NULL WHERE s.id IS NULL").use{ps->ps.setString(1,json);ps.setString(2,a);ps.executeQuery().use{rs->rs.next();rs.getInt(1)}}}.getOrElse{throw validation("sourceIdsJson must be a JSON array of owned source UUIDs")}
+        if(invalid>0)throw DomainException(DomainError("SOURCE_NOT_FOUND",ErrorCategory.NOT_FOUND,"ContextCarry source not found"))
+    }
+    private fun ownedScoped(c:Connection,t:String,a:String,id:String){require(t in setOf("conversation","assessment"));c.prepareStatement("SELECT 1 FROM $t WHERE id=?::uuid AND account_id=?::uuid AND deleted_at IS NULL").use{ps->ps.setString(1,id);ps.setString(2,a);ps.executeQuery().use{if(!it.next())throw DomainException(DomainError("NOT_FOUND",ErrorCategory.NOT_FOUND,"Linked object not found"))}}}
     private fun owned(c:Connection,t:String,a:String,id:String){require(t=="project");c.prepareStatement("SELECT 1 FROM project WHERE id=?::uuid AND account_id=?::uuid AND deleted_at IS NULL").use{ps->ps.setString(1,id);ps.setString(2,a);ps.executeQuery().use{if(!it.next())throw DomainException(DomainError("PROJECT_NOT_FOUND",ErrorCategory.NOT_FOUND,"Project not found"))}}}
     private fun conflict(msg:String)=DomainException(DomainError("CONFLICT",ErrorCategory.CONFLICT,msg))
     private fun canonical(m:SyncMutationRequest)=listOf(m.mutationId,m.entityType,m.entityId,m.operation,m.expectedRevision?.toString().orEmpty(),m.idempotencyKey)+m.payload.toSortedMap().flatMap{listOf(it.key,it.value)}
