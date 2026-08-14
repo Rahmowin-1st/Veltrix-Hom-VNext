@@ -42,12 +42,25 @@ g1=call('POST',f'/v1/projects/{pid}/goals',{'title':'Learn mechanics'},token,(20
 g2=call('POST',f'/v1/projects/{pid}/goals',{'title':'Pass mechanics test'},token,(201,))
 dep=call('POST',f'/v1/projects/{pid}/goals/{g2["id"]}/dependencies',{'dependsOnGoalId':g1['id']},token,(201,))
 assert dep['dependsOnGoalId']==g1['id']
-
 deps=call('GET',f'/v1/projects/{pid}/goals/{g2["id"]}/dependencies',token=token)
 assert len(deps)==1
 sug=call('POST',f'/v1/projects/{pid}/goal-suggestions',{'parentGoalId':g1['id'],'title':'Solve mixed problems','provenanceJson':'{"source":"AI_DRAFT"}'},token,(201,))
 accepted=call('POST',f'/v1/projects/{pid}/goal-suggestions/{sug["id"]}/decision',{'decision':'ACCEPT','expectedRevision':sug['revision']},token)
 assert accepted['state']=='ACCEPTED' and accepted['acceptedGoalId']
+
+assessment=call('POST','/v1/assessments',{'kind':'TEST','title':'Mechanics HTTP retest','projectId':pid,'questions':[{'prompt':'2+2?','type':'SHORT_ANSWER','expectedAnswers':['4']}]},token,(201,))
+detail=call('GET',f'/v1/assessments/{assessment["id"]}',token=token)
+qid=detail['questions'][0]['id']
+first=call('POST',f'/v1/assessments/{assessment["id"]}/attempts',{},token,(201,))
+call('PUT',f'/v1/assessments/attempts/{first["id"]}/answer',{'questionId':qid,'answers':['3']},token)
+call('POST',f'/v1/assessments/attempts/{first["id"]}/submit',{},token)
+retest=call('POST',f'/v1/assessments/{assessment["id"]}/retest',{'previousAttemptId':first['id']},token,(201,))
+second_id=retest['attempt']['id']
+call('PUT',f'/v1/assessments/attempts/{second_id}/answer',{'questionId':qid,'answers':['4']},token)
+call('POST',f'/v1/assessments/attempts/{second_id}/submit',{},token)
+history=call('GET',f'/v1/assessments/{assessment["id"]}/history',token=token)
+assert len([a for a in history['attempts'] if a['state']=='GRADED'])==2
+assert history['latestScore'] > history['attempts'][-1]['score'] if history['attempts'][-1]['score'] is not None else True
 
 signal=call('POST','/v1/student-model/signals',{'projectId':pid,'type':'GOAL','valueJson':'{"focus":"mechanics"}','evidence':[{'kind':'USER_STATEMENT','objectId':'http-smoke'}]},token,(201,))
 model=call('GET',f'/v1/student-model?projectId={pid}',token=token)
@@ -57,7 +70,6 @@ ctx=call('PUT','/v1/context-carry',{'projectId':pid,'topic':'mechanics','learnin
 assert ctx['projectId']==pid and ctx['contextRevision']>=1
 cmd=call('POST','/v1/commands/resolve',{'text':f'Open my Physics {suffix} project','projectId':pid},token)
 assert cmd['deterministic'] is True
-
 results=call('POST','/v1/search',{'query':'Physics','limit':50},token)
 assert any(r['type']=='PROJECT' and r['id']==pid for r in results)
 
@@ -65,6 +77,8 @@ exported=call('GET','/v1/account/export',token=token)
 assert exported['schemaVersion']==3 and exported['entityCounts']['project']>=1
 assert pid in exported['entityPayloads']['project']
 assert len(exported['payloadSha256'])==64
+legacy_keys={'progressionProfiles','xpLedger','coinAccounts','coinLedger','rewardGrants','rewardDecisions','rewardQueue','dailyActivity','consistencyState','consistencyHistory','achievementProgress','inventoryOwnership','equippedAvatars','storePurchases','storeRefunds','personalMaps','mapGenerations','mapUnitProgress','seasonProgress','gamingStatistics','gameStateEvents'}
+assert legacy_keys <= set(exported['entityCounts'])
 
 call('POST','/v1/account/delete',{'password':password,'confirmation':'DELETE'},token)
 call('GET','/v1/home',token=token,expect=(401,))
@@ -73,6 +87,8 @@ call('POST','/v1/auth/login',{'login':login,'password':password,'deviceLabel':'a
 print('PART3_HTTP_LEARNING_MODES=PASS')
 print('PART3_HTTP_HOME_PERSONAL_WORKSPACE=PASS')
 print('PART3_HTTP_GOAL_GRAPH=PASS')
+print('PART3_HTTP_ASSESSMENT_RETEST_HISTORY=PASS')
 print('PART3_HTTP_STUDENT_CONTEXT_COMMAND_SEARCH=PASS')
 print('PART3_HTTP_EXPORT_DELETE=PASS')
+print('PART3_HTTP_PART2_EXPORT_COMPAT=PASS')
 print('PART3_HTTP_RUNTIME_SMOKE=PASS')
