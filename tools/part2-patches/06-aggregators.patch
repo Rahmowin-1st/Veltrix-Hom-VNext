@@ -1,0 +1,39 @@
+--- a/server/src/main/kotlin/com/veltrix/hom/vnext/server/SearchAggregators.kt
++++ b/server/src/main/kotlin/com/veltrix/hom/vnext/server/SearchAggregators.kt
+@@ -32,14 +32,15 @@
+     private fun requireProject(c:Connection,a:String,id:String){c.prepareStatement("SELECT 1 FROM project WHERE id=?::uuid AND account_id=?::uuid AND deleted_at IS NULL").use{ps->ps.setString(1,id);ps.setString(2,a);ps.executeQuery().use{if(!it.next())throw DomainException(DomainError("PROJECT_NOT_FOUND",ErrorCategory.NOT_FOUND,"Project not found"))}}}
+ }
+ 
+-class HomeAggregatorRepository(private val db:Database, private val projects:ProjectRepository, private val memory:MemoryRepository){
++class HomeAggregatorRepository(private val db:Database, private val projects:ProjectRepository, private val memory:MemoryRepository, private val game:Part2GameRepository){
+     fun snapshot(accountId:String):HomeSnapshotResponse{
+         val profile=db.tx{c->c.prepareStatement("SELECT display_name,default_avatar_id FROM user_profile WHERE account_id=?::uuid").use{ps->ps.setString(1,accountId);ps.executeQuery().use{rs->if(!rs.next())throw DomainException(DomainError("PROFILE_NOT_FOUND",ErrorCategory.NOT_FOUND,"Profile not found"));rs.getString(1) to rs.getString(2)}}}
+         val recent=projects.list(accountId,6,0)
+         val maturity=memory.maturity(accountId)
+         val unread=db.tx{c->c.prepareStatement("SELECT count(*) FROM notification_intent WHERE account_id=?::uuid AND status='PENDING' AND (scheduled_for IS NULL OR scheduled_for<=now())").use{ps->ps.setString(1,accountId);ps.executeQuery().use{rs->rs.next();rs.getInt(1)}}}
+         val focus=recent.firstOrNull{it.status=="ACTIVE"}?.title
+-        return HomeSnapshotResponse(accountId,profile.first,profile.second?:"default",recent,focus,maturity.state,"LOCKED_PART_2",unread,"SERVER_AUTHORITATIVE",1)
++        val g=game.profile(accountId)
++        return HomeSnapshotResponse(accountId,profile.first,g.equippedAvatar.avatarId,recent,focus,maturity.state,g.mapState,unread,"SERVER_AUTHORITATIVE",2,g.level,g.lifetimeXp,g.coinBalance,g.currentConsistency,g.currentSeason?.seasonId,g.revision)
+     }
+ }
+ 
+--- a/server/src/main/kotlin/com/veltrix/hom/vnext/server/TimelinePersonalRepositories.kt
++++ b/server/src/main/kotlin/com/veltrix/hom/vnext/server/TimelinePersonalRepositories.kt
+@@ -15,7 +15,7 @@
+     private fun requireProject(c:java.sql.Connection,a:String,id:String){c.prepareStatement("SELECT 1 FROM project WHERE id=?::uuid AND account_id=?::uuid AND deleted_at IS NULL").use{ps->ps.setString(1,id);ps.setString(2,a);ps.executeQuery().use{if(!it.next())throw DomainException(DomainError("PROJECT_NOT_FOUND",ErrorCategory.NOT_FOUND,"Project not found"))}}}
+ }
+ 
+-class PersonalAggregatorRepository(private val db:Database,private val memory:MemoryRepository,private val timeline:ActivityTimelineRepository){
++class PersonalAggregatorRepository(private val db:Database,private val memory:MemoryRepository,private val timeline:ActivityTimelineRepository,private val game:Part2GameRepository){
+     fun snapshot(accountId:String):PersonalSnapshotResponse=db.tx{c->
+         val profile=c.prepareStatement("SELECT display_name,preferred_language,timezone FROM user_profile WHERE account_id=?::uuid").use{ps->ps.setString(1,accountId);ps.executeQuery().use{rs->if(!rs.next())throw DomainException(DomainError("PROFILE_NOT_FOUND",ErrorCategory.NOT_FOUND,"Profile not found"));Triple(rs.getString(1),rs.getString(2),rs.getString(3))}}
+         fun count(sql:String):Int=c.prepareStatement(sql).use{ps->ps.setString(1,accountId);ps.executeQuery().use{rs->rs.next();rs.getInt(1)}}
+@@ -23,7 +23,7 @@
+         val assessments=count("SELECT count(*) FROM assessment_attempt WHERE account_id=?::uuid AND state='GRADED'")
+         val mistakes=count("SELECT count(*) FROM mistake WHERE account_id=?::uuid AND status IN ('ACTIVE','IMPROVING','RECURRED') AND deleted_at IS NULL")
+         val due=count("SELECT count(*) FROM flashcard_schedule WHERE account_id=?::uuid AND due_at<=now()")
+-        PersonalSnapshotResponse(accountId,profile.first,profile.second,profile.third,memory.maturity(accountId).state,activeProjects,assessments,mistakes,due,timeline.list(accountId,null,10,0))
++        PersonalSnapshotResponse(accountId,profile.first,profile.second,profile.third,memory.maturity(accountId).state,activeProjects,assessments,mistakes,due,timeline.list(accountId,null,10,0),schemaVersion=2,game=game.profile(accountId))
+     }
+ }
