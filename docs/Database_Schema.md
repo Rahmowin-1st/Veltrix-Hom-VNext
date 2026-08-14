@@ -1,3 +1,5 @@
-# Database Schema
+# Database Schema — Current Part 2 Truth
 
-Migrations V001–V004 define account/session, projects/goals, memory/evidence, sources/chunks, chats/messages, notes, assessments, flashcards, mistakes, sync/idempotency, activity, source processing, vector embeddings, post-response jobs, deep practice, attachments/citations, generated artifacts and related indexes. Ownership columns are account-scoped and hot paths receive indexes. Vector rows retain source/version/chunk/text-hash/model provenance.
+> **Part 2 current-state document.** The exact acceptance SHA/run/job are bound in the canonical package `PROVENANCE.txt`. Preserved Android runtime evidence is from product SHA `2e70908f65bb25d23e87a9ddc690b8ea09f3040e`, run `31787591097`, job `94726891516`; Manager-acceptance deltas are reverified on the final handoff SHA.
+
+The current database migration chain is V001–V006. Part 2 is V005 `V005__part2_game_account.sql` plus V006 `V006__part2_completion.sql`. See `DATABASE_SCHEMA_PART2.md` for the exact Part 2 tables, constraints, functions/triggers and seeded definitions. This document supersedes the previous V001–V004-only final description.

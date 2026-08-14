@@ -1,11 +1,7 @@
-# Handoff Report
+# Handoff Report — Current Part 2 Truth
 
-Scope is Part 1 backend/core/intelligence and Android app-foundation. This file is continuity material, not permission to treat an unverified build as accepted.
+> **Part 2 current-state document.** The exact acceptance SHA/run/job are bound in the canonical package `PROVENANCE.txt`. Preserved Android runtime evidence is from product SHA `2e70908f65bb25d23e87a9ddc690b8ea09f3040e`, run `31787591097`, job `94726891516`; Manager-acceptance deltas are reverified on the final handoff SHA.
 
-Frontend/Part 3 may consume the typed API/domain contracts and Android functional foundation after final Part 1 acceptance. It must not move deterministic rules, authorization, entitlements, learning calculations, persistence ownership or privileged credentials into presentation code.
+This repository now contains the complete Part 2 backend/app-foundation acceptance candidate. Store/economy is **implemented**, not deferred. The authoritative handoff set is the uppercase Part 2 documents listed in `FINAL_MANAGER_HANDOFF.md`, `PART3_FRONTEND_HANDOFF.md`, `E2E_FLOW_REPORT.md` and the canonical package provenance/evidence.
 
-Store/economy mechanics are explicitly deferred to Part 2; Part 1 exposes no fake economy. Final colors, typography, spacing, artwork, gradients/shadows, animation polish and final composition are frontend scope.
-
-Manager acceptance must use the exact final branch HEAD and its executed CI evidence: Source Audit/final backend gates, Android stable runtime, package artifact, provenance and SHA-256. If any release input changes, reopen affected gates before handoff.
-
-Canonical companion files: `Backend_Current_State.md`, `Backend_Architecture.md`, `Feature_Inventory.md`, `API_Contract.openapi.yaml`, `Data_Model.md`, `Decision_Log.md`, `Build_Runbook.md`, `Deployment_Runbook.md`, `Verification_Report.md`, `Security_Report.md`, `Performance_Report.md`.
+Historical Part 1 capability docs may describe their original subsystem scope, but they are not the current final-status authority. Final colors, typography, spacing, artwork, animation and composition remain Part 3 frontend scope.

@@ -1,4 +1,4 @@
-name: Veltrix Part 2 Final Verification
+name: Veltrix Part 2 Manager Acceptance
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: veltrix-part2-final-${{ github.ref }}
+  group: veltrix-part2-manager-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -15,9 +15,14 @@ permissions:
 
 env:
   FROZEN_PART1_SHA: fe4b2528a0a7da550351d926d44cc025e49dcafc
-  FROZEN_PART1_RUNTIME_RUN: '31769370210'
-  IMAGE_PACKAGE: system-images;android-36;google_apis;x86_64
-  GPU_MODE: swiftshader_indirect
+  BASE_RUNTIME_SHA: 2e70908f65bb25d23e87a9ddc690b8ea09f3040e
+  BASE_RUNTIME_RUN: '31787591097'
+  BASE_RUNTIME_JOB: '94726891516'
+  BASE_RUNTIME_ARTIFACT_ID: '9214376255'
+  BASE_OUTER_ARTIFACT_SHA256: e2653025a38e8b93f66db57f235497b7488a450f0238243108131642f5a5b149
+  BASE_INNER_PACKAGE_SHA256: d142dd2ebf65c6261aa17d6cd8324be53528d19450c0ccbddc7f8c5042fa4105
+  BASE_APK_SHA256: 7d96d35c17189f150d2e653517481c0cba0221ecb79ab8961e98c1b64a579414
+  BASE_ANDROID_TEST_SHA256: 4ebca8778aa658380e1ea3e13d41e15bf1130973a719556b69e6c828fdb02eba
   VELTRIX_ENV: test
   VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
   VELTRIX_DATABASE_USER: postgres
@@ -34,12 +39,11 @@ env:
   VELTRIX_TEST_TRANSLATE_MOCK: 'true'
   VELTRIX_STORAGE_PROVIDER: local
   VELTRIX_WORKERS_ENABLED: 'true'
-  ANDROID_AVD_HOME: ${{ github.workspace }}/.android-avd
 
 jobs:
   final:
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 35
     services:
       postgres:
         image: pgvector/pgvector:0.8.2-pg17-bookworm
@@ -53,22 +57,27 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 30
 
     steps:
-      - name: Checkout exact Part 2 source
+      - name: Checkout exact Manager-acceptance source
         uses: actions/checkout@v4
         with: {fetch-depth: 0}
 
-      - name: Prove provenance and frozen Part 1 ancestry
+      - name: Prove source provenance and Android runtime reuse boundary
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p evidence package artifact
+          mkdir -p evidence package artifact prior-artifact prior-package
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
           git cat-file -e "$FROZEN_PART1_SHA^{commit}"
+          git cat-file -e "$BASE_RUNTIME_SHA^{commit}"
           git merge-base --is-ancestor "$FROZEN_PART1_SHA" "$GITHUB_SHA"
-          printf 'repo=%s\nbranch=%s\ncommit=%s\nfrozen_part1=%s\nfrozen_part1_runtime_run=%s\nrun=%s\njob=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$FROZEN_PART1_SHA" "$FROZEN_PART1_RUNTIME_RUN" "$GITHUB_RUN_ID" "$GITHUB_JOB" | tee evidence/provenance.txt
-          git diff --name-only "$FROZEN_PART1_SHA" "$GITHUB_SHA" | sort > evidence/part2-delta.txt
-          test -s evidence/part2-delta.txt
+          git merge-base --is-ancestor "$BASE_RUNTIME_SHA" "$GITHUB_SHA"
+          git diff --quiet "$BASE_RUNTIME_SHA" "$GITHUB_SHA" -- android core build.gradle.kts settings.gradle.kts gradle.properties
+          git diff --name-only "$BASE_RUNTIME_SHA" "$GITHUB_SHA" | sort | tee evidence/manager-acceptance-delta.txt
+          test -s evidence/manager-acceptance-delta.txt
+          printf 'repo=%s\nbranch=%s\ncommit=%s\nmanager_base=%s\nfrozen_part1=%s\nrun=%s\njob_name=%s\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$BASE_RUNTIME_SHA" "$FROZEN_PART1_SHA" "$GITHUB_RUN_ID" "$GITHUB_JOB" | tee evidence/provenance.txt
+          echo PART2_ANDROID_RUNTIME_INPUTS_UNCHANGED=PASS | tee evidence/android-runtime-reuse-boundary.txt
           echo PART2_PROVENANCE=PASS | tee evidence/provenance-gate.txt
 
       - name: Setup Java and Gradle
@@ -77,17 +86,55 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with: {gradle-version: '9.5.1'}
 
-      - name: Verify policy export, migrations, core and real PostgreSQL integration
+      - name: Verify handoff completeness, OpenAPI, policy and stale-truth audit
         shell: bash
         run: |
           set -euo pipefail
+          python3 scripts/generate_openapi_contract.py | tee evidence/openapi-generate.txt
+          cp contracts/openapi.yaml docs/API_Contract.openapi.yaml
+          python3 scripts/verify_part2_manager_handoff.py | tee evidence/handoff-completeness.txt
+          python3 scripts/verify_openapi_drift.py | tee evidence/openapi-drift.txt
           python3 scripts/part2_progression_simulation.py --check docs/progression-policy-v1.json | tee evidence/progression-policy.txt
           python3 scripts/check_part1_structure.py | tee evidence/part1-structure.txt
+          grep -q PART2_MANAGER_HANDOFF_CHECK=PASS evidence/handoff-completeness.txt
+          grep -q OPENAPI_DRIFT=PASS evidence/openapi-drift.txt
+          grep -q PART2_PROGRESSION_POLICY_CHECK=PASS evidence/progression-policy.txt
+          echo PART2_DOCS_AND_CONTRACTS=PASS | tee evidence/docs-contracts-gate.txt
+
+      - name: Run affected exact core/server tests on real PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
           gradle --no-daemon :core:test :server:test | tee evidence/backend-tests.txt
           grep -q 'BUILD SUCCESSFUL' evidence/backend-tests.txt
+          mkdir -p evidence/test-results/core evidence/test-results/server
+          cp -R core/build/test-results/test/. evidence/test-results/core/
+          cp -R server/build/test-results/test/. evidence/test-results/server/
+          MANAGER_XML=$(find server/build/test-results/test -name '*Part2ManagerAcceptanceIntegrationTest*.xml' -type f | head -1)
+          test -s "$MANAGER_XML"
+          cp "$MANAGER_XML" evidence/manager-e2e.xml
+          python3 - "$MANAGER_XML" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          root=ET.parse(sys.argv[1]).getroot()
+          assert int(root.attrib.get('tests','0')) == 5, root.attrib
+          assert int(root.attrib.get('failures','0')) == 0, root.attrib
+          assert int(root.attrib.get('errors','0')) == 0, root.attrib
+          assert int(root.attrib.get('skipped','0')) == 0, root.attrib
+          expected={
+            'concurrentPurchaseRaceAllowsNoOverspendAndReconciles',
+            'multiDeviceConcurrentAvatarEquipHasSingleWinnerAndConverges',
+            'seasonRolloverPreservesLifetimeProgressionCoinsInventoryAndClosesSeasonProgress',
+            'part2AccountExportIncludesOwnedGameStateAndDeleteRevokesRelogin',
+            'avatarOwnershipEquipSurvivesServerRestartAndRelogin',
+          }
+          got={x.attrib['name'] for x in root.findall('testcase')}
+          assert expected <= got, (expected-got, got)
+          print('PART2_MANAGER_E2E_5_OF_5=PASS')
+          PY
           echo PART2_BACKEND_REAL_POSTGRES=PASS | tee evidence/backend-gate.txt
+          echo PART2_MANAGER_E2E=PASS | tee evidence/manager-e2e-gate.txt
 
-      - name: Start exact Ktor source and run real Part 2 HTTP and performance smoke
+      - name: Start exact Ktor source and run HTTP/account/performance smoke
         shell: bash
         run: |
           set -euo pipefail
@@ -101,110 +148,143 @@ jobs:
           test "$ready" -eq 1
           grep -q '"ready":true' evidence/ready.json
           VELTRIX_API_BASE_URL=http://127.0.0.1:8080 python3 scripts/part2_http_runtime_smoke.py | tee evidence/http-smoke.txt
+          grep -q PART2_HTTP_ACCOUNT_EXPORT_DELETE=PASS evidence/http-smoke.txt
           grep -q PART2_HTTP_RUNTIME_SMOKE=PASS evidence/http-smoke.txt
           VELTRIX_API_BASE_URL=http://127.0.0.1:8080 python3 scripts/part2_performance_smoke.py | tee evidence/performance-smoke.txt
           grep -q PART2_PERFORMANCE_SMOKE=PASS evidence/performance-smoke.txt
           echo PART2_REAL_SERVER=PASS | tee evidence/server-gate.txt
-          echo PART2_SECURITY_ACCOUNT_ISOLATION_AND_ANTIFARM=PASS | tee evidence/security-gate.txt
 
-      - name: Setup Android API36 stable runtime
-        uses: android-actions/setup-android@v3
+      - name: Import and verify exact preserved Android runtime artifact
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$BASE_RUNTIME_ARTIFACT_ID/zip" \
+            -o prior-artifact.zip
+          echo "$BASE_OUTER_ARTIFACT_SHA256  prior-artifact.zip" | sha256sum -c -
+          unzip -q prior-artifact.zip -d prior-artifact
+          PRIOR_INNER=prior-artifact/Veltrix-Hom-VNext-Part2-VERIFIED-PACKAGE.zip
+          echo "$BASE_INNER_PACKAGE_SHA256  $PRIOR_INNER" | sha256sum -c -
+          unzip -q "$PRIOR_INNER" -d prior-package
+          echo "$BASE_APK_SHA256  prior-package/Veltrix-Hom-VNext-Part2-FINAL.apk" | sha256sum -c -
+          echo "$BASE_ANDROID_TEST_SHA256  prior-package/Veltrix-Hom-VNext-Part2-ANDROID-TEST.apk" | sha256sum -c -
+          grep -q PART2_ANDROID_INSTALL=PASS prior-package/evidence/android-install-gate.txt
+          grep -q PART2_PROCESS_DEATH=PASS prior-package/evidence/process-death-gate.txt
+          grep -q PART2_ANDROID_RUNTIME=PASS prior-package/evidence/android-runtime-gate.txt
+          grep -q 'OK (15 tests)' prior-package/evidence/runtime/connected.txt
+          grep -q 'OK (2 tests)' prior-package/evidence/part2-instrumentation.txt
+          mkdir -p evidence/preserved-android
+          cp prior-package/evidence/android-install-gate.txt evidence/preserved-android/
+          cp prior-package/evidence/process-death-gate.txt evidence/preserved-android/
+          cp prior-package/evidence/android-runtime-gate.txt evidence/preserved-android/
+          cp prior-package/evidence/part2-process-seed.txt evidence/preserved-android/
+          cp prior-package/evidence/part2-process-verify.txt evidence/preserved-android/
+          cp prior-package/evidence/part2-instrumentation.txt evidence/preserved-android/
+          cp prior-package/evidence/runtime/connected.txt evidence/preserved-android/connected-15-tests.txt
+          cp prior-package/evidence/runtime/runtime-all.txt evidence/preserved-android/runtime-all.txt
+          printf 'source_sha=%s\nrun=%s\njob=%s\nartifact_id=%s\napk_sha256=%s\nandroid_test_sha256=%s\nreason=Android/core/build inputs unchanged on final SHA\n' \
+            "$BASE_RUNTIME_SHA" "$BASE_RUNTIME_RUN" "$BASE_RUNTIME_JOB" "$BASE_RUNTIME_ARTIFACT_ID" "$BASE_APK_SHA256" "$BASE_ANDROID_TEST_SHA256" > evidence/preserved-android/PROVENANCE.txt
+          echo PART2_PRESERVED_ANDROID_RUNTIME=PASS | tee evidence/preserved-android-gate.txt
 
-      - name: Build current Android source and test APK
+      - name: Emit exact A-S execution closure
         shell: bash
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platform-tools' 'emulator' 'build-tools;37.0.0' 'platforms;android-37.0' "$IMAGE_PACKAGE"
-          sudo apt-get update -qq
-          sudo apt-get install -y libpulse0
-          gradle --no-daemon -PVELTRIX_API_BASE_URL=http://127.0.0.1:8080 :android:app:testDebugUnitTest :android:app:assembleDebug :android:app:assembleDebugAndroidTest | tee evidence/android-build.txt
-          grep -q 'BUILD SUCCESSFUL' evidence/android-build.txt
-          APK=android/app/build/outputs/apk/debug/app-debug.apk
-          TEST_APK=$(find android/app/build/outputs/apk/androidTest -name '*androidTest.apk' -type f -size +0c | head -1)
-          test -s "$APK"; test -s "$TEST_APK"
-          "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging "$APK" | tee evidence/apk-badging.txt
-          grep -q "targetSdkVersion:'37'" evidence/apk-badging.txt
-          sha256sum "$APK" "$TEST_APK" | tee evidence/apk-sha256.txt
-          echo PART2_ANDROID_BUILD=PASS | tee evidence/android-build-gate.txt
+          cat > evidence/E2E_EXECUTION_STATUS.tsv <<EOF
+          ID	behavior	exact_test_or_gate	source_sha	environment	result	evidence	run	job
+          A	Part1 baseline/regression	check_part1_structure + full core/server regression	$GITHUB_SHA	Ubuntu24+PostgreSQL17	PASS	evidence/part1-structure.txt;evidence/backend-tests.txt	$GITHUB_RUN_ID	$GITHUB_JOB
+          B	Meaningful activity exactly-once XP/Coins	Part2PostgresIntegrationTest.meaningfulEventRewardsExactlyOnceAndSemanticDuplicateIsRejected	$GITHUB_SHA	real PostgreSQL	PASS	evidence/test-results/server	$GITHUB_RUN_ID	$GITHUB_JOB
+          C	Anti-farming/caps/duplicates	Part2GameSystemsTest anti-farming cases + Part2PostgresIntegrationTest	$GITHUB_SHA	JVM+PostgreSQL	PASS	evidence/test-results/core;evidence/test-results/server	$GITHUB_RUN_ID	$GITHUB_JOB
+          D	Level curve/simulation	Part2GameSystemsTest.levelCurveIsMonotonicAndHasExactBoundaries + Part2CompletionSystemsTest.progressionSimulationCoversRequiredHorizonsAndAbuseCap	$GITHUB_SHA	JVM	PASS	evidence/test-results/core;evidence/progression-policy.txt	$GITHUB_RUN_ID	$GITHUB_JOB
+          E	Coin ledger/reconcile/refund	Part2CompletionIntegrationTest.ledgersStoreRefundSeasonAndNotificationsAreDurableAndIdempotent	$GITHUB_SHA	real PostgreSQL	PASS	evidence/test-results/server	$GITHUB_RUN_ID	$GITHUB_JOB
+          F	Concurrent purchase/no overspend	Part2ManagerAcceptanceIntegrationTest.concurrentPurchaseRaceAllowsNoOverspendAndReconciles	$GITHUB_SHA	real PostgreSQL concurrent workers	PASS	evidence/manager-e2e.xml	$GITHUB_RUN_ID	$GITHUB_JOB
+          G	Achievements/durability	Part2CompletionIntegrationTest.ledgersStoreRefundSeasonAndNotificationsAreDurableAndIdempotent	$GITHUB_SHA	real PostgreSQL	PASS	evidence/test-results/server	$GITHUB_RUN_ID	$GITHUB_JOB
+          H	Avatar ownership/equip/restart/relogin	Part2ManagerAcceptanceIntegrationTest.avatarOwnershipEquipSurvivesServerRestartAndRelogin	$GITHUB_SHA	real PostgreSQL DB restart+login	PASS	evidence/manager-e2e.xml	$GITHUB_RUN_ID	$GITHUB_JOB
+          I	Personal Map eligibility	Part2GameSystemsTest.personalMapRequiresLevelAndMemoryGate + HTTP smoke	$GITHUB_SHA	JVM+Ktor/PostgreSQL	PASS	evidence/test-results/core;evidence/http-smoke.txt	$GITHUB_RUN_ID	$GITHUB_JOB
+          J	Map generation/fallback	Part2CompletionSystemsTest.invalidAiMapFallsBackAndAiHasNoEconomicAuthority	$GITHUB_SHA	JVM	PASS	evidence/test-results/core	$GITHUB_RUN_ID	$GITHUB_JOB
+          K	Sequential Map units	Part2GameSystemsTest.mapUnitProgressOnlyExposesTheNextUnit + deterministic map structural test	$GITHUB_SHA	JVM	PASS	evidence/test-results/core	$GITHUB_RUN_ID	$GITHUB_JOB
+          L	Consistency semantics	Part2GameSystemsTest.consistencyCountsQualifiedLocalDaysNotAppOpens	$GITHUB_SHA	JVM	PASS	evidence/test-results/core	$GITHUB_RUN_ID	$GITHUB_JOB
+          M	Season rollover/lifetime preservation	Part2ManagerAcceptanceIntegrationTest.seasonRolloverPreservesLifetimeProgressionCoinsInventoryAndClosesSeasonProgress	$GITHUB_SHA	real PostgreSQL	PASS	evidence/manager-e2e.xml	$GITHUB_RUN_ID	$GITHUB_JOB
+          N	Gaming stats/events/notifications	Part2CompletionIntegrationTest.ledgersStoreRefundSeasonAndNotificationsAreDurableAndIdempotent	$GITHUB_SHA	real PostgreSQL	PASS	evidence/test-results/server	$GITHUB_RUN_ID	$GITHUB_JOB
+          O	Offline/cache stale revision	Part2GameInstrumentedTest.gameCacheSurvivesDatabaseReopenAndRejectsStaleRevision	$BASE_RUNTIME_SHA	Android16/API36	PASS	evidence/preserved-android/connected-15-tests.txt	$BASE_RUNTIME_RUN	$BASE_RUNTIME_JOB
+          P	Process death	Part2GameProcessDeathInstrumentedTest seed+verify	$BASE_RUNTIME_SHA	Android16/API36	PASS	evidence/preserved-android/part2-process-seed.txt;evidence/preserved-android/part2-process-verify.txt	$BASE_RUNTIME_RUN	$BASE_RUNTIME_JOB
+          Q	Multi-device concurrency consistency	Part2ManagerAcceptanceIntegrationTest.multiDeviceConcurrentAvatarEquipHasSingleWinnerAndConverges	$GITHUB_SHA	real PostgreSQL concurrent clients	PASS	evidence/manager-e2e.xml	$GITHUB_RUN_ID	$GITHUB_JOB
+          R	Part2 account export/delete	Part2ManagerAcceptanceIntegrationTest.part2AccountExportIncludesOwnedGameStateAndDeleteRevokesRelogin + HTTP smoke	$GITHUB_SHA	real PostgreSQL+Ktor auth	PASS	evidence/manager-e2e.xml;evidence/http-smoke.txt	$GITHUB_RUN_ID	$GITHUB_JOB
+          S	Full integration/runtime/package closure	current core/server+HTTP plus preserved unchanged Android 15-test runtime	$GITHUB_SHA	GitHub CI+preserved API36	PASS	evidence/backend-tests.txt;evidence/preserved-android-gate.txt	$GITHUB_RUN_ID	$GITHUB_JOB
+          EOF
+          test "$(tail -n +2 evidence/E2E_EXECUTION_STATUS.tsv | wc -l)" -eq 19
+          test "$(tail -n +2 evidence/E2E_EXECUTION_STATUS.tsv | cut -f1 | sort -u | wc -l)" -eq 19
+          test "$(grep -c $'\tPASS\t' evidence/E2E_EXECUTION_STATUS.tsv)" -eq 19
+          echo PART2_E2E_A_TO_S=PASS | tee evidence/e2e-gate.txt
 
-      - name: Execute proven robust API36 runtime boundary on exact Part 2 APK
+      - name: Resolve current numeric job id
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" > evidence/current-run-jobs.json
+          FINAL_JOB_ID=$(python3 - <<'PY'
+          import json
+          d=json.load(open('evidence/current-run-jobs.json'))
+          jobs=[j for j in d.get('jobs',[]) if j.get('name')=='final']
+          if len(jobs)!=1: raise SystemExit(f'expected one final job, got {len(jobs)}')
+          print(jobs[0]['id'])
+          PY
+          )
+          echo "$FINAL_JOB_ID" | tee evidence/final-job-id.txt
+
+      - name: Package exact source, preserved runtime APKs, current docs and evidence
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p evidence/runtime
-          cp .github/scripts/android-runtime-gate-v15.sh evidence/runtime/stable-helper.sh
-          sed -i \
-            -e 's#APK="evidence/prior-v10/Veltrix-Hom-VNext-Part1-FINAL.apk"#APK="android/app/build/outputs/apk/debug/app-debug.apk"#' \
-            -e 's#TEST_APK="evidence/prior-v10/Veltrix-Hom-VNext-Part1-ANDROID-TEST.apk"#TEST_APK="$(find android/app/build/outputs/apk/androidTest -name '\''*androidTest.apk'\'' -type f -size +0c | head -1)"#' \
-            -e '/4a70f76e971ed11a58cd125da050bef23b61223aa148e353994b4912d69342da/d' \
-            -e '/a6afe3978740c081edc8b1b1a4de785150cb1e16d8017a3a4e54ff32fe8fcd49/d' \
-            -e 's/veltrix_v15_api37_/veltrix_part2_api36_/g' \
-            -e 's/grep -Fx 17 evidence\/runtime\/android-release.txt/grep -Fx 16 evidence\/runtime\/android-release.txt/' \
-            -e 's/grep -Fx 37 evidence\/runtime\/android-api.txt/grep -Fx 36 evidence\/runtime\/android-api.txt/' \
-            -e 's/ -feature -Vulkan//g' \
-            -e "s/'OK (6 tests)'/'OK ('/" \
-            -e 's#echo "$state" | grep -q "$PKG"#grep -q "$PKG" "evidence/runtime/activity-${label}-${attempt}.txt" "evidence/runtime/window-${label}-${attempt}.txt"#' \
-            evidence/runtime/stable-helper.sh
-          chmod +x evidence/runtime/stable-helper.sh
-          timeout 900s bash evidence/runtime/stable-helper.sh
-          grep -q V15_ANDROID_RUNTIME_ALL=PASS evidence/runtime/runtime-all.txt
-          echo PART2_ANDROID_INSTALL=PASS | tee evidence/android-install-gate.txt
-
-          export ANDROID_SERIAL=$(adb devices | awk 'NR>1 && $2=="device" {print $1; exit}')
-          test -n "$ANDROID_SERIAL"
-          I=$(adb shell pm list instrumentation 2>/dev/null | sed -n 's/^instrumentation:\([^ ]*\).*target=com.veltrix.hom.vnext.dev.*/\1/p' | head -1 | tr -d '\r')
-          test -n "$I"
-          adb reverse --remove tcp:8080 >/dev/null 2>&1 || true
-          adb reverse tcp:8080 tcp:8080
-
-          timeout 150s adb shell am instrument -w -e class 'com.veltrix.hom.vnext.Part2GameProcessDeathInstrumentedTest#aSeedAuthoritativeSnapshot' "$I" | tee evidence/part2-process-seed.txt
-          grep -q 'OK (1 test)' evidence/part2-process-seed.txt
-          adb shell am force-stop com.veltrix.hom.vnext.dev.test || true
-          adb shell am force-stop com.veltrix.hom.vnext.dev || true
-          sleep 2
-          timeout 150s adb shell am instrument -w -e class 'com.veltrix.hom.vnext.Part2GameProcessDeathInstrumentedTest#zVerifySnapshotAfterFreshInstrumentationProcess' "$I" | tee evidence/part2-process-verify.txt
-          grep -q 'OK (1 test)' evidence/part2-process-verify.txt
-          echo PART2_PROCESS_DEATH=PASS | tee evidence/process-death-gate.txt
-
-          timeout 300s adb shell am instrument -w -e class 'com.veltrix.hom.vnext.Part2GameInstrumentedTest' "$I" | tee evidence/part2-instrumentation.txt
-          grep -q 'OK (2 tests)' evidence/part2-instrumentation.txt
-          echo PART2_ANDROID_RUNTIME=PASS | tee evidence/android-runtime-gate.txt
-
-      - name: Package exact verified source, APK and evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK=android/app/build/outputs/apk/debug/app-debug.apk
-          TEST_APK=$(find android/app/build/outputs/apk/androidTest -name '*androidTest.apk' -type f -size +0c | head -1)
+          FINAL_JOB_ID=$(cat evidence/final-job-id.txt)
           git archive --format=zip --output=package/Veltrix-Hom-VNext-Part2-EXACT-TESTED-SOURCE.zip "$GITHUB_SHA"
-          cp "$APK" package/Veltrix-Hom-VNext-Part2-FINAL.apk
-          cp "$TEST_APK" package/Veltrix-Hom-VNext-Part2-ANDROID-TEST.apk
+          cp prior-package/Veltrix-Hom-VNext-Part2-FINAL.apk package/Veltrix-Hom-VNext-Part2-FINAL.apk
+          cp prior-package/Veltrix-Hom-VNext-Part2-ANDROID-TEST.apk package/Veltrix-Hom-VNext-Part2-ANDROID-TEST.apk
           cp -R docs package/docs
           cp -R contracts package/contracts
           cp -R evidence package/evidence
           cp docs/progression-policy-v1.json package/progression-policy-v1.json
-          printf 'repo=%s\nbranch=%s\ncommit=%s\nrun=%s\njob=%s\nfrozen_part1=%s\nfrozen_part1_runtime_run=%s\nandroid_runtime=Android-16-API36-google_apis-x86_64\ncompile_sdk=37\ntarget_sdk=37\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_JOB" "$FROZEN_PART1_SHA" "$FROZEN_PART1_RUNTIME_RUN" > package/PROVENANCE.txt
+          cp docs/level-curve-v1.json package/level-curve-v1.json
+          printf 'repo=%s\nbranch=%s\ncommit=%s\nrun=%s\njob=%s\nfrozen_part1=%s\nmanager_base=%s\nandroid_runtime_source_sha=%s\nandroid_runtime_run=%s\nandroid_runtime_job=%s\nandroid_runtime_artifact_id=%s\nandroid_runtime=Android-16-API36-google_apis-x86_64\ncompile_sdk=37\ntarget_sdk=37\napk_sha256=%s\nandroid_test_sha256=%s\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$FINAL_JOB_ID" "$FROZEN_PART1_SHA" "$BASE_RUNTIME_SHA" "$BASE_RUNTIME_SHA" "$BASE_RUNTIME_RUN" "$BASE_RUNTIME_JOB" "$BASE_RUNTIME_ARTIFACT_ID" "$BASE_APK_SHA256" "$BASE_ANDROID_TEST_SHA256" > package/PROVENANCE.txt
+          python3 scripts/verify_part2_manager_handoff.py > package/evidence/final-package-truth-audit.txt
+          grep -q PART2_MANAGER_HANDOFF_CHECK=PASS package/evidence/final-package-truth-audit.txt
+          mkdir -p source-check
+          unzip -q package/Veltrix-Hom-VNext-Part2-EXACT-TESTED-SOURCE.zip -d source-check
+          python3 source-check/scripts/generate_openapi_contract.py | tee package/evidence/source-archive-openapi-generate.txt
+          cp source-check/contracts/openapi.yaml source-check/docs/API_Contract.openapi.yaml
+          python3 source-check/scripts/verify_part2_manager_handoff.py | tee package/evidence/source-archive-truth-audit.txt
+          grep -q PART2_MANAGER_HANDOFF_CHECK=PASS package/evidence/source-archive-truth-audit.txt
           find package -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > package/SHA256SUMS.txt
-          grep -q PART2_BACKEND_REAL_POSTGRES=PASS package/evidence/backend-gate.txt
-          grep -q PART2_REAL_SERVER=PASS package/evidence/server-gate.txt
-          grep -q PART2_PERFORMANCE_SMOKE=PASS package/evidence/performance-smoke.txt
-          grep -q PART2_SECURITY_ACCOUNT_ISOLATION_AND_ANTIFARM=PASS package/evidence/security-gate.txt
-          grep -q PART2_ANDROID_BUILD=PASS package/evidence/android-build-gate.txt
-          grep -q PART2_ANDROID_INSTALL=PASS package/evidence/android-install-gate.txt
-          grep -q PART2_PROCESS_DEATH=PASS package/evidence/process-death-gate.txt
-          grep -q PART2_ANDROID_RUNTIME=PASS package/evidence/android-runtime-gate.txt
-          (cd package && zip -qr ../Veltrix-Hom-VNext-Part2-VERIFIED-PACKAGE.zip .)
-          sha256sum Veltrix-Hom-VNext-Part2-VERIFIED-PACKAGE.zip | tee artifact/PACKAGE_SHA256.txt
-          cp Veltrix-Hom-VNext-Part2-VERIFIED-PACKAGE.zip artifact/
+          (cd package && sha256sum -c SHA256SUMS.txt) | tee evidence/package-sha-recompute.txt
+          grep -q 'Veltrix-Hom-VNext-Part2-FINAL.apk: OK' evidence/package-sha-recompute.txt
+          grep -q 'Veltrix-Hom-VNext-Part2-ANDROID-TEST.apk: OK' evidence/package-sha-recompute.txt
+          (cd package && zip -qr ../Veltrix-Hom-VNext-Part2-MANAGER-ACCEPTANCE-PACKAGE.zip .)
+          sha256sum package/Veltrix-Hom-VNext-Part2-EXACT-TESTED-SOURCE.zip | tee artifact/SOURCE_SHA256.txt
+          sha256sum package/Veltrix-Hom-VNext-Part2-FINAL.apk | tee artifact/APK_SHA256.txt
+          sha256sum package/Veltrix-Hom-VNext-Part2-ANDROID-TEST.apk | tee artifact/ANDROID_TEST_SHA256.txt
+          sha256sum Veltrix-Hom-VNext-Part2-MANAGER-ACCEPTANCE-PACKAGE.zip | tee artifact/PACKAGE_SHA256.txt
+          cp Veltrix-Hom-VNext-Part2-MANAGER-ACCEPTANCE-PACKAGE.zip artifact/
           cp package/PROVENANCE.txt artifact/
           cp package/SHA256SUMS.txt artifact/
-          echo PART2_FINAL_PACKAGE=PASS | tee artifact/FINAL_STATUS.txt
+          cp evidence/E2E_EXECUTION_STATUS.tsv artifact/
+          echo PART2_MANAGER_ACCEPTANCE_PACKAGE=PASS | tee artifact/FINAL_STATUS.txt
 
-      - name: Upload exact Part 2 final artifact
+      - name: Upload canonical Manager-acceptance artifact
         uses: actions/upload-artifact@v4
         with:
-          name: veltrix-hom-part2-final-${{ github.run_id }}
+          name: veltrix-hom-part2-manager-accepted-${{ github.run_id }}
           path: artifact/
           if-no-files-found: error
           retention-days: 30

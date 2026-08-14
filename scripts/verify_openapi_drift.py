@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "server/src/main/kotlin/com/veltrix/hom/vnext/server/Main.kt"
@@ -61,30 +60,34 @@ def server_routes() -> set[tuple[str, str]]:
 
 
 def openapi_routes() -> set[tuple[str, str]]:
-    document = yaml.safe_load(OPENAPI.read_text(encoding="utf-8"))
-    if not str(document.get("openapi", "")).startswith("3.1"):
+    text = OPENAPI.read_text(encoding="utf-8")
+    if not text.startswith("openapi: 3.1"):
         raise SystemExit("OpenAPI must remain 3.1.x")
-    servers = document.get("servers") or []
-    if not any(str(s.get("url", "")).rstrip("/") == "/v1" for s in servers if isinstance(s, dict)):
+    if not re.search(r"(?m)^- url: /v1\s*$", text):
         raise SystemExit("OpenAPI servers must declare /v1 base path")
     result: set[tuple[str, str]] = set()
     operation_ids: set[str] = set()
-    for path, item in (document.get("paths") or {}).items():
-        if not isinstance(item, dict):
+    current_path: str | None = None
+    current_method: str | None = None
+    for raw in text.splitlines():
+        pm = re.match(r"^  (/[^:]*):\s*$", raw)
+        if pm:
+            current_path = pm.group(1)
+            current_method = None
             continue
-        for method, operation in item.items():
-            upper = str(method).upper()
-            if upper not in HTTP:
-                continue
-            if not isinstance(operation, dict):
-                raise SystemExit(f"invalid OpenAPI operation: {upper} {path}")
-            operation_id = operation.get("operationId")
-            if not operation_id:
-                raise SystemExit(f"missing operationId: {upper} {path}")
+        mm = re.match(r"^    (get|post|put|patch|delete):\s*$", raw)
+        if mm and current_path is not None:
+            current_method = mm.group(1).upper()
+            result.add((current_method, current_path))
+            continue
+        om = re.match(r"^      operationId:\s*(\S+)\s*$", raw)
+        if om and current_path is not None and current_method is not None:
+            operation_id = om.group(1)
             if operation_id in operation_ids:
                 raise SystemExit(f"duplicate operationId: {operation_id}")
-            operation_ids.add(str(operation_id))
-            result.add((upper, str(path)))
+            operation_ids.add(operation_id)
+    if len(operation_ids) != len(result):
+        raise SystemExit(f"missing operationId: operations={len(result)} ids={len(operation_ids)}")
     return result
 
 

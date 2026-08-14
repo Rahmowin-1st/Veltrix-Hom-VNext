@@ -165,9 +165,9 @@ def build() -> dict:
     document: dict = {
         "openapi": "3.1.0",
         "info": {
-            "title": "Veltrix Hom vNext Part 1 API",
-            "version": "0.1.0-part1-completion",
-            "description": "Authoritative Android-first Part 1 contract generated from the public Ktor /v1 route inventory. Part 2 economy/map behavior remains intentionally unavailable.",
+            "title": "Veltrix Hom vNext Part 2 API",
+            "version": "0.2.0-part2",
+            "description": "Authoritative Android-first Part 2 contract generated from the exact public Ktor /v1 route inventory, including progression, economy, Store, avatars, Personal Map, seasons, game events, account export and deletion routes.",
         },
         "servers": [{"url": "/v1"}],
         "security": [{"bearerSession": []}],
@@ -177,7 +177,7 @@ def build() -> dict:
 
     for method, path, source_line in route_inventory():
         operation: dict = {
-            "operationId": existing_ids.get((method, path), derived_operation_id(method, path)),
+            "operationId": derived_operation_id(method, path) if path == "/store" else existing_ids.get((method, path), derived_operation_id(method, path)),
             "summary": f"{method.title()} {path}",
         }
         if path in {"/auth/register", "/auth/login"}:
@@ -222,9 +222,6 @@ def build() -> dict:
                 "200": {"description": "SSE stream", "content": {"text/event-stream": {"schema": {"type": "string"}}}},
                 **error_responses(),
             }
-        elif path == "/store":
-            operation["description"] = "Honest Part 2 placeholder. Store/economy is intentionally not implemented in Part 1."
-            operation["responses"] = {"501": {"$ref": "#/components/responses/Error"}}
         else:
             success = "200"
             if "HttpStatusCode.Created" in source_line:

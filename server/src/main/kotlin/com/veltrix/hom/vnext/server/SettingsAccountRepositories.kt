@@ -96,6 +96,39 @@ class AccountDataRepository(private val db: Database) {
     }
 
     companion object {
-        val countTables=listOf("projects" to "project","conversations" to "conversation","sources" to "source","notes" to "note","assessments" to "assessment","practiceSessions" to "practice_session","flashcards" to "flashcard","mistakes" to "mistake","memories" to "memory_item","activityEvents" to "activity_event")
+        val countTables=listOf(
+            "projects" to "project",
+            "conversations" to "conversation",
+            "sources" to "source",
+            "notes" to "note",
+            "assessments" to "assessment",
+            "practiceSessions" to "practice_session",
+            "flashcards" to "flashcard",
+            "mistakes" to "mistake",
+            "memories" to "memory_item",
+            "activityEvents" to "activity_event",
+            // Part 2 account-owned state. Definition/catalog tables are intentionally excluded because they are global product data.
+            "progressionProfiles" to "progression_profile",
+            "xpLedger" to "xp_ledger",
+            "coinAccounts" to "coin_account_projection",
+            "coinLedger" to "coin_ledger",
+            "rewardGrants" to "reward_grant",
+            "rewardDecisions" to "reward_decision_log",
+            "rewardQueue" to "activity_reward_queue",
+            "dailyActivity" to "daily_activity_state",
+            "consistencyState" to "consistency_state",
+            "consistencyHistory" to "consistency_history",
+            "achievementProgress" to "achievement_progress",
+            "inventoryOwnership" to "inventory_ownership",
+            "equippedAvatars" to "equipped_avatar",
+            "storePurchases" to "store_purchase",
+            "storeRefunds" to "store_refund",
+            "personalMaps" to "personal_map",
+            "mapGenerations" to "map_generation_record",
+            "mapUnitProgress" to "map_unit_progress",
+            "seasonProgress" to "season_progress",
+            "gamingStatistics" to "gaming_statistics",
+            "gameStateEvents" to "game_state_event",
+        )
     }
 }

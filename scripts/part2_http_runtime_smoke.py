@@ -41,4 +41,12 @@ recon=call("GET","/v1/game/coins/reconciliation",token=token)
 assert recon["matches"] is True
 season=call("GET","/v1/seasons/current",token=token)
 assert season is not None
+exported=call("GET","/v1/account/export",token=token)
+for key in ("progressionProfiles","coinAccounts","coinLedger","inventoryOwnership","equippedAvatars","gamingStatistics","gameStateEvents"):
+    assert key in exported["entityCounts"],f"missing Part2 export key: {key}"
+assert exported["entityCounts"]["progressionProfiles"]==1
+call("POST","/v1/account/delete",{"password":"testing-password-12345","confirmation":"DELETE"},token,(200,))
+call("GET","/v1/game/profile",token=token,expect=(401,))
+call("POST","/v1/auth/login",{"login":f"part2-smoke-{suffix}@example.test","password":"testing-password-12345","deviceLabel":"after-delete"},expect=(401,))
+print("PART2_HTTP_ACCOUNT_EXPORT_DELETE=PASS")
 print("PART2_HTTP_RUNTIME_SMOKE=PASS")

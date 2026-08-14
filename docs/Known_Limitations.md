@@ -1,7 +1,5 @@
-# Known Limitations
+# Known Limitations — Current Part 2 Truth
 
-- Live production AI is NOT VERIFIED unless an approved provider credential is available to the final live-probe environment.
-- Physical-camera OCR and external production OCR are NOT VERIFIED without a real device/service credential; CI OCR adapter is test-only.
-- Production translation provider quality is NOT VERIFIED without its live credential/provider probe.
-- Part 2 economy/Map/XP/Coins and Part 3 final Liquid Glass/game presentation are intentionally out of Part 1 scope.
-- Android Part 1 UI is a functional developer shell, not final product presentation.
+> **Part 2 current-state document.** The exact acceptance SHA/run/job are bound in the canonical package `PROVENANCE.txt`. Preserved Android runtime evidence is from product SHA `2e70908f65bb25d23e87a9ddc690b8ea09f3040e`, run `31787591097`, job `94726891516`; Manager-acceptance deltas are reverified on the final handoff SHA.
+
+This filename is retained for compatibility. The authoritative current limitations are `KNOWN_LIMITATIONS.md`. Part 2 XP/Coins/Store/Map/avatars/seasons are implemented; they are not deferred. See the uppercase document for exact verification boundaries and the Room schema-export note.
