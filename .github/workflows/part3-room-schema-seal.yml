@@ -1,6 +1,7 @@
 name: Veltrix Backend Part 3 Room Schema Seal
 
 on:
+  workflow_dispatch:
   push:
     branches: [veltrix-hom-backend-part3-final]
     paths:
