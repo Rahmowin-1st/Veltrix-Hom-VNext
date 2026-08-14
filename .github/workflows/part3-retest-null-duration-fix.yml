@@ -1,0 +1,33 @@
+name: Veltrix Backend Part 3 Retest Null Duration Fix
+on:
+  push:
+    branches: [veltrix-hom-backend-part3-final]
+    paths:
+      - scripts/part3_fix_retest_null_duration.py
+      - .github/workflows/part3-retest-null-duration-fix.yml
+permissions:
+  contents: write
+concurrency:
+  group: veltrix-part3-retest-null-duration-fix
+  cancel-in-progress: true
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-backend-part3-final
+          fetch-depth: 0
+      - run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 scripts/part3_fix_retest_null_duration.py
+          git diff --check
+          git diff --exit-code --quiet && { echo PART3_RETEST_NULL_DURATION_NO_CHANGE=PASS; exit 0; }
+          git config user.name veltrix-backend-master
+          git config user.email actions@users.noreply.github.com
+          git add server/src/main/kotlin/com/veltrix/hom/vnext/server/Part3CompletionRepository.kt
+          git commit -m 'fix(part3): type nullable retest duration in PostgreSQL'
+          git push origin HEAD:veltrix-hom-backend-part3-final
+          echo PART3_RETEST_NULL_DURATION_PUSH=PASS
