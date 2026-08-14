@@ -1,0 +1,73 @@
+name: Veltrix Part 2 Source Audit
+
+on:
+  push:
+    branches: [veltrix-hom-part2-backend]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    env:
+      VELTRIX_ENV: test
+      VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_DATABASE_USER: postgres
+      VELTRIX_DATABASE_PASSWORD: postgres
+      VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+      VELTRIX_TEST_DATABASE_USER: postgres
+      VELTRIX_TEST_DATABASE_PASSWORD: postgres
+      VELTRIX_AI_PROVIDER: disabled
+      VELTRIX_TEST_AI_MOCK: 'true'
+      VELTRIX_EMBEDDING_PROVIDER: disabled
+      VELTRIX_TEST_EMBEDDING_MOCK: 'true'
+      VELTRIX_EMBEDDING_DIMENSIONS: '64'
+      VELTRIX_STORAGE_PROVIDER: local
+      VELTRIX_WORKERS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Exact provenance
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          git merge-base --is-ancestor fe4b2528a0a7da550351d926d44cc025e49dcafc HEAD
+          printf 'repo=%s\nbranch=%s\ncommit=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+      - name: PostgreSQL readiness
+        run: |
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+      - name: Core and server tests with real PostgreSQL
+        run: gradle --no-daemon --stacktrace :core:test :server:test
+      - name: Frozen Part 1 deterministic regression
+        run: bash scripts/run_local_regressions.sh
+      - name: Structure check
+        run: bash scripts/verify_structure.sh
+      - name: Part 2 static authority checks
+        run: |
+          grep -q 'CREATE TABLE xp_ledger' database/migrations/V005__part2_game_account.sql
+          grep -q 'CHECK(balance >= 0)' database/migrations/V005__part2_game_account.sql
+          grep -q 'FOR UPDATE' server/src/main/kotlin/com/veltrix/hom/vnext/server/Part2GameRepository.kt
+          grep -q 'semanticEvidence' server/src/main/kotlin/com/veltrix/hom/vnext/server/Part2GameRepository.kt
+          ! grep -R --line-number -E 'xpAmount.*call.receive|coinAmount.*call.receive|priceCoins.*call.receive' server/src/main/kotlin
