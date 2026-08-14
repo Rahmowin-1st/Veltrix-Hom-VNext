@@ -17,7 +17,7 @@ class SyncWorker(appContext:Context,params:WorkerParameters):CoroutineWorker(app
         val batch=dao.nextBatch(session.accountId,50);if(batch.isEmpty())return Result.success()
         val body=JSONObject().put("mutations",JSONArray().apply{batch.forEach{m->
             val payload=runCatching{JSONObject(m.payload)}.getOrElse{JSONObject()}
-            put(JSONObject().put("mutationId",m.id).put("entityType",m.entityType).put("entityId",m.entityId).put("operation","UPSERT").apply{m.expectedRevision?.let{put("expectedRevision",it)}}.put("idempotencyKey",m.idempotencyKey).put("payload",payload))
+            put(JSONObject().put("mutationId",m.id).put("entityType",m.entityType).put("entityId",m.entityId).put("operation",m.operation).apply{m.expectedRevision?.let{put("expectedRevision",it)}}.put("idempotencyKey",m.idempotencyKey).put("payload",payload))
         }}).toString()
         val response=try{post("${BuildConfig.VELTRIX_API_BASE_URL}/v1/sync/mutations",session.accessToken,body)}catch(_:Exception){return Result.retry()}
         if(response.first==401){SessionStore(applicationContext).clear();return Result.failure()}
