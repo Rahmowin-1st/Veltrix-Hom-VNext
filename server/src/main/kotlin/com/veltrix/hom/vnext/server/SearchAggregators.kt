@@ -32,14 +32,15 @@ class GlobalSearchRepository(private val db:Database){
     private fun requireProject(c:Connection,a:String,id:String){c.prepareStatement("SELECT 1 FROM project WHERE id=?::uuid AND account_id=?::uuid AND deleted_at IS NULL").use{ps->ps.setString(1,id);ps.setString(2,a);ps.executeQuery().use{if(!it.next())throw DomainException(DomainError("PROJECT_NOT_FOUND",ErrorCategory.NOT_FOUND,"Project not found"))}}}
 }
 
-class HomeAggregatorRepository(private val db:Database, private val projects:ProjectRepository, private val memory:MemoryRepository){
+class HomeAggregatorRepository(private val db:Database, private val projects:ProjectRepository, private val memory:MemoryRepository, private val game:Part2GameRepository){
     fun snapshot(accountId:String):HomeSnapshotResponse{
         val profile=db.tx{c->c.prepareStatement("SELECT display_name,default_avatar_id FROM user_profile WHERE account_id=?::uuid").use{ps->ps.setString(1,accountId);ps.executeQuery().use{rs->if(!rs.next())throw DomainException(DomainError("PROFILE_NOT_FOUND",ErrorCategory.NOT_FOUND,"Profile not found"));rs.getString(1) to rs.getString(2)}}}
         val recent=projects.list(accountId,6,0)
         val maturity=memory.maturity(accountId)
         val unread=db.tx{c->c.prepareStatement("SELECT count(*) FROM notification_intent WHERE account_id=?::uuid AND status='PENDING' AND (scheduled_for IS NULL OR scheduled_for<=now())").use{ps->ps.setString(1,accountId);ps.executeQuery().use{rs->rs.next();rs.getInt(1)}}}
         val focus=recent.firstOrNull{it.status=="ACTIVE"}?.title
-        return HomeSnapshotResponse(accountId,profile.first,profile.second?:"default",recent,focus,maturity.state,"LOCKED_PART_2",unread,"SERVER_AUTHORITATIVE",1)
+        val g=game.profile(accountId)
+        return HomeSnapshotResponse(accountId,profile.first,g.equippedAvatar.avatarId,recent,focus,maturity.state,g.mapState,unread,"SERVER_AUTHORITATIVE",2,g.level,g.lifetimeXp,g.coinBalance,g.currentConsistency,g.currentSeason?.seasonId,g.revision)
     }
 }
 

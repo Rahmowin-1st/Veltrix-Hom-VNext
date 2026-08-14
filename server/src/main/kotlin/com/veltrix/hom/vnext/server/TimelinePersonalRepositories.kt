@@ -15,7 +15,7 @@ class ActivityTimelineRepository(private val db: Database) {
     private fun requireProject(c:java.sql.Connection,a:String,id:String){c.prepareStatement("SELECT 1 FROM project WHERE id=?::uuid AND account_id=?::uuid AND deleted_at IS NULL").use{ps->ps.setString(1,id);ps.setString(2,a);ps.executeQuery().use{if(!it.next())throw DomainException(DomainError("PROJECT_NOT_FOUND",ErrorCategory.NOT_FOUND,"Project not found"))}}}
 }
 
-class PersonalAggregatorRepository(private val db:Database,private val memory:MemoryRepository,private val timeline:ActivityTimelineRepository){
+class PersonalAggregatorRepository(private val db:Database,private val memory:MemoryRepository,private val timeline:ActivityTimelineRepository,private val game:Part2GameRepository){
     fun snapshot(accountId:String):PersonalSnapshotResponse=db.tx{c->
         val profile=c.prepareStatement("SELECT display_name,preferred_language,timezone FROM user_profile WHERE account_id=?::uuid").use{ps->ps.setString(1,accountId);ps.executeQuery().use{rs->if(!rs.next())throw DomainException(DomainError("PROFILE_NOT_FOUND",ErrorCategory.NOT_FOUND,"Profile not found"));Triple(rs.getString(1),rs.getString(2),rs.getString(3))}}
         fun count(sql:String):Int=c.prepareStatement(sql).use{ps->ps.setString(1,accountId);ps.executeQuery().use{rs->rs.next();rs.getInt(1)}}
@@ -23,7 +23,7 @@ class PersonalAggregatorRepository(private val db:Database,private val memory:Me
         val assessments=count("SELECT count(*) FROM assessment_attempt WHERE account_id=?::uuid AND state='GRADED'")
         val mistakes=count("SELECT count(*) FROM mistake WHERE account_id=?::uuid AND status IN ('ACTIVE','IMPROVING','RECURRED') AND deleted_at IS NULL")
         val due=count("SELECT count(*) FROM flashcard_schedule WHERE account_id=?::uuid AND due_at<=now()")
-        PersonalSnapshotResponse(accountId,profile.first,profile.second,profile.third,memory.maturity(accountId).state,activeProjects,assessments,mistakes,due,timeline.list(accountId,null,10,0))
+        PersonalSnapshotResponse(accountId,profile.first,profile.second,profile.third,memory.maturity(accountId).state,activeProjects,assessments,mistakes,due,timeline.list(accountId,null,10,0),schemaVersion=2,game=game.profile(accountId))
     }
 }
 
