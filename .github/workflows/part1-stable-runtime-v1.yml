@@ -1,4 +1,4 @@
-# retrigger after single-route state-machine fix
+# retrigger exact current source after route and AI stream verification
 name: Veltrix Part 1 Stable Runtime V1
 
 on:
