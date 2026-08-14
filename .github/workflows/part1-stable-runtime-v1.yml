@@ -1,4 +1,4 @@
-# retrigger after valid SHA-256 source metadata fixture fix
+# retrigger after capability viewport assertion fix
 name: Veltrix Part 1 Stable Runtime V1
 
 on:
