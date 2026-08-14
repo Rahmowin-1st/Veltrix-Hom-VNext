@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.security.MessageDigest
 
 /** Device-side proof that the Android transport can exercise real Part 1 feature contracts. */
 class Part1FeatureInstrumentedTest {
@@ -16,6 +17,10 @@ class Part1FeatureInstrumentedTest {
         assertTrue("$method $path -> $code $text", code in expected)
         return if (text.isBlank()) JSONObject() else JSONObject(text)
     }
+
+    private fun sha256Hex(value: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
     @Test
     fun projectSourceQuizMistakePracticeFlashcardContractsWorkOnDevice() {
@@ -51,7 +56,7 @@ class Part1FeatureInstrumentedTest {
             .put("title", "Device Source")
             .put("type", "TEXT")
             .put("mimeType", "text/plain")
-            .put("contentHash", "device-source-$suffix")
+            .put("contentHash", sha256Hex("device-source-$suffix"))
             .put("sizeBytes", 80), setOf(201))
         val sourceId = source.getString("id")
         val ready = obj("POST", "/v1/sources/$sourceId/text", token, JSONObject()
