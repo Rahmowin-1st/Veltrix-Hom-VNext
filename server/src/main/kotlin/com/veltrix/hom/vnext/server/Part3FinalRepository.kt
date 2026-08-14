@@ -1,6 +1,6 @@
 package com.veltrix.hom.vnext.server
 
-internal class Part3FinalRepository(
+class Part3FinalRepository(
     db:Database,
     projects:ProjectRepository,
     chats:ChatRepository,
