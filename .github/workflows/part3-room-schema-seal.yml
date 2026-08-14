@@ -1,5 +1,6 @@
 name: Veltrix Backend Part 3 Room Schema Seal
 
+# Canonical Android ApiSession uses accountId + token.
 on:
   workflow_dispatch:
   push:
