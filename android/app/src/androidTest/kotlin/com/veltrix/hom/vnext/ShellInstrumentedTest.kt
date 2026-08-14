@@ -30,14 +30,27 @@ class ShellInstrumentedTest {
         assertEquals("SETTINGS", required.last())
 
         compose.onNodeWithTag("open-capabilities").assertIsDisplayed().performClick()
-        compose.waitForIdle()
-        compose.onNodeWithTag("active-route").assertTextEquals("CHAT").assertIsDisplayed()
+        waitForActiveRoute("CHAT")
         compose.onNodeWithTag("capability-CHAT").assertIsDisplayed()
 
         CapabilityRoute.entries.drop(1).forEach { route ->
-            compose.onNodeWithTag("capability-${route.name}").performScrollTo().performClick()
+            val tag = "capability-${route.name}"
+            compose.onNodeWithTag(tag).performScrollTo()
             compose.waitForIdle()
-            compose.onNodeWithTag("active-route").assertTextEquals(route.name).assertIsDisplayed()
+            // Re-query after scrolling/recomposition so the click never uses a stale semantics node.
+            compose.onNodeWithTag(tag).assertIsDisplayed().performClick()
+            waitForActiveRoute(route.name)
         }
+    }
+
+    private fun waitForActiveRoute(expected: String) {
+        compose.waitUntil(timeoutMillis = 5_000) {
+            runCatching {
+                compose.onNodeWithTag("active-route").assertTextEquals(expected)
+                true
+            }.getOrDefault(false)
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("active-route").assertTextEquals(expected).assertIsDisplayed()
     }
 }
