@@ -138,11 +138,11 @@ cat evidence/offline-tests.txt
 grep -q 'OK (2 tests)' evidence/offline-tests.txt
 
 # Process-death contract is intentionally split across fresh instrumentation processes.
-adb shell am instrument -w -e class 'com.veltrix.hom.vnext.Part3ProcessDeathInstrumentedTest#step1CreatePrepareState' "$I" > evidence/process-death-step1.txt
+adb shell am instrument -w -e class 'com.veltrix.hom.vnext.Part3ProcessDeathInstrumentedTest#aSeedPart3State' "$I" > evidence/process-death-step1.txt
 cat evidence/process-death-step1.txt
 grep -q 'OK (1 test)' evidence/process-death-step1.txt
 
-adb shell am instrument -w -e class 'com.veltrix.hom.vnext.Part3ProcessDeathInstrumentedTest#step2FreshProcessReadsDurableState' "$I" > evidence/process-death-step2.txt
+adb shell am instrument -w -e class 'com.veltrix.hom.vnext.Part3ProcessDeathInstrumentedTest#zVerifyPart3StateAfterFreshInstrumentationProcess' "$I" > evidence/process-death-step2.txt
 cat evidence/process-death-step2.txt
 grep -q 'OK (1 test)' evidence/process-death-step2.txt
 
