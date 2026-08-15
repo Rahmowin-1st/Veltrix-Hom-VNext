@@ -39,8 +39,10 @@ assert_app_top() {
 }
 
 # Back ownership: open drawer, Android Back must close it while keeping MainActivity alive.
+# API-36 Pixel 7 has a 136px top status/cutout inset. The semantic drawer control is
+# [37,157][168,288], so tap its center instead of the system-inset area.
 start_home
-adb shell input tap 50 120
+adb shell input tap 102 222
 wait_text 'Global capabilities' opened
 adb shell input keyevent 4
 wait_text 'Continue with Veltrix|Ask Veltrix' back-closed
