@@ -56,13 +56,16 @@ cat evidence/frontend-personal-ui-test.txt
 grep -q 'OK (1 test)' evidence/frontend-personal-ui-test.txt
 cat evidence/frontend-home-ui-test.txt evidence/frontend-personal-ui-test.txt > evidence/frontend-ui-tests.txt
 
-# Real Activity shell + real API-36 viewport acceptance.
+# Real Activity shell + real API-36 viewport acceptance. Force-stop before every
+# Activity-backed instrumentation process so stale Compose roots cannot leak across runs.
+adb shell am force-stop "$PACKAGE"
 adb shell am instrument -w -e class com.veltrix.hom.vnext.ShellInstrumentedTest "$I" > evidence/shell-ui-test.txt
 cat evidence/shell-ui-test.txt
 grep -q 'OK (1 test)' evidence/shell-ui-test.txt
 
 # Accessibility adaptation: large text must keep critical navigation/action usable.
 adb shell settings put system font_scale 1.3
+adb shell am force-stop "$PACKAGE"
 adb shell am instrument -w -e class com.veltrix.hom.vnext.ShellInstrumentedTest "$I" > evidence/a11y-font-scale.txt
 cat evidence/a11y-font-scale.txt
 grep -q 'OK (1 test)' evidence/a11y-font-scale.txt
@@ -72,6 +75,7 @@ adb shell settings put system font_scale 1.0
 adb shell settings put global animator_duration_scale 0
 adb shell settings put global transition_animation_scale 0
 adb shell settings put global window_animation_scale 0
+adb shell am force-stop "$PACKAGE"
 adb shell am instrument -w -e class com.veltrix.hom.vnext.ShellInstrumentedTest "$I" > evidence/a11y-reduced-motion.txt
 cat evidence/a11y-reduced-motion.txt
 grep -q 'OK (1 test)' evidence/a11y-reduced-motion.txt
