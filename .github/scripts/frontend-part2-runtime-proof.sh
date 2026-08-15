@@ -71,7 +71,9 @@ PYPNG
 }
 
 capture_fixture() {
-  local scenario="$1" name="$2" png="evidence/screens/${name}.png"
+  local scenario="$1"
+  local name="$2"
+  local png="evidence/screens/${name}.png"
   adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
   adb shell wm dismiss-keyguard >/dev/null 2>&1 || true
   adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
