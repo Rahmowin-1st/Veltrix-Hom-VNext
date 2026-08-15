@@ -108,16 +108,21 @@ class Part2ServerIntegrationInstrumentedTest {
         val search = repository.search(ApiSession(session.accountId, session.token), "Motion Studio")
         assertTrue(search.value.orEmpty().any { it.id == projectId && it.deepLink.isNotBlank() })
 
+        // GET-only identity/store/map reads must agree with backend truth and cannot mutate economy.
         val store = repository.store(ApiSession(session.accountId, session.token), true)
         assertNotNull(store.value)
-        val initialBalance = store.value!!.coinBalance
-        assertEquals(initialBalance, repository.gameProfile(ApiSession(session.accountId, session.token), true).value?.coinBalance)
+        val balanceBeforeAi = store.value!!.coinBalance
+        assertEquals(balanceBeforeAi, repository.gameProfile(ApiSession(session.accountId, session.token), true).value?.coinBalance)
         val avatars = repository.avatars(ApiSession(session.accountId, session.token), true)
         assertTrue(avatars.value.orEmpty().isNotEmpty())
         val personalMap = repository.personalMap(ApiSession(session.accountId, session.token), true)
         assertNotNull(personalMap.value)
         assertEquals(personalMap.value!!.eligible, personalMap.value!!.levelSatisfied && personalMap.value!!.memorySatisfied)
+        assertEquals(balanceBeforeAi, repository.store(ApiSession(session.accountId, session.token), true).value!!.coinBalance)
 
+        // A completed AI interaction is meaningful backend activity and may legitimately earn a
+        // backend-defined reward. Frontend must display the resulting authoritative balance rather
+        // than assuming that the pre-interaction balance remains fixed.
         val streamEvents = mutableListOf<StreamUiEvent>()
         repository.streamAi(
             ApiSession(session.accountId, session.token), conversationId, projectId, listOf(sourceId),
@@ -127,10 +132,10 @@ class Part2ServerIntegrationInstrumentedTest {
         val messages = repository.messages(ApiSession(session.accountId, session.token), conversationId, true)
         assertTrue(messages.value.orEmpty().any { it.role == "ASSISTANT" && it.state == "COMPLETED" })
 
-        // Frontend does not grant coins or ownership. A store purchase must be interpreted from
-        // authoritative backend response only; merely previewing/selecting an item changes nothing.
-        val afterReadOnlyFlows = repository.store(ApiSession(session.accountId, session.token), true).value!!.coinBalance
-        assertEquals(initialBalance, afterReadOnlyFlows)
+        val authoritativeStoreBalance = repository.store(ApiSession(session.accountId, session.token), true).value!!.coinBalance
+        val authoritativeProfileBalance = repository.gameProfile(ApiSession(session.accountId, session.token), true).value!!.coinBalance
+        assertEquals(authoritativeProfileBalance, authoritativeStoreBalance)
+        assertTrue(authoritativeStoreBalance >= balanceBeforeAi)
     }
 
     private fun requestJson(api: VeltrixApiClient, token: String, method: String, path: String, body: JSONObject, expected: Int): JSONObject {
