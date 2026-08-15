@@ -115,6 +115,7 @@ jobs:
             bash .github/scripts/frontend-part1-runtime-proof.sh
             bash .github/scripts/frontend-part1-final-evidence.sh
             bash .github/scripts/frontend-part1-drawer-proof.sh
+            bash .github/scripts/frontend-part1-motion-refresh.sh
       - name: Package
         if: always()
         shell: bash
