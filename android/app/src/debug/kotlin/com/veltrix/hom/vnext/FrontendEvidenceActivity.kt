@@ -12,7 +12,7 @@ import androidx.compose.ui.Modifier
 
 /**
  * Debug-only deterministic presentation harness used by CI to prove visual state coverage.
- * It reuses the exact production Home/Personal composables and supplies repository-level
+ * It reuses the exact production premium Home/Personal composables and supplies repository-level
  * fixture states. No business rule or production runtime path depends on this activity.
  */
 class FrontendEvidenceActivity : ComponentActivity() {
@@ -25,9 +25,9 @@ class FrontendEvidenceActivity : ComponentActivity() {
                 VeltrixWorldBackground {
                     Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
                         if (scenario.startsWith("PERSONAL")) {
-                            PersonalScreen(personalEvidenceState(scenario), true, {})
+                            PremiumPersonalScreen(personalEvidenceState(scenario), true, {})
                         } else {
-                            HomeScreen(homeEvidenceState(scenario), true, {}, {}, {}, {}, {})
+                            PremiumHomeScreen(homeEvidenceState(scenario), true, {}, {}, {}, {}, {})
                         }
                     }
                 }
