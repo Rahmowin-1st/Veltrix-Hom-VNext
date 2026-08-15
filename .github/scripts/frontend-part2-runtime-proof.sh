@@ -6,6 +6,7 @@ APK="android/app/build/outputs/apk/debug/app-debug.apk"
 TEST_APK="$(find android/app/build/outputs/apk/androidTest -name '*androidTest.apk' -type f -size +0c | head -1)"
 PACKAGE="com.veltrix.hom.vnext.dev"
 ACTIVITY="$PACKAGE/com.veltrix.hom.vnext.MainActivity"
+EVIDENCE_ACTIVITY="$PACKAGE/com.veltrix.hom.vnext.FrontendEvidenceActivity"
 
 test -s "$APK"
 test -s "$TEST_APK"
@@ -21,6 +22,17 @@ run_test() {
   adb shell am instrument -w -e class "$cls" "$I" > "$out"
   cat "$out"
   grep -q "$expect" "$out"
+}
+
+capture_fixture() {
+  local scenario="$1" name="$2"
+  adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
+  adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario "$scenario" > "evidence/screens/${name}-start.txt"
+  sleep .55
+  adb exec-out screencap -p > "evidence/screens/${name}.png"
+  test -s "evidence/screens/${name}.png"
+  adb shell uiautomator dump "/sdcard/${name}.xml" >/dev/null 2>&1 || true
+  adb pull "/sdcard/${name}.xml" "evidence/screens/${name}.xml" >/dev/null 2>&1 || true
 }
 
 # Accepted foundation + new Part 2 real-backend contracts.
@@ -46,14 +58,64 @@ grep -Eqi 'Part2 Learner|Ask Veltrix|Build the next useful step' evidence/runtim
 adb exec-out screencap -p > evidence/screens/live-home.png
 test -s evidence/screens/live-home.png
 
+# Deterministic visual matrix. Fixtures use the exact production composables while keeping
+# backend-owned values explicit; screenshots are static proof, never a substitute for runtime tests.
+capture_fixture HOME_FOCUS 01-home-focus
+capture_fixture HOME_SPARSE 02-home-sparse
+capture_fixture HOME_OFFLINE 03-home-offline
+capture_fixture HOME_UNLOCKED 04-home-unlocked
+capture_fixture PERSONAL_MAP_ACTIVE 05-personal-map-active
+capture_fixture PERSONAL_SPARSE 06-personal-sparse
+capture_fixture PERSONAL_OFFLINE 07-personal-offline
+capture_fixture PROJECTS_LIST 08-projects-list
+capture_fixture PROJECTS_SPACE 09-project-space
+capture_fixture PROJECTS_EMPTY 10-projects-empty
+capture_fixture CHAT_STREAMING 11-chat-streaming
+capture_fixture CHAT_CITATION 12-chat-citations
+capture_fixture CHAT_ERROR 13-chat-error
+capture_fixture LIBRARY_PROCESSING 14-library-processing
+capture_fixture LIBRARY_FAILED 15-library-failed
+capture_fixture TESTING_ACTIVE 16-testing-active
+capture_fixture QUIZ_RESULT 17-quiz-result
+capture_fixture PRACTICE_HINT 18-practice-hint
+capture_fixture PRACTICE_FEEDBACK 19-practice-feedback
+capture_fixture FLASHCARD_READY 20-flashcard
+capture_fixture MISTAKES_ACTIVE 21-mistakes
+capture_fixture STORE_READY 22-store
+capture_fixture STORE_INSUFFICIENT 23-store-insufficient
+capture_fixture SEARCH_RESULTS 24-search
+capture_fixture HISTORY_READY 25-history
+printf 'VISUAL_MATRIX=PASS count=25\n' | tee evidence/screens/visual-matrix-gate.txt
+
+# Temporal proof for World Layer identity continuity. This is emulator evidence only.
+adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
+adb shell rm -f /sdcard/part2-world-motion.mp4 >/dev/null 2>&1 || true
+adb shell screenrecord --time-limit 9 --bit-rate 6000000 /sdcard/part2-world-motion.mp4 >/dev/null 2>&1 &
+REC_PID=$!
+sleep 1
+adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario HOME_FOCUS >/dev/null
+sleep 2
+adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario PERSONAL_MAP_ACTIVE >/dev/null
+sleep 2
+adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario PROJECTS_SPACE >/dev/null
+sleep 2
+adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario STORE_READY >/dev/null
+wait "$REC_PID" || true
+adb pull /sdcard/part2-world-motion.mp4 evidence/motion/part2-world-transitions.mp4 >/dev/null
+test -s evidence/motion/part2-world-transitions.mp4
+printf 'MOTION_EMULATOR_PROOF=PASS\nPHYSICAL_TOUCH_FEEL=NOT_VERIFIED\n' | tee evidence/motion/motion-gate.txt
+
 # A11Y: extreme text, reduced motion, TalkBack presence/semantics.
 adb shell settings put system font_scale 2.0
 run_test com.veltrix.hom.vnext.ShellInstrumentedTest evidence/accessibility/extreme-font-shell.txt 'OK (1 test)'
+capture_fixture HOME_FOCUS 26-home-font-200
+capture_fixture PROJECTS_SPACE 27-project-font-200
 adb shell settings put system font_scale 1.0
 adb shell settings put global animator_duration_scale 0
 adb shell settings put global transition_animation_scale 0
 adb shell settings put global window_animation_scale 0
 run_test com.veltrix.hom.vnext.ShellInstrumentedTest evidence/accessibility/reduced-motion-shell.txt 'OK (1 test)'
+capture_fixture PERSONAL_MAP_ACTIVE 28-personal-reduced-motion
 adb shell settings put global animator_duration_scale 1
 adb shell settings put global transition_animation_scale 1
 adb shell settings put global window_animation_scale 1
@@ -107,6 +169,7 @@ adb shell dumpsys meminfo "$PACKAGE" > evidence/performance/meminfo.txt || true
 adb shell logcat -d -t 1000 > evidence/runtime/logcat.txt || true
 ! grep -q 'ANR in com.veltrix.hom.vnext' evidence/runtime/logcat.txt
 ! grep -q 'FATAL EXCEPTION: main' evidence/runtime/logcat.txt
+printf 'PERF_API36_EMULATOR_SMOKE=PASS\nPHYSICAL_DEVICE_PF=NOT_VERIFIED\n' | tee evidence/performance/performance-gate.txt
 
 echo PART1_REGRESSION_RUNTIME=PASS | tee evidence/runtime/part1-regression-gate.txt
 echo PART2_BACKEND_CONTRACT_RUNTIME=PASS | tee evidence/runtime/part2-contract-gate.txt
