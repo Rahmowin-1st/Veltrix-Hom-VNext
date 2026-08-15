@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Run-scoped proof directories must never inherit checked-in or prior-run evidence.
+# Preserve root-level provenance/build/server logs created by earlier workflow stages.
+rm -rf evidence/runtime evidence/accessibility evidence/performance evidence/screens evidence/motion evidence/diagnostics
 mkdir -p evidence/runtime evidence/accessibility evidence/performance evidence/screens evidence/motion evidence/diagnostics package
 APK="android/app/build/outputs/apk/debug/app-debug.apk"
 TEST_APK="$(find android/app/build/outputs/apk/androidTest -name '*androidTest.apk' -type f -size +0c | head -1)"
@@ -156,7 +159,7 @@ adb exec-out screencap -p > evidence/screens/live-home.png
 assert_png_complete evidence/screens/live-home.png
 mark 'LIVE_HOME=PASS'
 
-while read -r scenario name; do capture_fixture "$scenario" "$name"; done <<'MATRIX'
+while read -r scenario name; do capture_fixture "$scenario" "$name" </dev/null; done <<'MATRIX'
 HOME_FOCUS 01-home-focus
 HOME_SPARSE 02-home-sparse
 HOME_OFFLINE 03-home-offline
@@ -183,11 +186,34 @@ STORE_INSUFFICIENT 23-store-insufficient
 SEARCH_RESULTS 24-search
 HISTORY_READY 25-history
 MATRIX
-printf 'VISUAL_MATRIX=PASS count=25 semantic=25 complete_render=25\n' | tee evidence/screens/visual-matrix-gate.txt
+MATRIX_NAMES=(
+  01-home-focus 02-home-sparse 03-home-offline 04-home-unlocked
+  05-personal-map-active 06-personal-sparse 07-personal-offline
+  08-projects-list 09-project-space 10-projects-empty
+  11-chat-streaming 12-chat-citations 13-chat-error
+  14-library-processing 15-library-failed 16-testing-active 17-quiz-result
+  18-practice-hint 19-practice-feedback 20-flashcard 21-mistakes
+  22-store 23-store-insufficient 24-search 25-history
+)
+MATRIX_FILES=()
+: > evidence/screens/screenshot-sha256.txt
+for name in "${MATRIX_NAMES[@]}"; do
+  png="evidence/screens/${name}.png"
+  start="evidence/screens/${name}-start.txt"
+  test -s "$png"
+  grep -q 'semantic=PASS visual=PASS' "$start"
+  assert_png_complete "$png"
+  MATRIX_FILES+=("$png")
+done
+test "${#MATRIX_FILES[@]}" -eq 25
+sha256sum "${MATRIX_FILES[@]}" > evidence/screens/screenshot-sha256.txt
+test "$(wc -l < evidence/screens/screenshot-sha256.txt)" -eq 25
+printf 'VISUAL_MATRIX=PASS count=%s semantic=%s complete_render=%s fresh_manifest=PASS\n' "${#MATRIX_FILES[@]}" "${#MATRIX_FILES[@]}" "${#MATRIX_FILES[@]}" | tee evidence/screens/visual-matrix-gate.txt
 mark 'VISUAL_MATRIX=PASS'
 
 motion_state(){
- local scenario="$1" marker="$2" name="$3" xml="evidence/motion/${name}.xml"
+ local scenario="$1" marker="$2" name="$3"
+ local xml="evidence/motion/${name}.xml"
  # Keep a single EvidenceActivity instance alive throughout the temporal proof. `am start -W`
  # can wait for a fresh Activity resume and hit the 20s guard on the software-rendered API36
  # runner. SINGLE_TOP instead delivers the new scenario through onNewIntent; the semantic
@@ -229,7 +255,8 @@ print(f'MOTION_SEQUENCE observed={scenarios}')
 if scenarios != expected:
     raise SystemExit(45)
 PYMOTION
-printf 'MOTION_RUNTIME=PASS states=HOME,PERSONAL,PROJECTS,STORE,HOME\nPHYSICAL_TOUCH_FEEL=NOT_VERIFIED\n' | tee evidence/motion/motion-gate.txt
+for xml_name in home personal projects store home-return; do test -s "evidence/motion/${xml_name}.xml"; done
+printf 'MOTION_RUNTIME=PASS states=HOME,PERSONAL,PROJECTS,STORE,HOME named_semantic_dumps=PASS\nPHYSICAL_TOUCH_FEEL=NOT_VERIFIED\n' | tee evidence/motion/motion-gate.txt
 mark 'MOTION=PASS'
 
 adb shell settings put system font_scale 2.0
@@ -318,5 +345,10 @@ See evidence/apk-sha256.txt, evidence/androidtest-apk-sha256.txt, evidence/sourc
 Review visual screenshots, motion MP4, renderer environment, accessibility gate, exact source provenance, and the physical-device limitation before Manager acceptance.
 EOF
 
-printf 'PART1_ACCEPTANCE_CANDIDATE=PASS\nPART2_ACCEPTANCE_CANDIDATE=PASS\nPHYSICAL_DEVICE_EXTERNAL_PROOF=NOT_VERIFIED\n' | tee evidence/runtime/final-gate.txt
+# Revalidate the visual evidence at the end of the run so packaging cannot inherit stale/missing proof.
+test "$(wc -l < evidence/screens/screenshot-sha256.txt)" -eq 25
+sha256sum -c evidence/screens/screenshot-sha256.txt
+for name in 26-home-font-200 27-project-font-200 28-personal-reduced-motion; do test -s "evidence/screens/${name}.png"; done
+test "$(find evidence/screens -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 29
+printf 'PART1_ACCEPTANCE_CANDIDATE=PASS\nPART2_ACCEPTANCE_CANDIDATE=PASS\nPHYSICAL_DEVICE_EXTERNAL_PROOF=NOT_VERIFIED\nSCREENSHOT_ARTIFACT_SET=PASS fresh_matrix=25 total_png=29\n' | tee evidence/runtime/final-gate.txt
 mark 'PART2_FINAL_PROOF=PASS'
