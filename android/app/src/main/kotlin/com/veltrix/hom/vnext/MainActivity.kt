@@ -168,40 +168,15 @@ private fun MainWorld(
                 CapabilityBridgeScreen(capability.name)
             } else {
                 when (destination) {
-                    PrimaryDestination.HOME -> {
-                        if (showBottomNav) {
-                            BoxWithConstraints(
-                                Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                // Phone Home is intentionally a bounded one-screen stage. This keeps
-                                // the primary action visible instead of letting non-critical signals
-                                // consume the action area on tall-density phone viewports.
-                                val stageHeight = maxHeight.coerceAtMost(688.dp)
-                                Box(Modifier.fillMaxWidth().height(stageHeight)) {
-                                    HomeScreen(
-                                        home,
-                                        sessionResolved,
-                                        onRetryHome,
-                                        { onSelectDestination(PrimaryDestination.PERSONAL) },
-                                        { onSelectCapability(CapabilityRoute.CHAT) },
-                                        { onSelectCapability(CapabilityRoute.PRACTICE) },
-                                        { onSelectDestination(PrimaryDestination.PROJECTS) },
-                                    )
-                                }
-                            }
-                        } else {
-                            HomeScreen(
-                                home,
-                                sessionResolved,
-                                onRetryHome,
-                                { onSelectDestination(PrimaryDestination.PERSONAL) },
-                                { onSelectCapability(CapabilityRoute.CHAT) },
-                                { onSelectCapability(CapabilityRoute.PRACTICE) },
-                                { onSelectDestination(PrimaryDestination.PROJECTS) },
-                            )
-                        }
-                    }
+                    PrimaryDestination.HOME -> HomeScreen(
+                        home,
+                        sessionResolved,
+                        onRetryHome,
+                        { onSelectDestination(PrimaryDestination.PERSONAL) },
+                        { onSelectCapability(CapabilityRoute.CHAT) },
+                        { onSelectCapability(CapabilityRoute.PRACTICE) },
+                        { onSelectDestination(PrimaryDestination.PROJECTS) },
+                    )
                     PrimaryDestination.PERSONAL -> PersonalScreen(personal, sessionResolved, onRetryPersonal)
                     PrimaryDestination.STORE -> TransitionalStoreScreen()
                     PrimaryDestination.PROJECTS -> TransitionalProjectsScreen(projects, onCreateProject)
