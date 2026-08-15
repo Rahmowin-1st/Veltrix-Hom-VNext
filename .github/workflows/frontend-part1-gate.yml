@@ -108,9 +108,12 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_7
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          cores: 4
+          emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
           disable-animations: false
-          script: bash .github/scripts/frontend-part1-runtime-proof.sh
+          script: |
+            bash .github/scripts/frontend-part1-runtime-proof.sh
+            bash .github/scripts/frontend-part1-final-evidence.sh
       - name: Package
         if: always()
         shell: bash
@@ -118,7 +121,7 @@ jobs:
           git archive --format=zip --output=package/Veltrix-Hom-Frontend-Part1-EXACT-SOURCE.zip "$GITHUB_SHA"
           cp android/app/build/outputs/apk/debug/app-debug.apk package/Veltrix-Hom-Frontend-Part1.apk 2>/dev/null || true
           cp -R evidence package/evidence
-          (cd package && find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+          (cd package && find . -type f ! -name 'SHA256SUMS.txt' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
           zip -qr Veltrix-Hom-Frontend-Part1-EVIDENCE.zip package
       - name: Upload
         if: always()
