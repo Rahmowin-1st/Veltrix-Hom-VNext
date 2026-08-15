@@ -20,9 +20,17 @@ adb shell am instrument -w -e class com.veltrix.hom.vnext.ServerIntegrationInstr
 cat evidence/session-seed-test.txt
 grep -q 'OK (1 test)' evidence/session-seed-test.txt
 
-adb shell am instrument -w -e class com.veltrix.hom.vnext.FrontendPart1UiInstrumentedTest "$I" > evidence/frontend-ui-tests.txt
-cat evidence/frontend-ui-tests.txt
-grep -q 'OK (2 tests)' evidence/frontend-ui-tests.txt
+# Run the two pure-Compose contracts in independent instrumentation processes.
+# API 36 exposed lifecycle flakiness when deprecated createComposeRule hosted two
+# setContent tests in one process; separate processes keep the contract strict and deterministic.
+adb shell am instrument -w -e class 'com.veltrix.hom.vnext.FrontendPart1UiInstrumentedTest#homeUsesAuthoritativeSnapshotWithoutLocalEconomyAuthority' "$I" > evidence/frontend-home-ui-test.txt
+cat evidence/frontend-home-ui-test.txt
+grep -q 'OK (1 test)' evidence/frontend-home-ui-test.txt
+
+adb shell am instrument -w -e class 'com.veltrix.hom.vnext.FrontendPart1UiInstrumentedTest#personalExposesTrustworthySparseAndMapState' "$I" > evidence/frontend-personal-ui-test.txt
+cat evidence/frontend-personal-ui-test.txt
+grep -q 'OK (1 test)' evidence/frontend-personal-ui-test.txt
+cat evidence/frontend-home-ui-test.txt evidence/frontend-personal-ui-test.txt > evidence/frontend-ui-tests.txt
 
 # Decisive pre-shell diagnostic: launch the exact production Activity after the
 # seeded session, then preserve its visible state before instrumentation can fail.
