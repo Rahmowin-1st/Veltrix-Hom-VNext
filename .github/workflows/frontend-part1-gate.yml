@@ -1,0 +1,153 @@
+name: Veltrix Frontend Part 1 Gate
+
+on:
+  push:
+    branches: [veltrix-hom-frontend-part1]
+  workflow_dispatch:
+
+concurrency:
+  group: veltrix-frontend-part1-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  ACCEPTED_BACKEND_SHA: 4ed13cfcf7d4bb1fe6215b231426e0b4f208343a
+  VELTRIX_ENV: test
+  VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_DATABASE_USER: postgres
+  VELTRIX_DATABASE_PASSWORD: postgres
+  VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_TEST_DATABASE_USER: postgres
+  VELTRIX_TEST_DATABASE_PASSWORD: postgres
+  VELTRIX_AI_PROVIDER: disabled
+  VELTRIX_TEST_AI_MOCK: 'true'
+  VELTRIX_EMBEDDING_PROVIDER: disabled
+  VELTRIX_TEST_EMBEDDING_MOCK: 'true'
+  VELTRIX_EMBEDDING_DIMENSIONS: '64'
+  VELTRIX_TEST_OCR_MOCK: 'true'
+  VELTRIX_TEST_TRANSLATE_MOCK: 'true'
+  VELTRIX_STORAGE_PROVIDER: local
+  VELTRIX_WORKERS_ENABLED: 'true'
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/screens evidence/motion package
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git cat-file -e "$ACCEPTED_BACKEND_SHA^{commit}"
+          git merge-base --is-ancestor "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA"
+          ! git diff --name-only "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA" | grep -E '^(server/|database/migrations/|core/src/main/)' || exit 1
+          printf 'repo=%s\nbranch=%s\ncommit=%s\nparent_backend=%s\nrun=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" "$GITHUB_RUN_ID" | tee evidence/provenance.txt
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+      - name: Build and regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :core:test :server:test | tee evidence/backend-regression.txt
+          bash scripts/run_local_regressions.sh | tee evidence/frozen-regressions.txt
+          gradle --no-daemon -PVELTRIX_API_BASE_URL=http://127.0.0.1:8080 :android:app:testDebugUnitTest :android:app:assembleDebug :android:app:assembleDebugAndroidTest | tee evidence/android-build.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/android-build.txt
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee evidence/apk-sha256.txt
+      - name: Start backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup gradle --no-daemon :server:run > evidence/server.log 2>&1 &
+          for i in $(seq 1 90); do curl -fsS --max-time 3 http://127.0.0.1:8080/ready > evidence/ready.json && break || sleep 2; done
+          grep -q '"ready":true' evidence/ready.json
+      - uses: android-actions/setup-android@v3
+      - name: Android packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'emulator' 'build-tools;37.0.0' 'platforms;android-37.0' 'system-images;android-36;google_apis;x86_64'
+      - name: Runtime proof
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          script: |
+            set -euo pipefail
+            APK=android/app/build/outputs/apk/debug/app-debug.apk
+            TEST_APK=$(find android/app/build/outputs/apk/androidTest -name '*androidTest.apk' -type f -size +0c | head -1)
+            adb reverse tcp:8080 tcp:8080
+            adb install -r "$APK"
+            adb install -r "$TEST_APK"
+            I=$(adb shell pm list instrumentation | sed -n 's/^instrumentation:\([^ ]*\).*target=com.veltrix.hom.vnext.dev.*/\1/p' | head -1 | tr -d '\r')
+            test -n "$I"
+            adb shell am instrument -w -e class com.veltrix.hom.vnext.ServerIntegrationInstrumentedTest "$I" | tee evidence/session-seed-test.txt
+            grep -q 'OK (1 test)' evidence/session-seed-test.txt
+            adb shell am instrument -w -e class com.veltrix.hom.vnext.FrontendPart1UiInstrumentedTest "$I" | tee evidence/frontend-ui-tests.txt
+            grep -q 'OK (2 tests)' evidence/frontend-ui-tests.txt
+            adb shell am instrument -w -e class com.veltrix.hom.vnext.ShellInstrumentedTest "$I" | tee evidence/shell-ui-test.txt
+            grep -q 'OK (1 test)' evidence/shell-ui-test.txt
+            adb shell am force-stop com.veltrix.hom.vnext.dev
+            adb shell monkey -p com.veltrix.hom.vnext.dev 1 >/dev/null
+            sleep 4
+            adb exec-out screencap -p > evidence/screens/home.png
+            adb shell dumpsys gfxinfo com.veltrix.hom.vnext.dev reset || true
+            adb shell screenrecord --time-limit 6 /sdcard/motion.mp4 >/dev/null 2>&1 & P=$!
+            sleep 1
+            adb shell input tap 405 1770
+            sleep 2
+            adb shell input tap 90 140
+            sleep 2
+            wait $P || true
+            adb pull /sdcard/motion.mp4 evidence/motion/navigation-motion.mp4 >/dev/null
+            adb shell dumpsys gfxinfo com.veltrix.hom.vnext.dev framestats > evidence/gfxinfo-framestats.txt || true
+            test -s evidence/screens/home.png
+            test -s evidence/motion/navigation-motion.mp4
+            echo FRONTEND_PART1_RUNTIME=PASS | tee evidence/runtime-gate.txt
+      - name: Package
+        if: always()
+        shell: bash
+        run: |
+          git archive --format=zip --output=package/Veltrix-Hom-Frontend-Part1-EXACT-SOURCE.zip "$GITHUB_SHA"
+          cp android/app/build/outputs/apk/debug/app-debug.apk package/Veltrix-Hom-Frontend-Part1.apk 2>/dev/null || true
+          cp -R evidence package/evidence
+          (cd package && find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+          zip -qr Veltrix-Hom-Frontend-Part1-EVIDENCE.zip package
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-frontend-part1-${{ github.run_id }}
+          path: |
+            package/
+            evidence/
+            Veltrix-Hom-Frontend-Part1-EVIDENCE.zip
+          if-no-files-found: warn
+          retention-days: 30
