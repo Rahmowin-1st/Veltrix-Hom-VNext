@@ -36,7 +36,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 60
     services:
       postgres:
         image: pgvector/pgvector:0.8.2-pg17-bookworm
@@ -81,19 +81,63 @@ jobs:
           grep -q 'BUILD SUCCESSFUL' evidence/android-build.txt
           grep -q 'LOCAL_REGRESSION_GATE=PASS total=105' evidence/frozen-regressions.txt
           sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee evidence/apk-sha256.txt
-      - name: Package build evidence
+      - name: Start accepted backend for runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup gradle --no-daemon :server:run > evidence/server-runtime.log 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8080/ready > evidence/ready.json; then break; fi
+            sleep 2
+          done
+          grep -q '"ready":true' evidence/ready.json
+      - uses: android-actions/setup-android@v3
+      - name: Android API36 runtime packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'emulator' 'build-tools;37.0.0' 'platforms;android-37.0' 'system-images;android-36;google_apis;x86_64'
+      - name: Enable KVM acceleration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+            ls -l /dev/kvm | tee evidence/kvm.txt
+          else
+            echo '/dev/kvm unavailable' | tee evidence/kvm.txt
+            exit 1
+          fi
+      - name: API36 emulator runtime, A11Y and PF smoke
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          cores: 4
+          emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          script: bash .github/scripts/frontend-part2-runtime-proof.sh
+      - name: Package build and runtime evidence
         if: always()
         shell: bash
         run: |
           git archive --format=zip --output=package/Veltrix-Hom-Frontend-Part2-EXACT-SOURCE.zip "$GITHUB_SHA"
           cp android/app/build/outputs/apk/debug/app-debug.apk package/Veltrix-Hom-Frontend-Part2.apk 2>/dev/null || true
+          cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk package/Veltrix-Hom-Frontend-Part2-androidTest.apk 2>/dev/null || true
           cp -R evidence package/evidence
           (cd package && find . -type f ! -name 'SHA256SUMS.txt' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
-      - name: Upload build evidence
+          zip -qr Veltrix-Hom-Frontend-Part2-EVIDENCE.zip package
+      - name: Upload Part 2 evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: veltrix-frontend-part2-build-${{ github.run_id }}
-          path: package/
+          name: veltrix-frontend-part2-${{ github.run_id }}
+          path: |
+            package/
+            evidence/
+            Veltrix-Hom-Frontend-Part2-EVIDENCE.zip
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 30
