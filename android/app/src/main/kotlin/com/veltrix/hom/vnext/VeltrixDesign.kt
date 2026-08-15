@@ -1,6 +1,7 @@
 package com.veltrix.hom.vnext
 
 import android.content.Context
+import android.os.Build
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.core.FiniteAnimationSpec
@@ -8,7 +9,6 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -40,17 +40,207 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 @Immutable
-data class VeltrixEffectPolicy(val reducedMotion:Boolean,val highContrast:Boolean)
+data class VeltrixEffectPolicy(
+    val reducedMotion: Boolean,
+    val highContrast: Boolean,
+)
 
-object VeltrixColors{
-    val Ink=Color(0xFF15233D);val InkMuted=Color(0xFF60708C);val Sky=Color(0xFF4B7DFF);val SkyDeep=Color(0xFF3156C8)
-    val Ice=Color(0xFFF5F8FF);val Mint=Color(0xFF41C7A2);val Amber=Color(0xFFFFB650);val Error=Color(0xFFB4233D)
-    val Glass=Color(0xB8FFFFFF);val GlassStrong=Color(0xE8FFFFFF);val GlassShadow=Color(0x1A173A76);val Scrim=Color(0x4A10213D)
+object VeltrixColors {
+    val Ink = Color(0xFF15233D)
+    val InkMuted = Color(0xFF60708C)
+    val Sky = Color(0xFF4B7DFF)
+    val SkyDeep = Color(0xFF3156C8)
+    val Ice = Color(0xFFF5F8FF)
+    val Mint = Color(0xFF41C7A2)
+    val Amber = Color(0xFFFFB650)
+    val Error = Color(0xFFB4233D)
+    val Glass = Color(0xB8FFFFFF)
+    val GlassStrong = Color(0xE8FFFFFF)
+    val GlassShadow = Color(0x1A173A76)
+    val Scrim = Color(0x4A10213D)
 }
-private val VeltrixScheme=lightColorScheme(primary=VeltrixColors.Sky,onPrimary=Color.White,secondary=VeltrixColors.Mint,onSecondary=Color(0xFF0C3229),background=VeltrixColors.Ice,onBackground=VeltrixColors.Ink,surface=Color.White,onSurface=VeltrixColors.Ink,error=VeltrixColors.Error)
-@Composable fun VeltrixTheme(content:@Composable()->Unit){MaterialTheme(colorScheme=VeltrixScheme,typography=Typography(),content=content)}
-@Composable fun rememberVeltrixEffectPolicy():VeltrixEffectPolicy{val context=LocalContext.current;return remember(context){val scale=runCatching{Settings.Global.getFloat(context.contentResolver,Settings.Global.ANIMATOR_DURATION_SCALE,1f)}.getOrDefault(1f);val a=context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager;VeltrixEffectPolicy(scale==0f,a?.isHighTextContrastEnabled==true)}}
-fun veltrixMotion(reduced:Boolean):FiniteAnimationSpec<Float> = if(reduced)snap() else spring(dampingRatio=.82f,stiffness=Spring.StiffnessMediumLow)
-@Composable fun VeltrixWorldBackground(modifier:Modifier=Modifier,content:@Composable BoxScope.()->Unit){Box(modifier.fillMaxSize().drawWithCache{val base=Brush.verticalGradient(listOf(Color(0xFFF9FBFF),Color(0xFFEFF5FF),Color(0xFFF7FBFF)));val a=Brush.radialGradient(listOf(Color(0x5C83A7FF),Color.Transparent),Offset(size.width*.18f,size.height*.16f),size.minDimension*.82f);val b=Brush.radialGradient(listOf(Color(0x385DE8C8),Color.Transparent),Offset(size.width*.92f,size.height*.62f),size.minDimension*.78f);onDrawBehind{drawRect(base);drawRect(a);drawRect(b)}},content=content)}
-@Composable fun GlassSurface(modifier:Modifier=Modifier,radius:Dp=28.dp,strong:Boolean=false,policy:VeltrixEffectPolicy=rememberVeltrixEffectPolicy(),content:@Composable BoxScope.()->Unit){val shape=RoundedCornerShape(radius);val fill=when{policy.highContrast->Color(0xFFFDFEFF);strong->VeltrixColors.GlassStrong;else->VeltrixColors.Glass};Box(modifier.clip(shape).drawWithCache{val body=Brush.linearGradient(listOf(fill,fill.copy(alpha=(fill.alpha*.83f).coerceAtMost(1f))),Offset.Zero,Offset(size.width,size.height));val rim=Brush.linearGradient(listOf(Color.White.copy(alpha=.96f),Color.White.copy(alpha=.28f),Color(0x6685A6DC)),Offset.Zero,Offset(size.width,size.height));val highlight=Brush.radialGradient(listOf(Color.White.copy(alpha=if(policy.highContrast)0f else .72f),Color.Transparent),Offset(size.width*.22f,0f),size.width*.72f);onDrawBehind{val cr=androidx.compose.ui.geometry.CornerRadius(radius.toPx());drawRoundRect(body,cornerRadius=cr);if(!policy.highContrast){drawRoundRect(highlight,cornerRadius=cr);drawRoundRect(VeltrixColors.GlassShadow,Offset(0f,size.height-2.dp.toPx()),Size(size.width,2.dp.toPx()),cr)};drawRoundRect(rim,cornerRadius=cr,style=androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))}}.border(.5.dp,Color.White.copy(alpha=if(policy.highContrast).9f else .35f),shape),content=content)}
-@Composable fun PressableGlass(onClick:()->Unit,modifier:Modifier=Modifier,radius:Dp=22.dp,strong:Boolean=false,enabled:Boolean=true,role:Role=Role.Button,content:@Composable BoxScope.()->Unit){val policy=rememberVeltrixEffectPolicy();val source=remember{MutableInteractionSource()};val pressed by source.collectIsPressedAsState();val scale by animateFloatAsState(if(pressed&&enabled).975f else 1f,veltrixMotion(policy.reducedMotion),label="veltrix-press");GlassSurface(modifier.graphicsLayer{scaleX=scale;scaleY=scale;alpha=if(enabled)1f else .5f}.semantics{this.role=role}.clip(RoundedCornerShape(radius)).clickable(enabled=enabled,interactionSource=source,indication=null,onClick=onClick),radius,strong,policy,content)}
+
+private val VeltrixScheme = lightColorScheme(
+    primary = VeltrixColors.Sky,
+    onPrimary = Color.White,
+    secondary = VeltrixColors.Mint,
+    onSecondary = Color(0xFF0C3229),
+    background = VeltrixColors.Ice,
+    onBackground = VeltrixColors.Ink,
+    surface = Color.White,
+    onSurface = VeltrixColors.Ink,
+    error = VeltrixColors.Error,
+)
+
+@Composable
+fun VeltrixTheme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = VeltrixScheme,
+        typography = Typography(),
+        content = content,
+    )
+}
+
+@Composable
+fun rememberVeltrixEffectPolicy(): VeltrixEffectPolicy {
+    val context = LocalContext.current
+    return remember(context) {
+        val scale = runCatching {
+            Settings.Global.getFloat(
+                context.contentResolver,
+                Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f,
+            )
+        }.getOrDefault(1f)
+        val accessibility = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+        val highContrast = Build.VERSION.SDK_INT >= 36 && accessibility?.isHighContrastTextEnabled == true
+        VeltrixEffectPolicy(
+            reducedMotion = scale == 0f,
+            highContrast = highContrast,
+        )
+    }
+}
+
+fun veltrixMotion(reduced: Boolean): FiniteAnimationSpec<Float> =
+    if (reduced) snap() else spring(
+        dampingRatio = .82f,
+        stiffness = Spring.StiffnessMediumLow,
+    )
+
+@Composable
+fun VeltrixWorldBackground(
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    Box(
+        modifier.fillMaxSize().drawWithCache {
+            val base = Brush.verticalGradient(
+                listOf(Color(0xFFF9FBFF), Color(0xFFEFF5FF), Color(0xFFF7FBFF)),
+            )
+            val coolGlow = Brush.radialGradient(
+                listOf(Color(0x5C83A7FF), Color.Transparent),
+                center = Offset(size.width * .18f, size.height * .16f),
+                radius = size.minDimension * .82f,
+            )
+            val mintGlow = Brush.radialGradient(
+                listOf(Color(0x385DE8C8), Color.Transparent),
+                center = Offset(size.width * .92f, size.height * .62f),
+                radius = size.minDimension * .78f,
+            )
+            onDrawBehind {
+                drawRect(base)
+                drawRect(coolGlow)
+                drawRect(mintGlow)
+            }
+        },
+        content = content,
+    )
+}
+
+@Composable
+fun GlassSurface(
+    modifier: Modifier = Modifier,
+    radius: Dp = 28.dp,
+    strong: Boolean = false,
+    policy: VeltrixEffectPolicy = rememberVeltrixEffectPolicy(),
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val shape = RoundedCornerShape(radius)
+    val fill = when {
+        policy.highContrast -> Color(0xFFFDFEFF)
+        strong -> VeltrixColors.GlassStrong
+        else -> VeltrixColors.Glass
+    }
+    Box(
+        modifier
+            .clip(shape)
+            .drawWithCache {
+                val body = Brush.linearGradient(
+                    listOf(fill, fill.copy(alpha = (fill.alpha * .83f).coerceAtMost(1f))),
+                    start = Offset.Zero,
+                    end = Offset(size.width, size.height),
+                )
+                val rim = Brush.linearGradient(
+                    listOf(
+                        Color.White.copy(alpha = .96f),
+                        Color.White.copy(alpha = .28f),
+                        Color(0x6685A6DC),
+                    ),
+                    start = Offset.Zero,
+                    end = Offset(size.width, size.height),
+                )
+                val highlight = Brush.radialGradient(
+                    listOf(
+                        Color.White.copy(alpha = if (policy.highContrast) 0f else .72f),
+                        Color.Transparent,
+                    ),
+                    center = Offset(size.width * .22f, 0f),
+                    radius = size.width * .72f,
+                )
+                onDrawBehind {
+                    val corner = androidx.compose.ui.geometry.CornerRadius(radius.toPx())
+                    drawRoundRect(body, cornerRadius = corner)
+                    if (!policy.highContrast) {
+                        drawRoundRect(highlight, cornerRadius = corner)
+                        drawRoundRect(
+                            VeltrixColors.GlassShadow,
+                            topLeft = Offset(0f, size.height - 2.dp.toPx()),
+                            size = Size(size.width, 2.dp.toPx()),
+                            cornerRadius = corner,
+                        )
+                    }
+                    drawRoundRect(
+                        rim,
+                        cornerRadius = corner,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()),
+                    )
+                }
+            }
+            .border(
+                .5.dp,
+                Color.White.copy(alpha = if (policy.highContrast) .9f else .35f),
+                shape,
+            ),
+        content = content,
+    )
+}
+
+@Composable
+fun PressableGlass(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    radius: Dp = 22.dp,
+    strong: Boolean = false,
+    enabled: Boolean = true,
+    role: Role = Role.Button,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val policy = rememberVeltrixEffectPolicy()
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) .975f else 1f,
+        animationSpec = veltrixMotion(policy.reducedMotion),
+        label = "veltrix-press",
+    )
+    GlassSurface(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                alpha = if (enabled) 1f else .5f
+            }
+            .semantics { this.role = role }
+            .clip(RoundedCornerShape(radius))
+            .clickable(
+                enabled = enabled,
+                interactionSource = source,
+                indication = null,
+                onClick = onClick,
+            ),
+        radius = radius,
+        strong = strong,
+        policy = policy,
+        content = content,
+    )
+}
