@@ -7,6 +7,9 @@ TEST_APK="$(find android/app/build/outputs/apk/androidTest -name '*androidTest.a
 PACKAGE="com.veltrix.hom.vnext.dev"
 ACTIVITY="$PACKAGE/com.veltrix.hom.vnext.MainActivity"
 EVIDENCE_ACTIVITY="$PACKAGE/com.veltrix.hom.vnext.FrontendEvidenceActivity"
+PROGRESS="evidence/runtime/progress.txt"
+
+mark() { printf '%s\n' "$1" | tee -a "$PROGRESS"; }
 
 test -s "$APK"
 test -s "$TEST_APK"
@@ -15,11 +18,12 @@ adb install -r "$APK"
 adb install -r "$TEST_APK"
 I="$(adb shell pm list instrumentation | sed -n 's/^instrumentation:\([^ ]*\).*target=com.veltrix.hom.vnext.dev.*/\1/p' | head -1 | tr -d '\r')"
 test -n "$I"
+mark 'DEVICE_READY=PASS'
 
 run_test() {
   local cls="$1" out="$2" expect="${3:-OK}"
   adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
-  adb shell am instrument -w -e class "$cls" "$I" > "$out"
+  timeout 180s adb shell am instrument -w -e class "$cls" "$I" > "$out"
   cat "$out"
   grep -q "$expect" "$out"
 }
@@ -27,28 +31,28 @@ run_test() {
 capture_fixture() {
   local scenario="$1" name="$2"
   adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
-  adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario "$scenario" > "evidence/screens/${name}-start.txt"
-  sleep .55
+  timeout 20s adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario "$scenario" > "evidence/screens/${name}-start.txt"
+  sleep .45
   adb exec-out screencap -p > "evidence/screens/${name}.png"
   test -s "evidence/screens/${name}.png"
-  adb shell uiautomator dump "/sdcard/${name}.xml" >/dev/null 2>&1 || true
-  adb pull "/sdcard/${name}.xml" "evidence/screens/${name}.xml" >/dev/null 2>&1 || true
 }
 
 # Accepted foundation + new Part 2 real-backend contracts.
 run_test com.veltrix.hom.vnext.ServerIntegrationInstrumentedTest evidence/runtime/server-foundation.txt 'OK (1 test)'
 run_test com.veltrix.hom.vnext.Part2ServerIntegrationInstrumentedTest evidence/runtime/part2-server-contracts.txt 'OK (1 test)'
+mark 'BACKEND_CONTRACTS=PASS'
 
 # Pure Compose acceptance for the old verified core and new worlds.
 run_test com.veltrix.hom.vnext.FrontendPart1UiInstrumentedTest evidence/runtime/part1-ui-regression.txt 'OK (2 tests)'
 run_test com.veltrix.hom.vnext.FrontendPart2UiInstrumentedTest evidence/runtime/part2-ui-worlds.txt 'OK (6 tests)'
 run_test com.veltrix.hom.vnext.ShellInstrumentedTest evidence/runtime/shell.txt 'OK (1 test)'
+mark 'SHELL_UI=PASS'
 
 # MainActivity must render a loaded Part 2 Home from the real session seeded above.
 adb shell am force-stop "$PACKAGE"
-adb shell am start -W -n "$ACTIVITY" > evidence/runtime/main-start.txt
-for _ in $(seq 1 35); do
-  adb shell uiautomator dump /sdcard/part2-main.xml >/dev/null 2>&1 || true
+timeout 20s adb shell am start -W -n "$ACTIVITY" > evidence/runtime/main-start.txt
+for _ in $(seq 1 20); do
+  timeout 6s adb shell uiautomator dump /sdcard/part2-main.xml >/dev/null 2>&1 || true
   adb pull /sdcard/part2-main.xml evidence/runtime/main-ui.xml >/dev/null 2>&1 || true
   if grep -Eqi 'Part2 Learner|Ask Veltrix|Build the next useful step' evidence/runtime/main-ui.xml 2>/dev/null; then break; fi
   sleep .5
@@ -57,9 +61,10 @@ grep -Eqi 'Part2 Learner|Ask Veltrix|Build the next useful step' evidence/runtim
 ! grep -q '{&quot;id&quot;' evidence/runtime/main-ui.xml
 adb exec-out screencap -p > evidence/screens/live-home.png
 test -s evidence/screens/live-home.png
+mark 'LIVE_HOME=PASS'
 
-# Deterministic visual matrix. Fixtures use the exact production composables while keeping
-# backend-owned values explicit; screenshots are static proof, never a substitute for runtime tests.
+# Deterministic visual matrix. Fixtures use exact production composables. Static screenshots do
+# not need a UIAutomator XML dump per frame; semantic truth is covered by executed Compose tests.
 capture_fixture HOME_FOCUS 01-home-focus
 capture_fixture HOME_SPARSE 02-home-sparse
 capture_fixture HOME_OFFLINE 03-home-offline
@@ -86,24 +91,26 @@ capture_fixture STORE_INSUFFICIENT 23-store-insufficient
 capture_fixture SEARCH_RESULTS 24-search
 capture_fixture HISTORY_READY 25-history
 printf 'VISUAL_MATRIX=PASS count=25\n' | tee evidence/screens/visual-matrix-gate.txt
+mark 'VISUAL_MATRIX=PASS'
 
-# Temporal proof for World Layer identity continuity. This is emulator evidence only.
+# Temporal proof for World Layer identity continuity. Emulator evidence only.
 adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
 adb shell rm -f /sdcard/part2-world-motion.mp4 >/dev/null 2>&1 || true
-adb shell screenrecord --time-limit 9 --bit-rate 6000000 /sdcard/part2-world-motion.mp4 >/dev/null 2>&1 &
+timeout 15s adb shell screenrecord --time-limit 9 --bit-rate 6000000 /sdcard/part2-world-motion.mp4 >/dev/null 2>&1 &
 REC_PID=$!
 sleep 1
-adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario HOME_FOCUS >/dev/null
+timeout 20s adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario HOME_FOCUS >/dev/null
 sleep 2
-adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario PERSONAL_MAP_ACTIVE >/dev/null
+timeout 20s adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario PERSONAL_MAP_ACTIVE >/dev/null
 sleep 2
-adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario PROJECTS_SPACE >/dev/null
+timeout 20s adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario PROJECTS_SPACE >/dev/null
 sleep 2
-adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario STORE_READY >/dev/null
+timeout 20s adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario STORE_READY >/dev/null
 wait "$REC_PID" || true
 adb pull /sdcard/part2-world-motion.mp4 evidence/motion/part2-world-transitions.mp4 >/dev/null
 test -s evidence/motion/part2-world-transitions.mp4
 printf 'MOTION_EMULATOR_PROOF=PASS\nPHYSICAL_TOUCH_FEEL=NOT_VERIFIED\n' | tee evidence/motion/motion-gate.txt
+mark 'MOTION=PASS'
 
 # A11Y: extreme text, reduced motion, TalkBack presence/semantics.
 adb shell settings put system font_scale 2.0
@@ -137,12 +144,14 @@ fi
 adb shell settings put secure touch_exploration_enabled 0 >/dev/null 2>&1 || true
 adb shell settings put secure accessibility_enabled 0 >/dev/null 2>&1 || true
 adb shell settings delete secure enabled_accessibility_services >/dev/null 2>&1 || true
+mark 'A11Y=PASS'
 
 # Existing local-first/offline/process-death guarantees remain regression gates.
 run_test com.veltrix.hom.vnext.DurabilityInstrumentedTest evidence/runtime/durability.txt 'OK (2 tests)'
 run_test com.veltrix.hom.vnext.OfflineDataInstrumentedTest evidence/runtime/offline.txt 'OK (2 tests)'
 run_test 'com.veltrix.hom.vnext.Part3ProcessDeathInstrumentedTest#aSeedPart3State' evidence/runtime/process-death-seed.txt 'OK (1 test)'
 run_test 'com.veltrix.hom.vnext.Part3ProcessDeathInstrumentedTest#zVerifyPart3StateAfterFreshInstrumentationProcess' evidence/runtime/process-death-verify.txt 'OK (1 test)'
+mark 'DURABILITY=PASS'
 
 # Environment fingerprint comes before any PF interpretation.
 {
@@ -155,7 +164,7 @@ run_test 'com.veltrix.hom.vnext.Part3ProcessDeathInstrumentedTest#zVerifyPart3St
 
 adb shell am force-stop "$PACKAGE"
 adb shell dumpsys gfxinfo "$PACKAGE" reset >/dev/null 2>&1 || true
-adb shell am start -W -n "$ACTIVITY" >/dev/null
+timeout 20s adb shell am start -W -n "$ACTIVITY" >/dev/null
 sleep 2
 adb shell input tap 405 2240 >/dev/null 2>&1 || true
 sleep .6
@@ -170,9 +179,11 @@ adb shell logcat -d -t 1000 > evidence/runtime/logcat.txt || true
 ! grep -q 'ANR in com.veltrix.hom.vnext' evidence/runtime/logcat.txt
 ! grep -q 'FATAL EXCEPTION: main' evidence/runtime/logcat.txt
 printf 'PERF_API36_EMULATOR_SMOKE=PASS\nPHYSICAL_DEVICE_PF=NOT_VERIFIED\n' | tee evidence/performance/performance-gate.txt
+mark 'PERF_EMULATOR=PASS'
 
 echo PART1_REGRESSION_RUNTIME=PASS | tee evidence/runtime/part1-regression-gate.txt
 echo PART2_BACKEND_CONTRACT_RUNTIME=PASS | tee evidence/runtime/part2-contract-gate.txt
 echo PART2_A11Y_RUNTIME=PASS | tee evidence/accessibility/a11y-gate.txt
 echo PART2_DURABILITY_OFFLINE_PROCESS_DEATH=PASS | tee evidence/runtime/durability-gate.txt
 echo PART2_RUNTIME=PASS | tee evidence/runtime/runtime-gate.txt
+mark 'PART2_RUNTIME=PASS'
