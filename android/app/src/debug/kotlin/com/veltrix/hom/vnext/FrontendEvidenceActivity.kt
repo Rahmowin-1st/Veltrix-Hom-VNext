@@ -1,5 +1,6 @@
 package com.veltrix.hom.vnext
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -16,10 +17,12 @@ import androidx.compose.ui.Modifier
 
 /** Debug-only deterministic presentation harness for screenshot/motion proof. */
 class FrontendEvidenceActivity : ComponentActivity() {
+    private var scenario by mutableStateOf("HOME_FOCUS")
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val scenario = intent.getStringExtra("scenario") ?: "HOME_FOCUS"
+        scenario = intent.getStringExtra("scenario") ?: "HOME_FOCUS"
         setContent {
             VeltrixTheme {
                 VeltrixWorldBackground {
@@ -44,6 +47,12 @@ class FrontendEvidenceActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        scenario = intent.getStringExtra("scenario") ?: "HOME_FOCUS"
     }
 }
 
