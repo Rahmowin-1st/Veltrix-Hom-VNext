@@ -93,6 +93,29 @@ capture_fixture() {
   return 1
 }
 
+assert_motion_scenario() {
+  local scenario="$1"
+  local marker="$2"
+  local name="$3"
+  local xml="evidence/motion/${name}.xml"
+  local png="evidence/motion/${name}.png"
+  timeout 20s adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario "$scenario" >/dev/null
+  for attempt in 1 2 3 4 5 6; do
+    sleep .35
+    timeout 6s adb shell uiautomator dump /sdcard/part2-motion.xml >/dev/null 2>&1 || true
+    adb pull /sdcard/part2-motion.xml "$xml" >/dev/null 2>&1 || true
+    if grep -Eqi "$marker" "$xml" 2>/dev/null; then
+      adb exec-out screencap -p > "$png"
+      test -s "$png"
+      assert_png_visible "$png"
+      printf 'scenario=%s marker=%s attempt=%s state=PASS\n' "$scenario" "$marker" "$attempt" | tee -a evidence/motion/motion-sequence-gate.txt
+      return 0
+    fi
+  done
+  printf 'scenario=%s marker=%s state=FAIL\n' "$scenario" "$marker" | tee -a evidence/motion/motion-sequence-gate.txt
+  return 1
+}
+
 # Accepted foundation + new Part 2 real-backend contracts.
 run_test com.veltrix.hom.vnext.ServerIntegrationInstrumentedTest evidence/runtime/server-foundation.txt 'OK (1 test)'
 run_test com.veltrix.hom.vnext.Part2ServerIntegrationInstrumentedTest evidence/runtime/part2-server-contracts.txt 'OK (1 test)'
@@ -153,23 +176,30 @@ done
 printf 'VISUAL_MATRIX=PASS count=25 rendered=25 blank=0\n' | tee evidence/screens/visual-matrix-gate.txt
 mark 'VISUAL_MATRIX=PASS'
 
-# Temporal proof for World Layer identity continuity. Emulator evidence only.
+# Temporal proof for World Layer continuity. The debug harness must actually recompose for every
+# scenario delivered through onNewIntent. A playable MP4 alone is insufficient evidence.
 adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
 adb shell rm -f /sdcard/part2-world-motion.mp4 >/dev/null 2>&1 || true
-timeout 15s adb shell screenrecord --time-limit 9 --bit-rate 6000000 /sdcard/part2-world-motion.mp4 >/dev/null 2>&1 &
+: > evidence/motion/motion-sequence-gate.txt
+assert_motion_scenario HOME_FOCUS 'Retest Newton' motion-home
+timeout 20s adb shell screenrecord --time-limit 14 --bit-rate 6000000 /sdcard/part2-world-motion.mp4 >/dev/null 2>&1 &
 REC_PID=$!
 sleep 1
-timeout 20s adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario HOME_FOCUS >/dev/null
-sleep 2
-timeout 20s adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario PERSONAL_MAP_ACTIVE >/dev/null
-sleep 2
-timeout 20s adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario PROJECTS_SPACE >/dev/null
-sleep 2
-timeout 20s adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario STORE_READY >/dev/null
+assert_motion_scenario PERSONAL_MAP_ACTIVE 'Learner intelligence|Personal Map' motion-personal
+sleep 1
+assert_motion_scenario PROJECTS_SPACE 'PROJECT SPACE|Motion Studio' motion-projects
+sleep 1
+assert_motion_scenario STORE_READY 'Store.*identity|Coin balance' motion-store
+sleep 1
+assert_motion_scenario HOME_FOCUS 'Retest Newton' motion-home-return
 wait "$REC_PID" || true
 adb pull /sdcard/part2-world-motion.mp4 evidence/motion/part2-world-transitions.mp4 >/dev/null
 test -s evidence/motion/part2-world-transitions.mp4
-printf 'MOTION_EMULATOR_PROOF=PASS\nPHYSICAL_TOUCH_FEEL=NOT_VERIFIED\n' | tee evidence/motion/motion-gate.txt
+grep -q 'scenario=HOME_FOCUS.*state=PASS' evidence/motion/motion-sequence-gate.txt
+grep -q 'scenario=PERSONAL_MAP_ACTIVE.*state=PASS' evidence/motion/motion-sequence-gate.txt
+grep -q 'scenario=PROJECTS_SPACE.*state=PASS' evidence/motion/motion-sequence-gate.txt
+grep -q 'scenario=STORE_READY.*state=PASS' evidence/motion/motion-sequence-gate.txt
+printf 'MOTION_EMULATOR_PROOF=PASS states=HOME,PERSONAL,PROJECTS,STORE,HOME\nPHYSICAL_TOUCH_FEEL=NOT_VERIFIED\n' | tee evidence/motion/motion-gate.txt
 mark 'MOTION=PASS'
 
 # A11Y: extreme text, reduced motion, TalkBack presence/semantics.
