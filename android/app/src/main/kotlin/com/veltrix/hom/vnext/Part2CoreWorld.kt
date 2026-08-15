@@ -126,7 +126,7 @@ private fun NowWorld(model: HomeFinalModel, modifier: Modifier, onChat: () -> Un
                     Text(model.memoryMaturity.ifBlank { "Memory building" }.coreTitle(), color = VeltrixColors.Ink, fontWeight = FontWeight.SemiBold)
                     Text("learning memory", color = VeltrixColors.InkMuted, style = MaterialTheme.typography.labelSmall)
                 }
-                PressableGlass(onChat, Modifier.heightIn(min=54.dp), 22.dp, strong = true) { Text("Ask Veltrix →", Modifier.padding(horizontal=16.dp,vertical=13.dp), color=VeltrixColors.Ink, fontWeight=FontWeight.SemiBold) }
+                PressableGlass(onChat, Modifier.heightIn(min=54.dp).testTag("home-primary-action"), 22.dp, strong = true) { Text("Ask Veltrix →", Modifier.padding(horizontal=16.dp,vertical=13.dp), color=VeltrixColors.Ink, fontWeight=FontWeight.SemiBold) }
             }
         }
     }
