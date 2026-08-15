@@ -113,8 +113,11 @@ jobs:
           disable-animations: false
           script: |
             bash .github/scripts/frontend-part1-runtime-proof.sh
+            adb shell am force-stop com.veltrix.hom.vnext.dev
             bash .github/scripts/frontend-part1-final-evidence.sh
+            adb shell am force-stop com.veltrix.hom.vnext.dev
             bash .github/scripts/frontend-part1-drawer-proof.sh
+            adb shell am force-stop com.veltrix.hom.vnext.dev
             bash .github/scripts/frontend-part1-motion-refresh.sh
       - name: Package
         if: always()
