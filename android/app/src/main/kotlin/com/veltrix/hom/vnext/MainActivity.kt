@@ -189,7 +189,10 @@ private fun MainWorld(
 @Composable
 private fun AppHeader(onMenu: () -> Unit, routeName: String) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+        Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
