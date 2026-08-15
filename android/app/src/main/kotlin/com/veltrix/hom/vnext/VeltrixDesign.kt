@@ -16,6 +16,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -224,7 +225,12 @@ fun PressableGlass(
         label = "veltrix-press",
     )
     GlassSurface(
-        modifier = modifier
+        // Interactive glass is a control, not a full-height content surface. Bounding
+        // it before caller modifiers prevents a child fillMaxSize() from claiming an
+        // entire Row/Column axis and starving sibling weighted content.
+        modifier = Modifier
+            .heightIn(max = 80.dp)
+            .then(modifier)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
