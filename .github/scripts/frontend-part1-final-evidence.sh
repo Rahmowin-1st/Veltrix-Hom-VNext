@@ -1,0 +1,396 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mkdir -p evidence/screens evidence/motion evidence/performance evidence/accessibility
+
+PACKAGE="com.veltrix.hom.vnext.dev"
+MAIN_ACTIVITY="$PACKAGE/com.veltrix.hom.vnext.MainActivity"
+EVIDENCE_ACTIVITY="$PACKAGE/com.veltrix.hom.vnext.FrontendEvidenceActivity"
+I="$(adb shell pm list instrumentation | sed -n 's/^instrumentation:\([^ ]*\).*target=com.veltrix.hom.vnext.dev.*/\1/p' | head -1 | tr -d '\r')"
+test -n "$I"
+
+cleanup_device() {
+  adb shell settings put system font_scale 1.0 >/dev/null 2>&1 || true
+  adb shell settings put global animator_duration_scale 1.0 >/dev/null 2>&1 || true
+  adb shell settings put global transition_animation_scale 1.0 >/dev/null 2>&1 || true
+  adb shell settings put global window_animation_scale 1.0 >/dev/null 2>&1 || true
+  adb shell settings put secure high_text_contrast_enabled 0 >/dev/null 2>&1 || true
+  adb shell settings put secure touch_exploration_enabled 0 >/dev/null 2>&1 || true
+  adb shell settings put secure accessibility_enabled 0 >/dev/null 2>&1 || true
+  adb shell settings delete secure enabled_accessibility_services >/dev/null 2>&1 || true
+  adb shell setprop debug.force_rtl false >/dev/null 2>&1 || true
+  adb shell wm size reset >/dev/null 2>&1 || true
+  adb shell wm density reset >/dev/null 2>&1 || true
+}
+trap cleanup_device EXIT
+cleanup_device
+adb reverse tcp:8080 tcp:8080
+
+{
+  echo "ro.hardware=$(adb shell getprop ro.hardware | tr -d '\r')"
+  echo "ro.hardware.egl=$(adb shell getprop ro.hardware.egl | tr -d '\r')"
+  echo "ro.opengles.version=$(adb shell getprop ro.opengles.version | tr -d '\r')"
+  adb shell dumpsys SurfaceFlinger 2>/dev/null | grep -Ei 'GLES|OpenGL|Vulkan|renderer|vendor' | head -40 || true
+} | tee evidence/performance/renderer.txt
+
+start_main_and_wait_home() {
+  adb shell am force-stop "$PACKAGE"
+  adb shell am start -W -n "$MAIN_ACTIVITY" >/dev/null
+  for _ in $(seq 1 20); do
+    adb shell uiautomator dump /sdcard/veltrix-home.xml >/dev/null 2>&1 || true
+    adb pull /sdcard/veltrix-home.xml evidence/home-current-final.xml >/dev/null 2>&1 || true
+    if grep -q 'Continue with Veltrix\|Ask Veltrix' evidence/home-current-final.xml 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo 'Home did not reach loaded primary-action state' >&2
+  cat evidence/home-current-final.xml 2>/dev/null || true
+  return 1
+}
+
+start_fixture() {
+  local scenario="$1"
+  adb shell am force-stop "$PACKAGE"
+  adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario "$scenario" >/dev/null
+  sleep 1
+}
+
+capture_fixture() {
+  local scenario="$1" output="$2"
+  start_fixture "$scenario"
+  adb exec-out screencap -p > "evidence/screens/$output"
+  test -s "evidence/screens/$output"
+}
+
+node_center() {
+  local needle="$1"
+  adb shell uiautomator dump /sdcard/veltrix-node.xml >/dev/null 2>&1 || true
+  adb pull /sdcard/veltrix-node.xml evidence/node.xml >/dev/null 2>&1 || true
+  python3 - "$needle" <<'PY'
+import re,sys,xml.etree.ElementTree as ET
+needle=sys.argv[1].strip().lower()
+root=ET.parse('evidence/node.xml').getroot()
+def center(n):
+    m=re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',n.attrib.get('bounds',''))
+    if not m:return None
+    x1,y1,x2,y2=map(int,m.groups()); return ((x1+x2)//2,(y1+y2)//2)
+for exact in (True,False):
+    for n in root.iter('node'):
+        values=[n.attrib.get('text','').strip().lower(),n.attrib.get('content-desc','').strip().lower()]
+        ok=any(v==needle for v in values) if exact else any(needle in v for v in values)
+        if ok and center(n):
+            print(*center(n));sys.exit(0)
+sys.exit(1)
+PY
+}
+
+tap_text() {
+  local c
+  c="$(node_center "$1")"
+  test -n "$c"
+  adb shell input tap $c
+}
+
+press_text() {
+  local c
+  c="$(node_center "$1")"
+  test -n "$c"
+  set -- $c
+  adb shell input swipe "$1" "$2" "$1" "$2" 650
+}
+
+# Accessibility: extreme font, Reduced Motion, higher-contrast fallback, TalkBack if installed.
+adb shell settings put system font_scale 2.0
+adb shell am instrument -w -e class com.veltrix.hom.vnext.ShellInstrumentedTest "$I" > evidence/accessibility/extreme-font-shell.txt
+cat evidence/accessibility/extreme-font-shell.txt
+grep -q 'OK (1 test)' evidence/accessibility/extreme-font-shell.txt
+adb shell settings put system font_scale 1.0
+
+adb shell settings put global animator_duration_scale 0
+adb shell settings put global transition_animation_scale 0
+adb shell settings put global window_animation_scale 0
+adb shell am instrument -w -e class com.veltrix.hom.vnext.ShellInstrumentedTest "$I" > evidence/accessibility/reduced-motion-shell-final.txt
+cat evidence/accessibility/reduced-motion-shell-final.txt
+grep -q 'OK (1 test)' evidence/accessibility/reduced-motion-shell-final.txt
+cleanup_device
+adb reverse tcp:8080 tcp:8080
+
+adb shell pm list packages | grep -Ei 'talkback|accessibility' | tee evidence/accessibility/accessibility-packages.txt || true
+if adb shell pm path com.google.android.marvin.talkback >/dev/null 2>&1; then
+  TB='com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService'
+  adb shell settings put secure enabled_accessibility_services "$TB"
+  adb shell settings put secure accessibility_enabled 1
+  adb shell settings put secure touch_exploration_enabled 1
+  sleep 2
+  adb shell dumpsys accessibility > evidence/accessibility/talkback-dumpsys.txt || true
+  grep -qi 'talkback' evidence/accessibility/talkback-dumpsys.txt
+  adb shell am instrument -w -e class com.veltrix.hom.vnext.ShellInstrumentedTest "$I" > evidence/accessibility/talkback-shell.txt
+  cat evidence/accessibility/talkback-shell.txt
+  grep -q 'OK (1 test)' evidence/accessibility/talkback-shell.txt
+  echo 'TALKBACK_RUNTIME=PASS' | tee evidence/accessibility/talkback-gate.txt
+else
+  echo 'TALKBACK_RUNTIME=NOT_AVAILABLE_IN_GOOGLE_APIS_IMAGE' | tee evidence/accessibility/talkback-gate.txt
+fi
+cleanup_device
+adb reverse tcp:8080 tcp:8080
+
+# Live standard Home from accepted backend fixture.
+start_main_and_wait_home
+if grep -q '{&quot;id&quot;' evidence/home-current-final.xml; then
+  echo 'Raw backend JSON leaked into Home UI' >&2
+  exit 1
+fi
+adb exec-out screencap -p > evidence/screens/01-home-standard-loaded.png
+
+# Deterministic repository-level presentation states using exact production composables.
+capture_fixture HOME_FOCUS 02-home-focus-map-locked.png
+capture_fixture HOME_SPARSE 04-home-sparse.png
+capture_fixture HOME_OFFLINE 05-home-offline-cached.png
+capture_fixture HOME_ERROR 06-home-error-no-cache.png
+capture_fixture HOME_UNLOCKED 06b-home-map-active-fixture.png
+
+adb shell wm size 900x2000
+adb shell wm density 420
+capture_fixture HOME_FOCUS 07-home-narrow.png
+adb shell wm size reset
+adb shell wm density reset
+cp evidence/screens/01-home-standard-loaded.png evidence/screens/08-home-standard-phone.png
+
+# Actual expanded shell with rail + real server-loaded Home/Personal.
+adb shell wm size 1600x2560
+adb shell wm density 240
+start_main_and_wait_home
+adb exec-out screencap -p > evidence/screens/09-home-expanded.png
+tap_text 'Personal'
+sleep 2
+adb exec-out screencap -p > evidence/screens/19-personal-expanded.png
+adb shell wm size reset
+adb shell wm density reset
+
+capture_fixture PERSONAL_STANDARD 10-personal-overview-identity.png
+adb shell input swipe 540 1780 540 720 350
+sleep 1
+adb exec-out screencap -p > evidence/screens/12-personal-intelligence-map-locked.png
+adb shell input swipe 540 1780 540 720 350
+sleep 1
+adb exec-out screencap -p > evidence/screens/16-personal-achievements-growth.png
+
+capture_fixture PERSONAL_UNLOCKED 15-personal-map-active.png
+adb shell input swipe 540 1780 540 720 350
+sleep 1
+adb exec-out screencap -p > evidence/screens/15b-personal-map-active-detail.png
+capture_fixture PERSONAL_OFFLINE 17-personal-offline.png
+
+adb shell settings put system font_scale 2.0
+capture_fixture PERSONAL_STANDARD 18-personal-extreme-font.png
+adb shell settings put system font_scale 1.0
+
+adb shell settings put secure high_text_contrast_enabled 1
+capture_fixture HOME_FOCUS 24-home-high-contrast-fallback.png
+adb shell settings get secure high_text_contrast_enabled > evidence/accessibility/high-contrast-setting.txt
+adb shell settings put secure high_text_contrast_enabled 0
+
+adb shell setprop debug.force_rtl true || true
+capture_fixture HOME_FOCUS 25-home-rtl.png
+adb shell setprop debug.force_rtl false || true
+
+# Global bottom navigation states on the actual server-backed MainActivity.
+start_main_and_wait_home
+adb exec-out screencap -p > evidence/screens/20a-nav-home.png
+adb shell input tap 405 2240; sleep 1
+adb exec-out screencap -p > evidence/screens/20b-nav-personal.png
+adb shell input tap 675 2240; sleep 1
+adb exec-out screencap -p > evidence/screens/20c-nav-store.png
+adb shell input tap 945 2240; sleep 1
+adb exec-out screencap -p > evidence/screens/20d-nav-projects.png
+
+start_main_and_wait_home
+adb exec-out screencap -p > evidence/screens/21a-sidebar-closed.png
+tap_text 'Open Veltrix capabilities'
+sleep 1
+adb exec-out screencap -p > evidence/screens/21b-sidebar-open.png
+adb shell input keyevent 4
+sleep 1
+if adb shell input motionevent DOWN 2 1000 >/dev/null 2>&1; then
+  adb shell input motionevent MOVE 520 1000 >/dev/null 2>&1 || true
+  sleep .2
+  adb exec-out screencap -p > evidence/screens/22-sidebar-mid-drag.png || true
+  adb shell input motionevent UP 520 1000 >/dev/null 2>&1 || true
+  echo 'SIDEBAR_MID_DRAG=CAPTURED' > evidence/sidebar-mid-drag.txt
+else
+  echo 'SIDEBAR_MID_DRAG=NOT_SUPPORTED_BY_SHELL_INPUT' > evidence/sidebar-mid-drag.txt
+fi
+
+cat > evidence/visual-evidence-matrix.txt <<'MATRIX'
+HOME
+01 standard loaded Home = screens/01-home-standard-loaded.png
+02 current focus/active learning = screens/02-home-focus-map-locked.png
+03 Map locked = screens/02-home-focus-map-locked.png
+04 sparse/new account = screens/04-home-sparse.png
+05 offline cached = screens/05-home-offline-cached.png
+06 error/no-cache/retry = screens/06-home-error-no-cache.png
+07 narrow phone = screens/07-home-narrow.png
+08 standard phone = screens/08-home-standard-phone.png
+09 expanded/tablet = screens/09-home-expanded.png
+optional legitimate repository state fixture: active Map = screens/06b-home-map-active-fixture.png
+
+PERSONAL
+10 overview = screens/10-personal-overview-identity.png
+11 identity/avatar/progression = screens/10-personal-overview-identity.png
+12 Student Model/Memory = screens/12-personal-intelligence-map-locked.png
+13 strengths/weaknesses/statistics = screens/12-personal-intelligence-map-locked.png
+14 Map locked = screens/12-personal-intelligence-map-locked.png
+15 Map active/current progression repository fixture = screens/15-personal-map-active.png + screens/15b-personal-map-active-detail.png
+16 achievements/progression = screens/16-personal-achievements-growth.png
+17 offline = screens/17-personal-offline.png
+18 extreme font = screens/18-personal-extreme-font.png
+19 expanded/tablet = screens/19-personal-expanded.png
+
+GLOBAL SHELL
+20 bottom nav states = screens/20a-nav-home.png .. screens/20d-nav-projects.png
+21 sidebar closed/open = screens/21a-sidebar-closed.png + screens/21b-sidebar-open.png
+22 sidebar mid-drag = screens/22-sidebar-mid-drag.png when shell input supports motionevent
+23 error/conflict/retry example = screens/06-home-error-no-cache.png
+24 higher-contrast/reduced-transmission fallback = screens/24-home-high-contrast-fallback.png
+additional RTL adaptation = screens/25-home-rtl.png
+MATRIX
+
+# Motion evidence; screen recording remains separate from PF intervals.
+cleanup_device
+adb reverse tcp:8080 tcp:8080
+start_main_and_wait_home
+adb shell screenrecord --time-limit 7 /sdcard/nav.mp4 >/dev/null 2>&1 & P=$!
+sleep 1
+adb shell input tap 405 2240; sleep 1
+adb shell input tap 675 2240; sleep 1
+adb shell input tap 945 2240; sleep 1
+adb shell input tap 135 2240; sleep 1
+wait "$P" || true
+adb pull /sdcard/nav.mp4 evidence/motion/navigation-destinations.mp4 >/dev/null
+test -s evidence/motion/navigation-destinations.mp4
+
+start_main_and_wait_home
+adb shell screenrecord --time-limit 7 /sdcard/sidebar.mp4 >/dev/null 2>&1 & P=$!
+sleep 1
+adb shell input swipe 2 1000 850 1000 900; sleep 1
+adb shell input swipe 850 1000 2 1000 900; sleep 1
+wait "$P" || true
+adb pull /sdcard/sidebar.mp4 evidence/motion/sidebar-direct-manipulation.mp4 >/dev/null
+test -s evidence/motion/sidebar-direct-manipulation.mp4
+
+adb shell am force-stop "$PACKAGE"
+adb shell screenrecord --time-limit 7 /sdcard/home-primary.mp4 >/dev/null 2>&1 & P=$!
+adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario HOME_FOCUS >/dev/null
+sleep 2
+press_text 'Continue with Veltrix'
+sleep 1
+wait "$P" || true
+adb pull /sdcard/home-primary.mp4 evidence/motion/home-avatar-primary-glass.mp4 >/dev/null
+test -s evidence/motion/home-avatar-primary-glass.mp4
+
+start_fixture PERSONAL_UNLOCKED
+adb shell input swipe 540 1780 540 720 350
+sleep 1
+adb shell screenrecord --time-limit 6 /sdcard/map.mp4 >/dev/null 2>&1 & P=$!
+sleep 1
+tap_text 'Explore Map status'
+sleep 2
+tap_text 'Hide Map status'
+sleep 1
+wait "$P" || true
+adb pull /sdcard/map.mp4 evidence/motion/personal-map-interaction.mp4 >/dev/null
+test -s evidence/motion/personal-map-interaction.mp4
+
+adb shell settings put global animator_duration_scale 0
+adb shell settings put global transition_animation_scale 0
+adb shell settings put global window_animation_scale 0
+start_main_and_wait_home
+adb shell screenrecord --time-limit 5 /sdcard/reduced.mp4 >/dev/null 2>&1 & P=$!
+sleep 1
+adb shell input tap 405 2240; sleep 1
+adb shell input tap 135 2240; sleep 1
+wait "$P" || true
+adb pull /sdcard/reduced.mp4 evidence/motion/reduced-motion-navigation.mp4 >/dev/null
+test -s evidence/motion/reduced-motion-navigation.mp4
+cleanup_device
+adb reverse tcp:8080 tcp:8080
+
+cat > evidence/motion-evidence-matrix.txt <<'MOTION'
+bottom navigation destination transition = motion/navigation-destinations.mp4
+sidebar direct open/close = motion/sidebar-direct-manipulation.mp4
+Home Avatar entry + primary Liquid Glass press/release = motion/home-avatar-primary-glass.mp4
+Personal Map presentation interaction = motion/personal-map-interaction.mp4
+Reduced Motion navigation = motion/reduced-motion-navigation.mp4
+Home→Personal shared element = NOT IMPLEMENTED; no false continuity claim
+major Map unlock/reward = NOT CAPTURED; no authoritative unlock mutation fixture was executed
+MOTION
+
+# Separate performance windows; no screenrecord/screenshot/UiAutomator inside measured intervals.
+perf_dump() {
+  local name="$1"
+  adb shell dumpsys gfxinfo "$PACKAGE" framestats > "evidence/performance/$name.txt" || true
+}
+
+adb shell am force-stop "$PACKAGE"
+adb shell dumpsys gfxinfo "$PACKAGE" reset >/dev/null 2>&1 || true
+adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario HOME_FOCUS >/dev/null
+sleep 3
+perf_dump 01-home-cold-avatar
+
+# Production MainActivity owns navigation performance measurement.
+start_main_and_wait_home
+adb shell dumpsys gfxinfo "$PACKAGE" reset >/dev/null 2>&1 || true
+adb shell input tap 405 2240; sleep 1
+adb shell input tap 135 2240; sleep 1
+adb shell input tap 675 2240; sleep 1
+adb shell input tap 135 2240; sleep 1
+perf_dump 02-navigation-home-personal
+
+start_main_and_wait_home
+adb shell dumpsys gfxinfo "$PACKAGE" reset >/dev/null 2>&1 || true
+adb shell input swipe 2 1000 850 1000 700; sleep 1
+adb shell input swipe 850 1000 2 1000 700; sleep 1
+perf_dump 03-sidebar-direct
+
+start_fixture PERSONAL_UNLOCKED
+adb shell input swipe 540 1780 540 720 250
+sleep 1
+c="$(node_center 'Explore Map status')"
+test -n "$c"
+adb shell dumpsys gfxinfo "$PACKAGE" reset >/dev/null 2>&1 || true
+adb shell input tap $c; sleep 1
+perf_dump 04-personal-map
+
+adb shell wm size 1600x2560
+adb shell wm density 240
+adb shell am force-stop "$PACKAGE"
+adb shell dumpsys gfxinfo "$PACKAGE" reset >/dev/null 2>&1 || true
+adb shell am start -W -n "$MAIN_ACTIVITY" >/dev/null
+sleep 3
+perf_dump 05-expanded-home
+adb shell wm size reset
+adb shell wm density reset
+
+adb shell dumpsys meminfo "$PACKAGE" > evidence/meminfo-final.txt || true
+adb shell logcat -d -t 1200 > evidence/runtime-logcat-final.txt || true
+if grep -q 'ANR in com.veltrix.hom.vnext' evidence/runtime-logcat-final.txt; then
+  echo 'ANR detected' >&2
+  exit 1
+fi
+
+{
+  echo 'Performance windows: API 36 emulator; renderer fingerprint in performance/renderer.txt'
+  for f in evidence/performance/0*.txt; do
+    echo "--- $(basename "$f")"
+    grep -E 'Total frames rendered|Janky frames:|50th percentile|90th percentile|95th percentile|99th percentile' "$f" | head -10 || true
+  done
+} | tee evidence/performance-summary-final.txt
+
+for f in evidence/performance/0*.txt; do
+  grep -q 'Total frames rendered:' "$f"
+  ! grep -q 'Total frames rendered: 0' "$f"
+done
+
+echo PERF_FRAME_DATA=COLLECTED | tee evidence/performance-final-gate.txt
+echo FINAL_EVIDENCE_GATE=PASS | tee evidence/final-evidence-gate.txt
