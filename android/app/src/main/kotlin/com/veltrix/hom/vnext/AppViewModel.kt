@@ -3,16 +3,17 @@ package com.veltrix.hom.vnext
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.veltrix.hom.vnext.core.newId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-
-private const val DEV_ACCOUNT = "dev-account-local"
+import org.json.JSONObject
+import java.util.UUID
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val localDb = VeltrixLocalDatabase.get(app)
@@ -20,13 +21,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val part3 = Part3AndroidRepository(app)
     private val part2 = Part2FeatureRepository(app)
 
-    val projects: StateFlow<List<LocalProjectEntity>> = localDb.projects().observe(DEV_ACCOUNT)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
     private val _session = MutableStateFlow<LocalSession?>(null)
     val session: StateFlow<LocalSession?> = _session.asStateFlow()
     private val _sessionResolved = MutableStateFlow(false)
     val sessionResolved: StateFlow<Boolean> = _sessionResolved.asStateFlow()
+
+    val projects: StateFlow<List<LocalProjectEntity>> = _session
+        .flatMapLatest { current ->
+            if (current == null) flowOf(emptyList<LocalProjectEntity>())
+            else localDb.projects().observe(current.accountId)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _home = MutableStateFlow(RepositoryState<HomeFinalModel>(null, DataFreshness.OFFLINE, loading = true))
     val home = _home.asStateFlow()
@@ -176,30 +181,73 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (clean.isEmpty()) return
         viewModelScope.launch {
             val s = apiSession()
-            if (s != null) {
-                try {
-                    val created = part2.createProject(s, clean, purpose)
-                    loadProjects(true)
-                    _workspace.value = part2.workspace(s, created.id, true)
-                    return@launch
-                } catch (_: Throwable) {
-                    // Preserve the verified offline-first local fallback below.
-                }
+            if (s == null) {
+                _mutationFeedback.value = MutationFeedback(false, "NO_SESSION", "Sign in is required to create a project.", false)
+                return@launch
             }
-            localDb.projects().upsert(
-                LocalProjectEntity(
-                    newId("proj"),
-                    DEV_ACCOUNT,
-                    clean,
-                    purpose?.trim()?.takeIf { it.isNotEmpty() },
-                    "ACTIVE",
-                    0,
-                    System.currentTimeMillis(),
-                    1,
-                    "PENDING",
-                ),
+            try {
+                val created = part2.createProject(s, clean, purpose)
+                loadProjects(true)
+                _workspace.value = part2.workspace(s, created.id, true)
+                return@launch
+            } catch (e: BackendUiException) {
+                if (!e.retryable) {
+                    _mutationFeedback.value = MutationFeedback(false, e.code, e.detail, false)
+                    return@launch
+                }
+            } catch (_: Throwable) {
+                // Transport/offline failures fall through to the durable accepted sync contract.
+            }
+            queueOfflineProject(s, clean, purpose)
+            _mutationFeedback.value = MutationFeedback(
+                true,
+                "QUEUED_OFFLINE",
+                "Project saved on this device and queued for sync.",
+                true,
             )
         }
+    }
+
+    private suspend fun queueOfflineProject(session: ApiSession, title: String, purpose: String?) {
+        val projectId = UUID.randomUUID().toString()
+        val mutationId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val cleanPurpose = purpose?.trim()?.takeIf { it.isNotEmpty() }
+        localDb.projects().upsert(
+            LocalProjectEntity(
+                id = projectId,
+                accountId = session.accountId,
+                title = title,
+                purpose = cleanPurpose,
+                status = "ACTIVE",
+                priority = 0,
+                updatedAtEpochMs = now,
+                revision = 0,
+                syncState = "PENDING",
+            ),
+        )
+        val payload = JSONObject()
+            .put("title", title)
+            .put("status", "ACTIVE")
+            .put("priority", 0)
+            .apply { cleanPurpose?.let { put("purpose", it) } }
+            .toString()
+        localDb.sync().enqueue(
+            LocalSyncMutationEntity(
+                id = mutationId,
+                accountId = session.accountId,
+                entityType = "PROJECT",
+                entityId = projectId,
+                operation = "UPSERT",
+                expectedRevision = null,
+                idempotencyKey = "android-project-create:$projectId",
+                payload = payload,
+                createdAtEpochMs = now,
+                attemptCount = 0,
+                state = "PENDING",
+            ),
+        )
+        SyncScheduler.ensure(getApplication<Application>())
     }
 
     fun refreshChats(projectId: String? = null) = viewModelScope.launch { loadChats(projectId, true) }
