@@ -90,6 +90,17 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'emulator' 'build-tools;37.0.0' 'platforms;android-37.0' 'system-images;android-36;google_apis;x86_64'
+      - name: Enable KVM acceleration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+            ls -l /dev/kvm | tee evidence/kvm.txt
+          else
+            echo '/dev/kvm unavailable' | tee evidence/kvm.txt
+            exit 1
+          fi
       - name: Runtime proof
         uses: reactivecircus/android-emulator-runner@v2
         with:
