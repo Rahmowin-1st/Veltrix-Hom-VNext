@@ -147,14 +147,17 @@ class Part3AndroidRepository(
 
     private fun parseHome(o:JSONObject)=HomeFinalModel(
         o.getString("accountId"),o.optString("displayName"),o.optString("avatarId"),o.optInt("effectiveLevel",o.optInt("level",1)),o.optLong("lifetimeXp"),
-        o.optLong("currentLevelXp"),o.optLong("nextLevelXp"),o.optLong("remainingXp"),o.optLong("coins"),o.optInt("qualifiedActiveDays"),o.optInt("consistency"),
-        o.optNullableString("currentFocus"),o.optString("memoryMaturity"),o.optString("mapState"),o.optNullableString("currentMapUnit"),o.optNullableString("seasonId"),
-        o.optInt("unreadNotifications"),o.optJSONArray("priorityKeys")?.stringList().orEmpty(),o.optJSONArray("insights")?.let{a->List(a.length()){i->a.getJSONObject(i).optString("code")}}.orEmpty(),o.optLong("revision",1)
+        o.optLong("currentLevelXp"),o.optLong("nextLevelXp"),o.optLong("remainingXp"),o.optLong("coins"),o.optInt("qualifiedActiveDays"),o.optInt("currentConsistency",o.optInt("consistency")),
+        parseCurrentFocus(o),o.optString("memoryMaturity"),o.optString("mapState"),o.optNullableString("currentMapUnit"),o.optNullableString("seasonId"),
+        o.optInt("unreadNotifications"),o.optJSONObject("priorities")?.optJSONArray("orderedKeys")?.stringList() ?: o.optJSONArray("priorityKeys")?.stringList().orEmpty(),
+        o.optJSONArray("insights")?.let{a->List(a.length()){i->a.getJSONObject(i).optString("code")}}.orEmpty(),o.optLong("revision",1)
     )
     private fun parsePersonal(o:JSONObject)=PersonalFinalModel(
         o.getString("accountId"),o.optString("displayName"),o.optString("avatarId"),o.optInt("effectiveLevel",o.optInt("level",1)),o.optLong("lifetimeXp"),o.optLong("coins"),
-        o.optString("memoryMaturity"),o.optJSONArray("strengths")?.stringList().orEmpty(),o.optJSONArray("weaknesses")?.stringList().orEmpty(),o.optJSONArray("interests")?.stringList().orEmpty(),
-        o.optJSONArray("goals")?.stringList().orEmpty(),o.optString("mapState"),o.optNullableString("seasonId"),o.optInt("achievementCount"),o.optInt("inventoryCount"),o.optInt("currentConsistency"),o.optLong("revision",1)
+        o.optJSONObject("memory")?.optString("maturity")?.takeIf{it.isNotBlank()} ?: o.optString("memoryMaturity"),
+        o.optJSONArray("strengths")?.stringList().orEmpty(),o.optJSONArray("weaknesses")?.stringList().orEmpty(),o.optJSONArray("interests")?.stringList().orEmpty(),
+        o.optJSONArray("goals")?.stringList().orEmpty(),o.optString("mapState"),o.optNullableString("seasonId"),o.optInt("achievements",o.optInt("achievementCount")),
+        o.optInt("inventoryItems",o.optInt("inventoryCount")),o.optInt("currentConsistency"),o.optLong("revision",1)
     )
     private fun parseWorkspace(o:JSONObject,projectId:String):ProjectWorkspaceFinalModel {
         val project=o.optJSONObject("project");return ProjectWorkspaceFinalModel(projectId,project?.optString("title").orEmpty(),project?.optString("status").orEmpty(),o.optInt("goalCount"),o.optInt("sourceCount"),o.optInt("chatCount"),o.optInt("noteCount"),o.optInt("assessmentCount"),o.optInt("flashcardCount"),o.optInt("mistakeCount"),o.optInt("practiceCount"),o.optInt("signalCount"),o.optString("memoryMaturity"),o.optLong("instructionRevision").takeIf{it>0},o.optLong("revision",project?.optLong("revision",1)?:1))
@@ -165,5 +168,13 @@ class Part3AndroidRepository(
     private fun parseFrontendEvent(o:JSONObject):FrontendSemanticEventModel { val raw=o.optString("occurredAt");val epoch=runCatching{java.time.Instant.parse(raw).toEpochMilli()}.getOrDefault(System.currentTimeMillis());return FrontendSemanticEventModel(o.getString("eventId"),o.getString("eventType"),o.optNullableString("subjectId"),o.optNullableString("projectId"),o.optJSONObject("payload")?.toString()?:"{}",epoch) }
 }
 
+private fun parseCurrentFocus(o:JSONObject):String? {
+    if(!o.has("currentFocus") || o.isNull("currentFocus")) return null
+    return when(val raw=o.opt("currentFocus")) {
+        is JSONObject -> raw.optString("title").takeIf{it.isNotBlank()}
+        is String -> runCatching{JSONObject(raw).optString("title").takeIf{it.isNotBlank()}}.getOrNull() ?: raw.takeIf{it.isNotBlank()}
+        else -> null
+    }
+}
 private fun JSONObject.optNullableString(key:String):String?=if(!has(key)||isNull(key))null else optString(key).takeIf{it.isNotBlank()}
 private fun JSONArray.stringList():List<String> = List(length()) { i -> getString(i) }
