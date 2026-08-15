@@ -111,6 +111,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: false
           script: |
+            bash <<'BASH'
             set -euo pipefail
             APK=android/app/build/outputs/apk/debug/app-debug.apk
             TEST_APK=$(find android/app/build/outputs/apk/androidTest -name '*androidTest.apk' -type f -size +0c | head -1)
@@ -142,6 +143,7 @@ jobs:
             test -s evidence/screens/home.png
             test -s evidence/motion/navigation-motion.mp4
             echo FRONTEND_PART1_RUNTIME=PASS | tee evidence/runtime-gate.txt
+            BASH
       - name: Package
         if: always()
         shell: bash
