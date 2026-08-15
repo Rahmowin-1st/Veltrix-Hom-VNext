@@ -24,6 +24,21 @@ adb shell am instrument -w -e class com.veltrix.hom.vnext.FrontendPart1UiInstrum
 cat evidence/frontend-ui-tests.txt
 grep -q 'OK (2 tests)' evidence/frontend-ui-tests.txt
 
+# Decisive pre-shell diagnostic: launch the exact production Activity after the
+# seeded session, then preserve its visible state before instrumentation can fail.
+adb shell am force-stop com.veltrix.hom.vnext.dev
+adb shell monkey -p com.veltrix.hom.vnext.dev 1 >/dev/null
+sleep 8
+adb exec-out screencap -p > evidence/screens/home-pre-shell.png || true
+adb shell uiautomator dump /sdcard/veltrix-home.xml >/dev/null 2>&1 || true
+adb pull /sdcard/veltrix-home.xml evidence/home-pre-shell.xml >/dev/null 2>&1 || true
+echo '--- HOME PRE-SHELL UI TREE ---'
+head -c 16000 evidence/home-pre-shell.xml 2>/dev/null || true
+echo
+adb shell dumpsys activity top > evidence/home-pre-shell-activity.txt || true
+adb shell logcat -d -t 500 > evidence/home-pre-shell-logcat.txt || true
+adb shell am force-stop com.veltrix.hom.vnext.dev
+
 adb shell am instrument -w -e class com.veltrix.hom.vnext.ShellInstrumentedTest "$I" > evidence/shell-ui-test.txt
 cat evidence/shell-ui-test.txt
 grep -q 'OK (1 test)' evidence/shell-ui-test.txt
