@@ -29,11 +29,11 @@ class ShellInstrumentedTest {
         assertNotNull("Seeded session must survive into the real Activity test process", persistedSession)
 
         compose.onNodeWithTag("nav-HOME").assertIsDisplayed()
-        compose.onNodeWithTag("home-screen").assertIsDisplayed()
 
-        // Keep the acceptance strict: the real API 36 Activity viewport must expose the
-        // primary action. If it does not, emit the actual semantics tree before failing
-        // so the next fix is state/layout evidence-driven rather than cosmetic guessing.
+        // Part 2 intentionally delegates its unresolved/loading state to the accepted Part 1
+        // Home state family. During that short handoff both wrappers may temporarily expose the
+        // same diagnostic test tag. The acceptance target is the loaded real Home world, so wait
+        // for its authoritative primary action first, then keep the home-screen check strict.
         try {
             compose.waitUntil(8_000) {
                 runCatching {
@@ -46,6 +46,7 @@ class ShellInstrumentedTest {
             Log.e("VELTRIX_HOME_DIAG", "Home primary action was not visible after 8s", failure)
             throw failure
         }
+        compose.onNodeWithTag("home-screen").assertIsDisplayed()
         compose.onNodeWithTag("home-primary-action").assertIsDisplayed()
 
         compose.onNodeWithTag("nav-PERSONAL").assertIsDisplayed().performClick()
