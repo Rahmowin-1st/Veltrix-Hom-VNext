@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
@@ -151,6 +152,7 @@ private fun MainWorld(
     onCreateProject: (String, String?) -> Unit,
     showBottomNav: Boolean,
 ) {
+    val extremeFont = LocalDensity.current.fontScale >= 1.75f
     Scaffold(
         modifier.fillMaxSize(),
         containerColor = Color.Transparent,
@@ -168,15 +170,33 @@ private fun MainWorld(
                 CapabilityBridgeScreen(capability.name)
             } else {
                 when (destination) {
-                    PrimaryDestination.HOME -> HomeScreen(
-                        home,
-                        sessionResolved,
-                        onRetryHome,
-                        { onSelectDestination(PrimaryDestination.PERSONAL) },
-                        { onSelectCapability(CapabilityRoute.CHAT) },
-                        { onSelectCapability(CapabilityRoute.PRACTICE) },
-                        { onSelectDestination(PrimaryDestination.PROJECTS) },
-                    )
+                    PrimaryDestination.HOME -> {
+                        val personalAction = { onSelectDestination(PrimaryDestination.PERSONAL) }
+                        val askAction = { onSelectCapability(CapabilityRoute.CHAT) }
+                        val practiceAction = { onSelectCapability(CapabilityRoute.PRACTICE) }
+                        val projectsAction = { onSelectDestination(PrimaryDestination.PROJECTS) }
+                        if (extremeFont) {
+                            AccessibleLargeTextHome(
+                                home,
+                                sessionResolved,
+                                onRetryHome,
+                                personalAction,
+                                askAction,
+                                practiceAction,
+                                projectsAction,
+                            )
+                        } else {
+                            HomeScreen(
+                                home,
+                                sessionResolved,
+                                onRetryHome,
+                                personalAction,
+                                askAction,
+                                practiceAction,
+                                projectsAction,
+                            )
+                        }
+                    }
                     PrimaryDestination.PERSONAL -> PersonalScreen(personal, sessionResolved, onRetryPersonal)
                     PrimaryDestination.STORE -> TransitionalStoreScreen()
                     PrimaryDestination.PROJECTS -> TransitionalProjectsScreen(projects, onCreateProject)
