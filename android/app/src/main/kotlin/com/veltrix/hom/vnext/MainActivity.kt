@@ -192,7 +192,7 @@ private fun MainWorld(
                                 projectsAction,
                             )
                         } else {
-                            HomeScreen(
+                            PremiumHomeScreen(
                                 home,
                                 sessionResolved,
                                 onRetryHome,
@@ -203,7 +203,7 @@ private fun MainWorld(
                             )
                         }
                     }
-                    PrimaryDestination.PERSONAL -> PersonalScreen(personal, sessionResolved, onRetryPersonal)
+                    PrimaryDestination.PERSONAL -> PremiumPersonalScreen(personal, sessionResolved, onRetryPersonal)
                     PrimaryDestination.STORE -> TransitionalStoreScreen()
                     PrimaryDestination.PROJECTS -> TransitionalProjectsScreen(projects, onCreateProject)
                 }
