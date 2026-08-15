@@ -1,0 +1,99 @@
+name: Veltrix Frontend Part 2 Gate
+
+on:
+  push:
+    branches: [veltrix-hom-frontend-part2]
+  workflow_dispatch:
+
+concurrency:
+  group: veltrix-frontend-part2-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  ACCEPTED_BACKEND_SHA: 4ed13cfcf7d4bb1fe6215b231426e0b4f208343a
+  PART1_SHA: ae8499fec896bd8715f5f114fc0eb95f12e8ebe1
+  VELTRIX_ENV: test
+  VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_DATABASE_USER: postgres
+  VELTRIX_DATABASE_PASSWORD: postgres
+  VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_TEST_DATABASE_USER: postgres
+  VELTRIX_TEST_DATABASE_PASSWORD: postgres
+  VELTRIX_AI_PROVIDER: disabled
+  VELTRIX_TEST_AI_MOCK: 'true'
+  VELTRIX_EMBEDDING_PROVIDER: disabled
+  VELTRIX_TEST_EMBEDDING_MOCK: 'true'
+  VELTRIX_EMBEDDING_DIMENSIONS: '64'
+  VELTRIX_TEST_OCR_MOCK: 'true'
+  VELTRIX_TEST_TRANSLATE_MOCK: 'true'
+  VELTRIX_STORAGE_PROVIDER: local
+  VELTRIX_WORKERS_ENABLED: 'true'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence package
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git cat-file -e "$ACCEPTED_BACKEND_SHA^{commit}"
+          git cat-file -e "$PART1_SHA^{commit}"
+          git merge-base --is-ancestor "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA"
+          git merge-base --is-ancestor "$PART1_SHA" "$GITHUB_SHA"
+          ! git diff --name-only "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA" | grep -E '^(server/|database/migrations/|core/src/main/)' || exit 1
+          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\npart1=%s\nrun=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" "$PART1_SHA" "$GITHUB_RUN_ID" | tee evidence/provenance.txt
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+      - name: Regressions and Android build
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :core:test :server:test | tee evidence/backend-regression.txt
+          bash scripts/run_local_regressions.sh | tee evidence/frozen-regressions.txt
+          gradle --no-daemon -PVELTRIX_API_BASE_URL=http://127.0.0.1:8080 :android:app:testDebugUnitTest :android:app:assembleDebug :android:app:assembleDebugAndroidTest | tee evidence/android-build.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/android-build.txt
+          grep -q 'LOCAL_REGRESSION_GATE=PASS total=105' evidence/frozen-regressions.txt
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee evidence/apk-sha256.txt
+      - name: Package build evidence
+        if: always()
+        shell: bash
+        run: |
+          git archive --format=zip --output=package/Veltrix-Hom-Frontend-Part2-EXACT-SOURCE.zip "$GITHUB_SHA"
+          cp android/app/build/outputs/apk/debug/app-debug.apk package/Veltrix-Hom-Frontend-Part2.apk 2>/dev/null || true
+          cp -R evidence package/evidence
+          (cd package && find . -type f ! -name 'SHA256SUMS.txt' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-frontend-part2-build-${{ github.run_id }}
+          path: package/
+          if-no-files-found: warn
+          retention-days: 14
