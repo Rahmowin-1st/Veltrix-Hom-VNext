@@ -28,13 +28,67 @@ run_test() {
   grep -q "$expect" "$out"
 }
 
+assert_png_visible() {
+  python3 - "$1" <<'PYPNG'
+import sys, struct, zlib, math
+p=sys.argv[1]
+b=open(p,'rb').read()
+if b[:8] != b'\x89PNG\r\n\x1a\n':
+    raise SystemExit(41)
+pos=8; packed=b''; w=h=bd=ct=None
+while pos < len(b):
+    n=struct.unpack('>I', b[pos:pos+4])[0]
+    typ=b[pos+4:pos+8]; dat=b[pos+8:pos+8+n]; pos += 12+n
+    if typ == b'IHDR':
+        w,h,bd,ct,_,_,inter=struct.unpack('>IIBBBBB', dat)
+        if bd != 8 or inter != 0 or ct not in (0,2,4,6): raise SystemExit(42)
+    elif typ == b'IDAT': packed += dat
+    elif typ == b'IEND': break
+channels={0:1,2:3,4:2,6:4}[ct]; bpp=channels; stride=w*channels
+raw=zlib.decompress(packed); off=0; prev=bytearray(stride); values=[]; sample=max(1,(w*h)//12000); pixel=0
+for _ in range(h):
+    f=raw[off]; off+=1; cur=bytearray(raw[off:off+stride]); off+=stride
+    for x in range(stride):
+        a=cur[x-bpp] if x>=bpp else 0; bb=prev[x]; c=prev[x-bpp] if x>=bpp else 0
+        if f==1: cur[x]=(cur[x]+a)&255
+        elif f==2: cur[x]=(cur[x]+bb)&255
+        elif f==3: cur[x]=(cur[x]+((a+bb)//2))&255
+        elif f==4:
+            q=a+bb-c; pa=abs(q-a); pb=abs(q-bb); pc=abs(q-c); pr=a if pa<=pb and pa<=pc else (bb if pb<=pc else c)
+            cur[x]=(cur[x]+pr)&255
+        elif f!=0: raise SystemExit(43)
+    for x in range(0,stride,channels):
+        if pixel % sample == 0:
+            values.append(sum(cur[x:x+3])/3 if ct in (2,6) else cur[x])
+        pixel += 1
+    prev=cur
+mean=sum(values)/len(values); std=math.sqrt(sum((v-mean)**2 for v in values)/len(values))
+print(f'VISIBLE_PNG {p} mean={mean:.1f} std={std:.1f}')
+# Veltrix evidence surfaces are intentionally pale. Transition/blank frames in the emulator
+# measured below mean 50; rendered product frames are well above 200. Keep a wide margin.
+if mean < 100 or std < 4: raise SystemExit(44)
+PYPNG
+}
+
 capture_fixture() {
-  local scenario="$1" name="$2"
+  local scenario="$1" name="$2" png="evidence/screens/${name}.png"
+  adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+  adb shell wm dismiss-keyguard >/dev/null 2>&1 || true
   adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
   timeout 20s adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario "$scenario" > "evidence/screens/${name}-start.txt"
-  sleep .45
-  adb exec-out screencap -p > "evidence/screens/${name}.png"
-  test -s "evidence/screens/${name}.png"
+  # am start -W can return before the emulator's launch transition has presented the first
+  # Compose frame. Capture until the actual light Veltrix surface is visible; never count a
+  # black/transition frame as visual evidence.
+  for attempt in 1 2 3 4 5 6; do
+    sleep .7
+    adb exec-out screencap -p > "$png"
+    if test -s "$png" && assert_png_visible "$png"; then
+      printf 'scenario=%s attempt=%s visual=PASS\n' "$scenario" "$attempt" >> "evidence/screens/${name}-start.txt"
+      return 0
+    fi
+  done
+  printf 'scenario=%s visual=FAIL\n' "$scenario" >> "evidence/screens/${name}-start.txt"
+  return 1
 }
 
 # Accepted foundation + new Part 2 real-backend contracts.
@@ -61,6 +115,7 @@ grep -Eqi 'Part2 Learner|Ask Veltrix|Build the next useful step' evidence/runtim
 ! grep -q '{&quot;id&quot;' evidence/runtime/main-ui.xml
 adb exec-out screencap -p > evidence/screens/live-home.png
 test -s evidence/screens/live-home.png
+assert_png_visible evidence/screens/live-home.png
 mark 'LIVE_HOME=PASS'
 
 # Deterministic visual matrix. Fixtures use exact production composables. Static screenshots do
@@ -90,7 +145,10 @@ capture_fixture STORE_READY 22-store
 capture_fixture STORE_INSUFFICIENT 23-store-insufficient
 capture_fixture SEARCH_RESULTS 24-search
 capture_fixture HISTORY_READY 25-history
-printf 'VISUAL_MATRIX=PASS count=25\n' | tee evidence/screens/visual-matrix-gate.txt
+for png in evidence/screens/{01-home-focus,02-home-sparse,03-home-offline,04-home-unlocked,05-personal-map-active,06-personal-sparse,07-personal-offline,08-projects-list,09-project-space,10-projects-empty,11-chat-streaming,12-chat-citations,13-chat-error,14-library-processing,15-library-failed,16-testing-active,17-quiz-result,18-practice-hint,19-practice-feedback,20-flashcard,21-mistakes,22-store,23-store-insufficient,24-search,25-history}.png; do
+  assert_png_visible "$png"
+done
+printf 'VISUAL_MATRIX=PASS count=25 rendered=25 blank=0\n' | tee evidence/screens/visual-matrix-gate.txt
 mark 'VISUAL_MATRIX=PASS'
 
 # Temporal proof for World Layer identity continuity. Emulator evidence only.
