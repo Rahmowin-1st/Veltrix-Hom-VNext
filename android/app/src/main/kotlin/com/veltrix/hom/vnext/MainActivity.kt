@@ -56,7 +56,13 @@ private fun VeltrixApp(vm: AppViewModel = viewModel()) {
     val projects by vm.projects.collectAsStateWithLifecycle()
     val sessionResolved by vm.sessionResolved.collectAsStateWithLifecycle()
 
-    BackHandler(enabled = capability != null) { capabilityName = null }
+    BackHandler(enabled = drawer.currentValue == DrawerValue.Open || capability != null) {
+        if (drawer.currentValue == DrawerValue.Open) {
+            scope.launch { drawer.close() }
+        } else {
+            capabilityName = null
+        }
+    }
 
     ModalNavigationDrawer(
         drawerState = drawer,
