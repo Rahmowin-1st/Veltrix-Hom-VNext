@@ -80,7 +80,7 @@ jobs:
           gradle --no-daemon -PVELTRIX_API_BASE_URL=http://127.0.0.1:8080 :android:app:testDebugUnitTest :android:app:assembleDebug :android:app:assembleDebugAndroidTest | tee evidence/android-build.txt
           grep -q 'BUILD SUCCESSFUL' evidence/android-build.txt
           grep -q 'LOCAL_REGRESSION_GATE=PASS total=105' evidence/frozen-regressions.txt
-          sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee evidence/apk-sha256.txt
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee evidence/apk-sha256-build.txt
       - name: Start accepted backend for runtime
         shell: bash
         run: |
@@ -109,7 +109,7 @@ jobs:
             echo '/dev/kvm unavailable' | tee evidence/kvm.txt
             exit 1
           fi
-      - name: API36 emulator runtime, A11Y and PF smoke
+      - name: API36 final runtime, visual, motion, A11Y and PF proof
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
@@ -119,8 +119,8 @@ jobs:
           cores: 4
           emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
           disable-animations: false
-          script: bash .github/scripts/frontend-part2-runtime-proof.sh
-      - name: Package build and runtime evidence
+          script: bash .github/scripts/frontend-part2-final-proof.sh
+      - name: Package exact source and final evidence
         if: always()
         shell: bash
         run: |
@@ -128,9 +128,29 @@ jobs:
           cp android/app/build/outputs/apk/debug/app-debug.apk package/Veltrix-Hom-Frontend-Part2.apk 2>/dev/null || true
           cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk package/Veltrix-Hom-Frontend-Part2-androidTest.apk 2>/dev/null || true
           cp -R evidence package/evidence
+          cp evidence/VELTRIX_FRONTEND_PART2_MANAGER_HANDOFF_2026-08-15.md package/ 2>/dev/null || true
           (cd package && find . -type f ! -name 'SHA256SUMS.txt' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
           zip -qr Veltrix-Hom-Frontend-Part2-EVIDENCE.zip package
-      - name: Upload Part 2 evidence
+      - name: Verify final package gates
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f evidence/runtime/final-gate.txt ]; then
+            grep -q 'PART1_ACCEPTANCE_CANDIDATE=PASS' evidence/runtime/final-gate.txt
+            grep -q 'PART2_ACCEPTANCE_CANDIDATE=PASS' evidence/runtime/final-gate.txt
+            grep -q 'VISUAL_MATRIX=PASS' evidence/screens/visual-matrix-gate.txt
+            grep -q 'PART2_FINAL_PROOF=PASS' evidence/runtime/final-progress.txt
+            test -s evidence/motion/part2-world-transitions.mp4
+            test -s evidence/VELTRIX_FRONTEND_PART2_MANAGER_HANDOFF_2026-08-15.md
+            test -s package/Veltrix-Hom-Frontend-Part2-EXACT-SOURCE.zip
+            test -s package/Veltrix-Hom-Frontend-Part2.apk
+            test -s Veltrix-Hom-Frontend-Part2-EVIDENCE.zip
+          else
+            echo 'Final gate missing; preserving failure artifact.' >&2
+            exit 1
+          fi
+      - name: Upload Part 2 final evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -139,5 +159,5 @@ jobs:
             package/
             evidence/
             Veltrix-Hom-Frontend-Part2-EVIDENCE.zip
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
