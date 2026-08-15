@@ -188,18 +188,30 @@ mark 'VISUAL_MATRIX=PASS'
 
 motion_state(){
  local scenario="$1" marker="$2" name="$3" xml="evidence/motion/${name}.xml"
- timeout 20s adb shell am start -W -n "$EVIDENCE_ACTIVITY" --es scenario "$scenario" >/dev/null
- for _ in 1 2 3 4 5 6 7 8; do
-  sleep .35; timeout 6s adb shell uiautomator dump /sdcard/part2-motion.xml >/dev/null 2>&1 || true; adb pull /sdcard/part2-motion.xml "$xml" >/dev/null 2>&1 || true
-  if grep -Eqi "$marker" "$xml" 2>/dev/null; then echo "scenario=$scenario state=PASS" | tee -a evidence/motion/motion-sequence-gate.txt; return 0; fi
+ # Keep a single EvidenceActivity instance alive throughout the temporal proof. `am start -W`
+ # can wait for a fresh Activity resume and hit the 20s guard on the software-rendered API36
+ # runner. SINGLE_TOP instead delivers the new scenario through onNewIntent; the semantic
+ # polling below is the actual readiness gate, so no launch-completion guess is accepted.
+ rm -f "$xml"
+ adb shell rm -f /sdcard/part2-motion.xml >/dev/null 2>&1 || true
+ timeout 8s adb shell am start --activity-single-top -n "$EVIDENCE_ACTIVITY" --es scenario "$scenario" >/dev/null
+ for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  sleep .35
+  timeout 6s adb shell uiautomator dump /sdcard/part2-motion.xml >/dev/null 2>&1 || true
+  adb pull /sdcard/part2-motion.xml "$xml" >/dev/null 2>&1 || true
+  if grep -Eqi "$marker" "$xml" 2>/dev/null; then
+   echo "scenario=$scenario attempt=$attempt state=PASS" | tee -a evidence/motion/motion-sequence-gate.txt
+   return 0
+  fi
  done
+ echo "scenario=$scenario state=FAIL" | tee -a evidence/motion/motion-sequence-gate.txt
  return 1
 }
 adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
 : > evidence/motion/motion-sequence-gate.txt
 motion_state HOME_FOCUS 'Retest Newton' home
 adb shell rm -f /sdcard/part2-world-motion.mp4 >/dev/null 2>&1 || true
-timeout 20s adb shell screenrecord --time-limit 14 --bit-rate 6000000 /sdcard/part2-world-motion.mp4 >/dev/null 2>&1 & REC=$!
+timeout 26s adb shell screenrecord --time-limit 20 --bit-rate 6000000 /sdcard/part2-world-motion.mp4 >/dev/null 2>&1 & REC=$!
 sleep .8
 motion_state PERSONAL_MAP_ACTIVE 'Personal Map|Motion' personal
 motion_state PROJECTS_SPACE 'PROJECT SPACE|Project Space' projects
@@ -208,10 +220,15 @@ motion_state HOME_FOCUS 'Retest Newton' home-return
 wait "$REC" || true
 adb pull /sdcard/part2-world-motion.mp4 evidence/motion/part2-world-transitions.mp4 >/dev/null
 test -s evidence/motion/part2-world-transitions.mp4
-grep -q 'HOME_FOCUS state=PASS' evidence/motion/motion-sequence-gate.txt
-grep -q 'PERSONAL_MAP_ACTIVE state=PASS' evidence/motion/motion-sequence-gate.txt
-grep -q 'PROJECTS_SPACE state=PASS' evidence/motion/motion-sequence-gate.txt
-grep -q 'STORE_READY state=PASS' evidence/motion/motion-sequence-gate.txt
+python3 - <<'PYMOTION'
+from pathlib import Path
+lines=[line.strip() for line in Path('evidence/motion/motion-sequence-gate.txt').read_text().splitlines() if 'state=PASS' in line]
+scenarios=[line.split('scenario=',1)[1].split(' ',1)[0] for line in lines]
+expected=['HOME_FOCUS','PERSONAL_MAP_ACTIVE','PROJECTS_SPACE','STORE_READY','HOME_FOCUS']
+print(f'MOTION_SEQUENCE observed={scenarios}')
+if scenarios != expected:
+    raise SystemExit(45)
+PYMOTION
 printf 'MOTION_RUNTIME=PASS states=HOME,PERSONAL,PROJECTS,STORE,HOME\nPHYSICAL_TOUCH_FEEL=NOT_VERIFIED\n' | tee evidence/motion/motion-gate.txt
 mark 'MOTION=PASS'
 
