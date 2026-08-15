@@ -124,11 +124,14 @@ jobs:
         if: always()
         shell: bash
         run: |
+          set -euo pipefail
+          rm -rf package Veltrix-Hom-Frontend-Part2-EVIDENCE.zip
+          mkdir -p package
           git archive --format=zip --output=package/Veltrix-Hom-Frontend-Part2-EXACT-SOURCE.zip "$GITHUB_SHA"
-          cp android/app/build/outputs/apk/debug/app-debug.apk package/Veltrix-Hom-Frontend-Part2.apk 2>/dev/null || true
-          cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk package/Veltrix-Hom-Frontend-Part2-androidTest.apk 2>/dev/null || true
-          cp -R evidence package/evidence
-          cp evidence/VELTRIX_FRONTEND_PART2_MANAGER_HANDOFF_2026-08-15.md package/ 2>/dev/null || true
+          cp android/app/build/outputs/apk/debug/app-debug.apk package/Veltrix-Hom-Frontend-Part2.apk
+          cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk package/Veltrix-Hom-Frontend-Part2-androidTest.apk
+          cp -a evidence package/evidence
+          cp evidence/VELTRIX_FRONTEND_PART2_MANAGER_HANDOFF_2026-08-15.md package/
           (cd package && find . -type f ! -name 'SHA256SUMS.txt' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
           zip -qr Veltrix-Hom-Frontend-Part2-EVIDENCE.zip package
       - name: Verify final package gates
@@ -139,13 +142,25 @@ jobs:
           if [ -f evidence/runtime/final-gate.txt ]; then
             grep -q 'PART1_ACCEPTANCE_CANDIDATE=PASS' evidence/runtime/final-gate.txt
             grep -q 'PART2_ACCEPTANCE_CANDIDATE=PASS' evidence/runtime/final-gate.txt
-            grep -q 'VISUAL_MATRIX=PASS' evidence/screens/visual-matrix-gate.txt
+            grep -q 'SCREENSHOT_ARTIFACT_SET=PASS fresh_matrix=25 total_png=29' evidence/runtime/final-gate.txt
+            grep -q 'VISUAL_MATRIX=PASS count=25 semantic=25 complete_render=25 fresh_manifest=PASS' evidence/screens/visual-matrix-gate.txt
             grep -q 'PART2_FINAL_PROOF=PASS' evidence/runtime/final-progress.txt
+            test -s evidence/screens/screenshot-sha256.txt
+            test "$(wc -l < evidence/screens/screenshot-sha256.txt)" -eq 25
+            test "$(find evidence/screens -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 29
+            sha256sum -c evidence/screens/screenshot-sha256.txt
             test -s evidence/motion/part2-world-transitions.mp4
             test -s evidence/VELTRIX_FRONTEND_PART2_MANAGER_HANDOFF_2026-08-15.md
             test -s package/Veltrix-Hom-Frontend-Part2-EXACT-SOURCE.zip
             test -s package/Veltrix-Hom-Frontend-Part2.apk
+            test -s package/Veltrix-Hom-Frontend-Part2-androidTest.apk
+            test -s package/SHA256SUMS.txt
+            test "$(find package/evidence/screens -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 29
+            (cd package && sha256sum -c evidence/screens/screenshot-sha256.txt)
+            (cd package && sha256sum -c SHA256SUMS.txt)
             test -s Veltrix-Hom-Frontend-Part2-EVIDENCE.zip
+            unzip -tq Veltrix-Hom-Frontend-Part2-EVIDENCE.zip >/dev/null
+            test "$(unzip -Z1 Veltrix-Hom-Frontend-Part2-EVIDENCE.zip | grep -Ec '^package/evidence/screens/[^/]+\.png$')" -eq 29
           else
             echo 'Final gate missing; preserving failure artifact.' >&2
             exit 1
