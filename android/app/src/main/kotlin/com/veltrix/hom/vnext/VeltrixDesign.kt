@@ -23,8 +23,11 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
@@ -219,10 +222,22 @@ fun PressableGlass(
     val policy = rememberVeltrixEffectPolicy()
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val scale by animateFloatAsState(
+    val circularIdentity = radius.value >= 900f
+    var entered by remember(circularIdentity, policy.reducedMotion) {
+        mutableStateOf(!circularIdentity || policy.reducedMotion)
+    }
+    LaunchedEffect(circularIdentity, policy.reducedMotion) {
+        if (circularIdentity) entered = true
+    }
+    val pressScale by animateFloatAsState(
         targetValue = if (pressed && enabled) .975f else 1f,
         animationSpec = veltrixMotion(policy.reducedMotion),
         label = "veltrix-press",
+    )
+    val entranceScale by animateFloatAsState(
+        targetValue = if (entered) 1f else .94f,
+        animationSpec = veltrixMotion(policy.reducedMotion),
+        label = "veltrix-circular-entry",
     )
     GlassSurface(
         // Interactive glass is a control, not a full-height content surface. Bounding
@@ -232,9 +247,14 @@ fun PressableGlass(
             .heightIn(max = 80.dp)
             .then(modifier)
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                alpha = if (enabled) 1f else .5f
+                val combined = pressScale * entranceScale
+                scaleX = combined
+                scaleY = combined
+                alpha = when {
+                    !enabled -> .5f
+                    circularIdentity && !policy.reducedMotion -> .72f + (.28f * entranceScale)
+                    else -> 1f
+                }
             }
             .semantics { this.role = role }
             .clip(RoundedCornerShape(radius))
