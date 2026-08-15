@@ -25,7 +25,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.*
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -58,26 +62,38 @@ private fun VeltrixApp(vm: AppViewModel = viewModel()) {
     val createdConversation by vm.createdConversationId.collectAsStateWithLifecycle()
     val openedPractice by vm.openedPracticeId.collectAsStateWithLifecycle()
 
-    LaunchedEffect(createdConversation) {
-        createdConversation?.let { conversationId = it; secondaryName = CapabilityRoute.CHAT.name; vm.consumeCreatedConversation() }
-    }
-    LaunchedEffect(openedPractice) {
-        openedPractice?.let { secondaryName = CapabilityRoute.PRACTICE.name; vm.consumeOpenedPractice() }
-    }
-
     fun selectDestination(value: PrimaryDestination) {
         destinationName = value.name
         secondaryName = null
         conversationId = null
-        if (value != PrimaryDestination.PROJECTS) selectedProjectId = null
+        if (value != PrimaryDestination.PROJECTS) {
+            selectedProjectId = null
+            vm.clearWorkspace()
+        }
     }
     fun selectCapability(value: String) {
         secondaryName = value
         if (value != CapabilityRoute.CHAT.name) conversationId = null
-        if (value == CapabilityRoute.FLASHCARDS.name) vm.refreshFlashcards()
-        if (value == CapabilityRoute.MISTAKES.name) vm.refreshMistakes()
-        if (value == HISTORY_ROUTE) vm.refreshHistory()
-        if (value == CapabilityRoute.LIBRARY.name) vm.refreshSources()
+        when (value) {
+            CapabilityRoute.FLASHCARDS.name -> vm.refreshFlashcards()
+            CapabilityRoute.MISTAKES.name -> vm.refreshMistakes()
+            CapabilityRoute.LIBRARY.name -> vm.refreshSources()
+            HISTORY_ROUTE -> vm.refreshHistory()
+        }
+    }
+
+    LaunchedEffect(createdConversation) {
+        createdConversation?.let {
+            conversationId = it
+            secondaryName = CapabilityRoute.CHAT.name
+            vm.consumeCreatedConversation()
+        }
+    }
+    LaunchedEffect(openedPractice) {
+        openedPractice?.let {
+            secondaryName = CapabilityRoute.PRACTICE.name
+            vm.consumeOpenedPractice()
+        }
     }
 
     val nested = drawer.currentValue == DrawerValue.Open || conversationId != null || selectedProjectId != null || secondaryName != null
@@ -85,9 +101,15 @@ private fun VeltrixApp(vm: AppViewModel = viewModel()) {
         when {
             drawer.currentValue == DrawerValue.Open -> scope.launch { drawer.close() }
             conversationId != null -> conversationId = null
-            selectedProjectId != null && secondaryName == null && destination == PrimaryDestination.PROJECTS -> { selectedProjectId = null; vm.clearWorkspace() }
-            secondaryName != null -> { secondaryName = null; conversationId = null; vm.clearAssessment() }
-            else -> Unit
+            secondaryName != null -> {
+                secondaryName = null
+                conversationId = null
+                vm.clearAssessment()
+            }
+            selectedProjectId != null && destination == PrimaryDestination.PROJECTS -> {
+                selectedProjectId = null
+                vm.clearWorkspace()
+            }
         }
     }
 
@@ -96,8 +118,8 @@ private fun VeltrixApp(vm: AppViewModel = viewModel()) {
         gesturesEnabled = true,
         drawerContent = {
             Sidebar(
-                onCapability = { selectCapability(it); scope.launch { drawer.close() } },
-                onDestination = { selectDestination(it); scope.launch { drawer.close() } },
+                onCapability = { route -> selectCapability(route); scope.launch { drawer.close() } },
+                onDestination = { target -> selectDestination(target); scope.launch { drawer.close() } },
             )
         },
         scrimColor = VeltrixColors.Scrim,
@@ -107,12 +129,17 @@ private fun VeltrixApp(vm: AppViewModel = viewModel()) {
                 val expanded = maxWidth >= 840.dp
                 if (expanded) {
                     Row(Modifier.fillMaxSize()) {
-                        PrimaryRail(destination, { scope.launch { drawer.open() } }, ::selectDestination)
+                        PrimaryRail(destination, { scope.launch { drawer.open() } }) { selectDestination(it) }
                         MainWorld(
-                            Modifier.weight(1f), vm, destination, secondaryName, selectedProjectId, conversationId,
+                            modifier = Modifier.weight(1f),
+                            vm = vm,
+                            destination = destination,
+                            secondaryName = secondaryName,
+                            selectedProjectId = selectedProjectId,
+                            conversationId = conversationId,
                             onMenu = { scope.launch { drawer.open() } },
-                            onDestination = ::selectDestination,
-                            onCapability = ::selectCapability,
+                            onDestination = { selectDestination(it) },
+                            onCapability = { selectCapability(it) },
                             onProject = { id -> selectedProjectId = id; vm.openProject(id) },
                             onConversation = { id -> conversationId = id; vm.openConversation(id) },
                             showBottomNav = false,
@@ -120,10 +147,15 @@ private fun VeltrixApp(vm: AppViewModel = viewModel()) {
                     }
                 } else {
                     MainWorld(
-                        Modifier, vm, destination, secondaryName, selectedProjectId, conversationId,
+                        modifier = Modifier,
+                        vm = vm,
+                        destination = destination,
+                        secondaryName = secondaryName,
+                        selectedProjectId = selectedProjectId,
+                        conversationId = conversationId,
                         onMenu = { scope.launch { drawer.open() } },
-                        onDestination = ::selectDestination,
-                        onCapability = ::selectCapability,
+                        onDestination = { selectDestination(it) },
+                        onCapability = { selectCapability(it) },
                         onProject = { id -> selectedProjectId = id; vm.openProject(id) },
                         onConversation = { id -> conversationId = id; vm.openConversation(id) },
                         showBottomNav = true,
@@ -150,14 +182,21 @@ private fun MainWorld(
     showBottomNav: Boolean,
 ) {
     Scaffold(
-        modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize(),
         containerColor = Color.Transparent,
-        topBar = { AppHeader(onMenu, secondaryName ?: destination.name, onSearch = { onCapability(SEARCH_ROUTE) }) },
-        bottomBar = { if (showBottomNav) Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) { PrimaryNavLens(destination, onDestination) } },
+        topBar = { AppHeader(onMenu, secondaryName ?: destination.name) { onCapability(SEARCH_ROUTE) } },
+        bottomBar = {
+            if (showBottomNav) Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
+                PrimaryNavLens(destination, onDestination)
+            }
+        },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).testTag("world-content")) {
-            if (secondaryName == null) DestinationWorld(vm, destination, selectedProjectId, onDestination, onCapability, onProject)
-            else SecondaryWorld(vm, secondaryName, selectedProjectId, conversationId, onDestination, onCapability, onProject, onConversation)
+            if (secondaryName == null) {
+                DestinationWorld(vm, destination, selectedProjectId, onDestination, onCapability, onProject)
+            } else {
+                SecondaryWorld(vm, secondaryName, selectedProjectId, conversationId, onDestination, onCapability, onProject, onConversation)
+            }
         }
     }
 }
@@ -173,21 +212,50 @@ private fun DestinationWorld(
 ) {
     when (destination) {
         PrimaryDestination.HOME -> {
-            val home by vm.home.collectAsStateWithLifecycle(); val resolved by vm.sessionResolved.collectAsStateWithLifecycle(); val extreme = LocalDensity.current.fontScale >= 1.75f
-            val personal = { onDestination(PrimaryDestination.PERSONAL) }; val chat = { onCapability(CapabilityRoute.CHAT.name) }; val practice = { onCapability(CapabilityRoute.PRACTICE.name) }; val projects = { onDestination(PrimaryDestination.PROJECTS) }
-            if (extreme) AccessibleLargeTextHome(home, resolved, vm::refreshHome, personal, chat, practice, projects) else PremiumHomeScreen(home, resolved, vm::refreshHome, personal, chat, practice, projects)
+            val home by vm.home.collectAsStateWithLifecycle()
+            val game by vm.gameProfile.collectAsStateWithLifecycle()
+            val projects by vm.remoteProjects.collectAsStateWithLifecycle()
+            val resolved by vm.sessionResolved.collectAsStateWithLifecycle()
+            val personal = { onDestination(PrimaryDestination.PERSONAL) }
+            val chat = { onCapability(CapabilityRoute.CHAT.name) }
+            val practice = { onCapability(CapabilityRoute.PRACTICE.name) }
+            val projectRoute = { onDestination(PrimaryDestination.PROJECTS) }
+            if (LocalDensity.current.fontScale >= 1.75f) {
+                AccessibleLargeTextHome(home, resolved, vm::refreshHome, personal, chat, practice, projectRoute)
+            } else {
+                Part2HomeScreen(home, game, projects, resolved, vm::refreshHome, personal, chat, practice, projectRoute)
+            }
         }
         PrimaryDestination.PERSONAL -> {
-            val personal by vm.personal.collectAsStateWithLifecycle(); val resolved by vm.sessionResolved.collectAsStateWithLifecycle()
-            PremiumPersonalScreen(personal, resolved, vm::refreshPersonal)
+            val personal by vm.personal.collectAsStateWithLifecycle()
+            val game by vm.gameProfile.collectAsStateWithLifecycle()
+            val map by vm.map.collectAsStateWithLifecycle()
+            val resolved by vm.sessionResolved.collectAsStateWithLifecycle()
+            Part2PersonalScreen(personal, game, map, resolved, vm::refreshPersonal, vm::unlockMap, vm::startMapUnit)
         }
         PrimaryDestination.STORE -> {
-            val store by vm.store.collectAsStateWithLifecycle(); val inventory by vm.inventory.collectAsStateWithLifecycle(); val avatars by vm.avatars.collectAsStateWithLifecycle(); val profile by vm.gameProfile.collectAsStateWithLifecycle(); val feedback by vm.mutationFeedback.collectAsStateWithLifecycle()
+            val store by vm.store.collectAsStateWithLifecycle()
+            val inventory by vm.inventory.collectAsStateWithLifecycle()
+            val avatars by vm.avatars.collectAsStateWithLifecycle()
+            val profile by vm.gameProfile.collectAsStateWithLifecycle()
+            val feedback by vm.mutationFeedback.collectAsStateWithLifecycle()
             StoreWorldScreen(store, inventory, avatars, profile, feedback, vm::refreshStore, vm::purchase, vm::equipAvatar)
         }
         PrimaryDestination.PROJECTS -> {
-            val remote by vm.remoteProjects.collectAsStateWithLifecycle(); val pending by vm.projects.collectAsStateWithLifecycle(); val workspace by vm.workspace.collectAsStateWithLifecycle()
-            ProjectsWorldScreen(remote, pending, workspace, selectedProjectId, vm::refreshProjects, vm::createProject, onProject, { vm.clearWorkspace() }, { onCapability(it.name) })
+            val remote by vm.remoteProjects.collectAsStateWithLifecycle()
+            val pending by vm.projects.collectAsStateWithLifecycle()
+            val workspace by vm.workspace.collectAsStateWithLifecycle()
+            ProjectsWorldScreen(
+                remote = remote,
+                pending = pending,
+                workspace = workspace,
+                selectedProjectId = selectedProjectId,
+                onRetry = vm::refreshProjects,
+                onCreate = vm::createProject,
+                onOpen = onProject,
+                onCloseWorkspace = { vm.clearWorkspace() },
+                onCapability = { onCapability(it.name) },
+            )
         }
     }
 }
@@ -205,64 +273,155 @@ private fun SecondaryWorld(
 ) {
     when (route) {
         CapabilityRoute.CHAT.name -> {
-            val chats by vm.chats.collectAsStateWithLifecycle(); val messages by vm.messages.collectAsStateWithLifecycle(); val sources by vm.sources.collectAsStateWithLifecycle(); val streaming by vm.streaming.collectAsStateWithLifecycle(); val streamingText by vm.streamingText.collectAsStateWithLifecycle(); val streamError by vm.streamError.collectAsStateWithLifecycle(); val selectedSources by vm.selectedSources.collectAsStateWithLifecycle(); val citations by vm.citations.collectAsStateWithLifecycle()
-            ChatWorldScreen(chats, messages, sources, conversationId, selectedProjectId, streaming, streamingText, streamError, selectedSources, citations, { vm.refreshChats(selectedProjectId) }, { vm.createChat(selectedProjectId) }, onConversation, vm::toggleSource, { text -> conversationId?.let { vm.sendChat(it, selectedProjectId, text) } }, { id -> conversationId?.let { vm.retryMessage(it, id) } }, { id -> conversationId?.let { vm.regenerateMessage(it, id) } }, { id -> conversationId?.let { vm.loadCitations(it, id) } })
+            val chats by vm.chats.collectAsStateWithLifecycle()
+            val messages by vm.messages.collectAsStateWithLifecycle()
+            val sources by vm.sources.collectAsStateWithLifecycle()
+            val streaming by vm.streaming.collectAsStateWithLifecycle()
+            val streamingText by vm.streamingText.collectAsStateWithLifecycle()
+            val streamError by vm.streamError.collectAsStateWithLifecycle()
+            val selectedSources by vm.selectedSources.collectAsStateWithLifecycle()
+            val citations by vm.citations.collectAsStateWithLifecycle()
+            ChatWorldScreen(
+                chats, messages, sources, conversationId, selectedProjectId, streaming, streamingText, streamError,
+                selectedSources, citations,
+                onRefresh = { vm.refreshChats(selectedProjectId) },
+                onNew = { vm.createChat(selectedProjectId) },
+                onOpen = onConversation,
+                onToggleSource = vm::toggleSource,
+                onSend = { text -> conversationId?.let { vm.sendChat(it, selectedProjectId, text) } },
+                onRetry = { id -> conversationId?.let { vm.retryMessage(it, id) } },
+                onRegenerate = { id -> conversationId?.let { vm.regenerateMessage(it, id) } },
+                onLoadCitations = { id -> conversationId?.let { vm.loadCitations(it, id) } },
+            )
         }
-        CapabilityRoute.LIBRARY.name -> { val state by vm.sources.collectAsStateWithLifecycle(); LibraryWorldScreen(state, vm::refreshSources, vm::createTextSource, vm::retrySource) }
+        CapabilityRoute.LIBRARY.name -> {
+            val state by vm.sources.collectAsStateWithLifecycle()
+            LibraryWorldScreen(state, vm::refreshSources, vm::createTextSource, vm::retrySource)
+        }
         CapabilityRoute.TESTING.name, CapabilityRoute.QUIZZES.name -> {
-            val search by vm.search.collectAsStateWithLifecycle(); val assessment by vm.assessment.collectAsStateWithLifecycle(); val attempt by vm.attempt.collectAsStateWithLifecycle(); val result by vm.assessmentResult.collectAsStateWithLifecycle()
-            AssessmentWorldScreen(route == CapabilityRoute.QUIZZES.name, search, assessment, attempt, result, { vm.search(it, selectedProjectId) }, vm::openAssessment, vm::startAssessment, vm::answerAssessment, vm::submitAssessment)
+            val search by vm.search.collectAsStateWithLifecycle()
+            val assessment by vm.assessment.collectAsStateWithLifecycle()
+            val attempt by vm.attempt.collectAsStateWithLifecycle()
+            val result by vm.assessmentResult.collectAsStateWithLifecycle()
+            AssessmentWorldScreen(
+                quizMode = route == CapabilityRoute.QUIZZES.name,
+                searchState = search,
+                detail = assessment,
+                attempt = attempt,
+                result = result,
+                onSearch = { vm.search(it, selectedProjectId) },
+                onOpen = vm::openAssessment,
+                onStart = vm::startAssessment,
+                onAnswer = vm::answerAssessment,
+                onSubmit = vm::submitAssessment,
+            )
         }
-        CapabilityRoute.PRACTICE.name -> { val state by vm.practice.collectAsStateWithLifecycle(); val hint by vm.practiceHint.collectAsStateWithLifecycle(); val check by vm.practiceCheck.collectAsStateWithLifecycle(); val complete by vm.practiceComplete.collectAsStateWithLifecycle(); PracticeWorldScreen(state, hint, check, complete, { vm.createPractice(selectedProjectId, it) }, vm::practiceAttempt, vm::practiceHint, vm::practiceCheck, vm::practiceSkip, vm::completePractice) }
-        CapabilityRoute.FLASHCARDS.name -> { val state by vm.flashcards.collectAsStateWithLifecycle(); FlashcardsWorldScreen(state, vm::refreshFlashcards, vm::reviewFlashcard) }
-        CapabilityRoute.MISTAKES.name -> { val state by vm.mistakes.collectAsStateWithLifecycle(); MistakesWorldScreen(state, vm::refreshMistakes, vm::resolveMistake, vm::practiceFromMistake, vm::flashcardFromMistake) }
+        CapabilityRoute.PRACTICE.name -> {
+            val state by vm.practice.collectAsStateWithLifecycle()
+            val hint by vm.practiceHint.collectAsStateWithLifecycle()
+            val check by vm.practiceCheck.collectAsStateWithLifecycle()
+            val complete by vm.practiceComplete.collectAsStateWithLifecycle()
+            PracticeWorldScreen(state, hint, check, complete, { vm.createPractice(selectedProjectId, it) }, vm::practiceAttempt, vm::practiceHint, vm::practiceCheck, vm::practiceSkip, vm::completePractice)
+        }
+        CapabilityRoute.FLASHCARDS.name -> {
+            val state by vm.flashcards.collectAsStateWithLifecycle()
+            FlashcardsWorldScreen(state, vm::refreshFlashcards, vm::reviewFlashcard)
+        }
+        CapabilityRoute.MISTAKES.name -> {
+            val state by vm.mistakes.collectAsStateWithLifecycle()
+            MistakesWorldScreen(state, vm::refreshMistakes, vm::resolveMistake, vm::practiceFromMistake, vm::flashcardFromMistake)
+        }
         SEARCH_ROUTE -> {
             val state by vm.search.collectAsStateWithLifecycle()
-            SearchWorldScreen(state, { vm.search(it, selectedProjectId) }) { r ->
+            SearchWorldScreen(state, { vm.search(it, selectedProjectId) }) { result ->
                 when {
-                    r.type.contains("PROJECT", true) -> { onDestination(PrimaryDestination.PROJECTS); onProject(r.id) }
-                    r.type.contains("CHAT", true) -> { onCapability(CapabilityRoute.CHAT.name); onConversation(r.id) }
-                    r.type.contains("SOURCE", true) -> onCapability(CapabilityRoute.LIBRARY.name)
-                    r.type.contains("ASSESS", true) -> { onCapability(CapabilityRoute.TESTING.name); vm.openAssessment(r.id) }
-                    else -> Unit
+                    result.type.contains("PROJECT", true) -> { onDestination(PrimaryDestination.PROJECTS); onProject(result.id) }
+                    result.type.contains("CHAT", true) -> { onCapability(CapabilityRoute.CHAT.name); onConversation(result.id) }
+                    result.type.contains("SOURCE", true) -> onCapability(CapabilityRoute.LIBRARY.name)
+                    result.type.contains("ASSESS", true) -> { onCapability(CapabilityRoute.TESTING.name); vm.openAssessment(result.id) }
                 }
             }
         }
-        HISTORY_ROUTE -> { val state by vm.history.collectAsStateWithLifecycle(); HistoryWorldScreen(state, vm::refreshHistory) { e -> when { e.projectId != null -> { onDestination(PrimaryDestination.PROJECTS); onProject(e.projectId) }; e.type.contains("CHAT", true) && e.objectId != null -> { onCapability(CapabilityRoute.CHAT.name); onConversation(e.objectId) }; else -> Unit } } }
-        CapabilityRoute.CALCULATOR.name, CapabilityRoute.TRANSLATE.name, CapabilityRoute.NOTIFICATIONS.name, CapabilityRoute.SETTINGS.name -> CapabilityBridgeScreen(route)
+        HISTORY_ROUTE -> {
+            val state by vm.history.collectAsStateWithLifecycle()
+            HistoryWorldScreen(state, vm::refreshHistory) { event ->
+                when {
+                    event.projectId != null -> { onDestination(PrimaryDestination.PROJECTS); onProject(event.projectId) }
+                    event.type.contains("CHAT", true) && event.objectId != null -> { onCapability(CapabilityRoute.CHAT.name); onConversation(event.objectId) }
+                }
+            }
+        }
         else -> CapabilityBridgeScreen(route)
     }
 }
 
 @Composable
 private fun AppHeader(onMenu: () -> Unit, routeName: String, onSearch: () -> Unit) {
-    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        PressableGlass(onMenu, Modifier.size(50.dp).testTag("open-capabilities").semantics { contentDescription = "Open Veltrix capabilities" }, 999.dp) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("≡", color = VeltrixColors.Ink, fontWeight = FontWeight.Bold) } }
-        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text("Veltrix Hom", color = VeltrixColors.Ink, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium); Text(routeName.lowercase().replace('_',' ').replaceFirstChar { it.uppercaseChar().toString() }, color = VeltrixColors.InkMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("active-route")) }
-        PressableGlass(onSearch, Modifier.size(50.dp).semantics { contentDescription = "Search Veltrix" }, 999.dp) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("⌕", color = VeltrixColors.Ink, fontWeight = FontWeight.Bold) } }
-    }
-}
-
-@Composable
-private fun PrimaryNavLens(selected: PrimaryDestination, onSelect: (PrimaryDestination) -> Unit) {
-    val destinations = listOf(PrimaryDestination.HOME, PrimaryDestination.PERSONAL, PrimaryDestination.STORE, PrimaryDestination.PROJECTS)
-    val policy = rememberVeltrixEffectPolicy()
-    GlassSurface(Modifier.fillMaxWidth().height(68.dp), 28.dp, true) {
-        BoxWithConstraints(Modifier.fillMaxSize().padding(5.dp)) {
-            val itemWidth = maxWidth / destinations.size.toFloat(); val index = destinations.indexOf(selected).coerceAtLeast(0)
-            val x by animateDpAsState(itemWidth * index.toFloat(), if (policy.reducedMotion) snap() else spring(dampingRatio = .82f, stiffness = 430f), label = "primary-nav-lens")
-            Box(Modifier.offset(x = x).width(itemWidth).fillMaxHeight().clip(RoundedCornerShape(23.dp)).background(Brush.linearGradient(listOf(Color(0xF6FFFFFF), Color(0xCEEAF2FF), Color(0xD5EEFFF9)))).semantics { contentDescription = "Selected destination lens" })
-            Row(Modifier.fillMaxSize()) { destinations.forEach { d -> val active = d == selected; Box(Modifier.width(itemWidth).fillMaxHeight().selectable(active, role = Role.Tab, onClick = { onSelect(d) }).semantics { this.selected = active }.testTag("nav-${d.name}"), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Box(Modifier.size(if (active) 7.dp else 5.dp).clip(CircleShape).background(if (active) VeltrixColors.Sky else Color(0xFF9AABC2))); Text(d.labelP2(), color = if (active) VeltrixColors.Ink else VeltrixColors.InkMuted, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium, style = MaterialTheme.typography.labelMedium) } } } }
+    Row(
+        Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        PressableGlass(onMenu, Modifier.size(50.dp).testTag("open-capabilities").semantics { contentDescription = "Open Veltrix capabilities" }, 999.dp) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("≡", color = VeltrixColors.Ink, fontWeight = FontWeight.Bold) }
+        }
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("Veltrix Hom", color = VeltrixColors.Ink, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+            Text(routeName.lowercase().replace('_', ' ').replaceFirstChar { it.uppercaseChar().toString() }, color = VeltrixColors.InkMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("active-route"))
+        }
+        PressableGlass(onSearch, Modifier.size(50.dp).semantics { contentDescription = "Search Veltrix" }, 999.dp) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("⌕", color = VeltrixColors.Ink, fontWeight = FontWeight.Bold) }
         }
     }
 }
 
 @Composable
-private fun PrimaryRail(selected: PrimaryDestination, onMenu: () -> Unit, onSelect: (PrimaryDestination) -> Unit) {
+private fun PrimaryNavLens(selectedDestination: PrimaryDestination, onSelect: (PrimaryDestination) -> Unit) {
+    val destinations = listOf(PrimaryDestination.HOME, PrimaryDestination.PERSONAL, PrimaryDestination.STORE, PrimaryDestination.PROJECTS)
+    val policy = rememberVeltrixEffectPolicy()
+    GlassSurface(Modifier.fillMaxWidth().height(68.dp), 28.dp, true) {
+        BoxWithConstraints(Modifier.fillMaxSize().padding(5.dp)) {
+            val itemWidth = maxWidth / destinations.size.toFloat()
+            val index = destinations.indexOf(selectedDestination).coerceAtLeast(0)
+            val x by animateDpAsState(itemWidth * index.toFloat(), if (policy.reducedMotion) snap() else spring(dampingRatio = .82f, stiffness = 430f), label = "primary-nav-lens")
+            Box(Modifier.offset(x = x).width(itemWidth).fillMaxHeight().clip(RoundedCornerShape(23.dp)).background(Brush.linearGradient(listOf(Color(0xF6FFFFFF), Color(0xCEEAF2FF), Color(0xD5EEFFF9)))).semantics { contentDescription = "Selected destination lens" })
+            Row(Modifier.fillMaxSize()) {
+                destinations.forEach { destination ->
+                    val active = destination == selectedDestination
+                    Box(
+                        Modifier.width(itemWidth).fillMaxHeight().selectable(active, role = Role.Tab, onClick = { onSelect(destination) }).semantics { selected = active }.testTag("nav-${destination.name}"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(Modifier.size(if (active) 7.dp else 5.dp).clip(CircleShape).background(if (active) VeltrixColors.Sky else Color(0xFF9AABC2)))
+                            Text(destination.labelP2(), color = if (active) VeltrixColors.Ink else VeltrixColors.InkMuted, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PrimaryRail(selectedDestination: PrimaryDestination, onMenu: () -> Unit, onSelect: (PrimaryDestination) -> Unit) {
     Column(Modifier.fillMaxHeight().width(116.dp).padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         PressableGlass(onMenu, Modifier.size(52.dp), 999.dp) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("≡", fontWeight = FontWeight.Bold, color = VeltrixColors.Ink) } }
         Spacer(Modifier.height(8.dp))
-        PrimaryDestination.entries.forEach { d -> val active = selected == d; PressableGlass({ onSelect(d) }, Modifier.fillMaxWidth().heightIn(min = 62.dp).semantics { role = Role.Tab; this.selected = active }, 22.dp, active) { Column(Modifier.fillMaxSize().padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) { Box(Modifier.size(7.dp).clip(CircleShape).background(if (active) VeltrixColors.Sky else Color(0xFF9AABC2))); Text(d.labelP2(), color = if (active) VeltrixColors.Ink else VeltrixColors.InkMuted, style = MaterialTheme.typography.labelSmall) } } }
+        PrimaryDestination.entries.forEach { destination ->
+            val active = selectedDestination == destination
+            PressableGlass(
+                onClick = { onSelect(destination) },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 62.dp).semantics { role = Role.Tab; selected = active },
+                radius = 22.dp,
+                strong = active,
+            ) {
+                Column(Modifier.fillMaxSize().padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Box(Modifier.size(7.dp).clip(CircleShape).background(if (active) VeltrixColors.Sky else Color(0xFF9AABC2)))
+                    Text(destination.labelP2(), color = if (active) VeltrixColors.Ink else VeltrixColors.InkMuted, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
     }
 }
 
@@ -277,10 +436,18 @@ private fun Sidebar(onCapability: (String) -> Unit, onDestination: (PrimaryDesti
                 LazyColumn(Modifier.weight(1f).testTag("capability-list"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     item { SidebarRoute(SEARCH_ROUTE, "Search", onCapability) }
                     item { SidebarRoute(HISTORY_ROUTE, "History", onCapability) }
-                    items(CapabilityRoute.entries) { route -> SidebarRoute(route.name, route.name.lowercase().replace('_',' ').replaceFirstChar { it.uppercaseChar().toString() }, onCapability, "capability-${route.name}") }
+                    items(CapabilityRoute.entries) { route ->
+                        SidebarRoute(route.name, route.name.lowercase().replace('_', ' ').replaceFirstChar { it.uppercaseChar().toString() }, onCapability, "capability-${route.name}")
+                    }
                 }
                 HorizontalDivider(Modifier.padding(vertical = 10.dp), color = Color(0x1F4A638A))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(PrimaryDestination.HOME, PrimaryDestination.PERSONAL).forEach { d -> PressableGlass({ onDestination(d) }, Modifier.weight(1f).heightIn(min = 48.dp), 18.dp) { Box(Modifier.fillMaxSize().padding(10.dp), contentAlignment = Alignment.Center) { Text(d.labelP2(), color = VeltrixColors.Ink) } } } }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(PrimaryDestination.HOME, PrimaryDestination.PERSONAL).forEach { destination ->
+                        PressableGlass({ onDestination(destination) }, Modifier.weight(1f).heightIn(min = 48.dp), 18.dp) {
+                            Box(Modifier.fillMaxSize().padding(10.dp), contentAlignment = Alignment.Center) { Text(destination.labelP2(), color = VeltrixColors.Ink) }
+                        }
+                    }
+                }
             }
         }
     }
@@ -288,7 +455,10 @@ private fun Sidebar(onCapability: (String) -> Unit, onDestination: (PrimaryDesti
 
 @Composable
 private fun SidebarRoute(route: String, label: String, onCapability: (String) -> Unit, tag: String? = null) {
-    Box(Modifier.fillMaxWidth().heightIn(min = 50.dp).clip(RoundedCornerShape(16.dp)).selectable(false, role = Role.Button, onClick = { onCapability(route) }).padding(horizontal = 12.dp).then(if (tag == null) Modifier else Modifier.testTag(tag)), contentAlignment = Alignment.CenterStart) { Text(label, color = VeltrixColors.Ink, fontWeight = FontWeight.Medium) }
+    Box(
+        Modifier.fillMaxWidth().heightIn(min = 50.dp).clip(RoundedCornerShape(16.dp)).selectable(false, role = Role.Button, onClick = { onCapability(route) }).padding(horizontal = 12.dp).then(if (tag == null) Modifier else Modifier.testTag(tag)),
+        contentAlignment = Alignment.CenterStart,
+    ) { Text(label, color = VeltrixColors.Ink, fontWeight = FontWeight.Medium) }
 }
 
 private fun PrimaryDestination.labelP2() = name.lowercase().replaceFirstChar { it.uppercaseChar().toString() }
