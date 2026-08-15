@@ -13,6 +13,7 @@ class SyncWorker(appContext:Context,params:WorkerParameters):CoroutineWorker(app
         val session=SessionStore(applicationContext).read() ?: return Result.success()
         val db=VeltrixLocalDatabase.get(applicationContext)
         val dao=db.sync()
+        val projectDao=db.projects()
         val part3=Part3LocalDatabase.get(applicationContext)
         val batch=dao.nextBatch(session.accountId,50);if(batch.isEmpty())return Result.success()
         val body=JSONObject().put("mutations",JSONArray().apply{batch.forEach{m->
@@ -33,9 +34,21 @@ class SyncWorker(appContext:Context,params:WorkerParameters):CoroutineWorker(app
                         val serverRevision=if(r.has("serverRevision")&&!r.isNull("serverRevision"))r.optLong("serverRevision",current.expectedRevision?:1) else current.expectedRevision?:1
                         part3.contextCarry().markAcked(session.accountId,serverRevision,System.currentTimeMillis())
                     }
+                    if(current.entityType.equals("PROJECT",true)) {
+                        projectDao.get(current.entityId)?.let { local ->
+                            val serverRevision=if(r.has("serverRevision")&&!r.isNull("serverRevision"))r.optLong("serverRevision",local.revision) else local.revision
+                            projectDao.upsert(local.copy(revision=serverRevision,syncState="SYNCED",updatedAtEpochMs=System.currentTimeMillis()))
+                        }
+                    }
                 }
-                "CONFLICT"->dao.updateState(id,"CONFLICT",current.attemptCount+1)
-                "REJECTED"->dao.updateState(id,"REJECTED",current.attemptCount+1)
+                "CONFLICT"->{
+                    dao.updateState(id,"CONFLICT",current.attemptCount+1)
+                    if(current.entityType.equals("PROJECT",true)) projectDao.get(current.entityId)?.let { projectDao.upsert(it.copy(syncState="CONFLICT",updatedAtEpochMs=System.currentTimeMillis())) }
+                }
+                "REJECTED"->{
+                    dao.updateState(id,"REJECTED",current.attemptCount+1)
+                    if(current.entityType.equals("PROJECT",true)) projectDao.get(current.entityId)?.let { projectDao.upsert(it.copy(syncState="REJECTED",updatedAtEpochMs=System.currentTimeMillis())) }
+                }
                 "RETRY"->{dao.updateState(id,"PENDING",current.attemptCount+1);retry=true}
             }
         }
