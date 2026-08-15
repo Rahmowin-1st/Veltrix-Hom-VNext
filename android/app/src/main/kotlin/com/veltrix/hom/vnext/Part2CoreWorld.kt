@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
@@ -52,8 +53,9 @@ fun Part2HomeScreen(
             HomeScreen(home, sessionResolved, onRetry, onOpenPersonal, onChat, onPractice, onProjects)
             return@BoxWithConstraints
         }
-        val compact = maxHeight < 700.dp || maxWidth < 355.dp
-        val expanded = maxWidth >= 760.dp
+        val largeText = LocalDensity.current.fontScale >= 1.5f
+        val compact = maxHeight < 700.dp || maxWidth < 355.dp || largeText
+        val expanded = maxWidth >= 760.dp && !largeText
         val profile = game.value
         val avatarId = profile?.avatarId?.takeIf { it.isNotBlank() } ?: model.avatarId
         val asset = profile?.avatarAssetKey.orEmpty()
@@ -62,8 +64,8 @@ fun Part2HomeScreen(
             Row(Modifier.fillMaxSize().padding(horizontal = 26.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 Column(Modifier.weight(.58f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     HomeIdentityBand(model, avatarId, asset, tier, onOpenPersonal)
-                    NowWorld(model, Modifier.weight(1f), onChat)
-                    HomeActions(onChat, onPractice, onProjects)
+                    NowWorld(model, Modifier.weight(1f), onChat, largeText = false)
+                    HomeActions(onChat, onPractice, onProjects, largeText = false)
                 }
                 ContinuityRail(model, projects, Modifier.weight(.42f).fillMaxHeight(), onProjects)
             }
@@ -71,8 +73,8 @@ fun Part2HomeScreen(
             Column(Modifier.fillMaxSize().padding(horizontal = if (compact) 14.dp else 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 11.dp)) {
                 if (home.freshness != DataFreshness.FRESH) CoreFreshness(home.freshness, onRetry)
                 HomeIdentityBand(model, avatarId, asset, tier, onOpenPersonal)
-                NowWorld(model, Modifier.weight(1f).fillMaxWidth(), onChat)
-                HomeActions(onChat, onPractice, onProjects)
+                NowWorld(model, Modifier.weight(1f).fillMaxWidth(), onChat, largeText)
+                HomeActions(onChat, onPractice, onProjects, largeText)
                 if (!compact) ContinuityStrip(model, projects, onProjects)
             }
         }
@@ -101,7 +103,7 @@ private fun XpThread(model: HomeFinalModel) {
 }
 
 @Composable
-private fun NowWorld(model: HomeFinalModel, modifier: Modifier, onChat: () -> Unit) {
+private fun NowWorld(model: HomeFinalModel, modifier: Modifier, onChat: () -> Unit, largeText: Boolean) {
     val focus = model.currentFocus?.takeIf { it.isNotBlank() }
     Box(
         modifier.clip(RoundedCornerShape(42.dp)).drawWithCache {
@@ -115,27 +117,44 @@ private fun NowWorld(model: HomeFinalModel, modifier: Modifier, onChat: () -> Un
             }
         },
     ) {
-        Column(Modifier.fillMaxSize().padding(22.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Column(Modifier.fillMaxSize().padding(if (largeText) 16.dp else 22.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Column(verticalArrangement = Arrangement.spacedBy(if (largeText) 4.dp else 7.dp)) {
                 Text("NOW", style = MaterialTheme.typography.labelSmall, color = VeltrixColors.SkyDeep, fontWeight = FontWeight.Bold)
-                Text(focus ?: "Build the next useful step", style = MaterialTheme.typography.headlineSmall, color = VeltrixColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                Text(if (focus == null) "No current focus is confirmed yet. Veltrix keeps the space intentional instead of inventing a recommendation." else "Continue the learning context already confirmed for your account.", color = VeltrixColors.InkMuted)
+                Text(focus ?: "Build the next useful step", style = MaterialTheme.typography.headlineSmall, color = VeltrixColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = if (largeText) 2 else 3, overflow = TextOverflow.Ellipsis)
+                if (!largeText) Text(if (focus == null) "No current focus is confirmed yet. Veltrix keeps the space intentional instead of inventing a recommendation." else "Continue the learning context already confirmed for your account.", color = VeltrixColors.InkMuted)
             }
             Row(verticalAlignment = Alignment.Bottom) {
-                Column(Modifier.weight(1f)) {
-                    Text(model.memoryMaturity.ifBlank { "Memory building" }.coreTitle(), color = VeltrixColors.Ink, fontWeight = FontWeight.SemiBold)
-                    Text("learning memory", color = VeltrixColors.InkMuted, style = MaterialTheme.typography.labelSmall)
-                }
-                PressableGlass(onChat, Modifier.heightIn(min=54.dp).testTag("home-primary-action"), 22.dp, strong = true) { Text("Ask Veltrix →", Modifier.padding(horizontal=16.dp,vertical=13.dp), color=VeltrixColors.Ink, fontWeight=FontWeight.SemiBold) }
+                if (!largeText) {
+                    Column(Modifier.weight(1f)) {
+                        Text(model.memoryMaturity.ifBlank { "Memory building" }.coreTitle(), color = VeltrixColors.Ink, fontWeight = FontWeight.SemiBold)
+                        Text("learning memory", color = VeltrixColors.InkMuted, style = MaterialTheme.typography.labelSmall)
+                    }
+                } else Spacer(Modifier.weight(1f))
+                PressableGlass(onChat, Modifier.heightIn(min=54.dp).testTag("home-primary-action"), 22.dp, strong = true) { Text("Ask Veltrix →", Modifier.padding(horizontal=16.dp,vertical=13.dp), color=VeltrixColors.Ink, fontWeight=FontWeight.SemiBold, maxLines = 1) }
             }
         }
     }
 }
 
 @Composable
-private fun HomeActions(onChat:()->Unit,onPractice:()->Unit,onProjects:()->Unit) {
-    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-        listOf("Ask" to onChat,"Practice" to onPractice,"Projects" to onProjects).forEach { (label,action) -> PressableGlass(action,Modifier.weight(1f).heightIn(min=56.dp),20.dp) { Box(Modifier.fillMaxSize().padding(10.dp),contentAlignment=Alignment.Center){Text(label,color=VeltrixColors.Ink,fontWeight=FontWeight.Medium)} } }
+private fun HomeActions(onChat:()->Unit,onPractice:()->Unit,onProjects:()->Unit,largeText:Boolean) {
+    @Composable fun HomeAction(label:String, action:()->Unit, modifier:Modifier) {
+        PressableGlass(action, modifier.heightIn(min=56.dp), 20.dp) { Box(Modifier.fillMaxSize().padding(horizontal=10.dp,vertical=8.dp),contentAlignment=Alignment.Center){Text(label,color=VeltrixColors.Ink,fontWeight=FontWeight.Medium,maxLines=1,overflow=TextOverflow.Ellipsis)} }
+    }
+    if (largeText) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HomeAction("Ask", onChat, Modifier.weight(1f))
+                HomeAction("Practice", onPractice, Modifier.weight(1f))
+            }
+            HomeAction("Projects", onProjects, Modifier.fillMaxWidth())
+        }
+    } else {
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            HomeAction("Ask", onChat, Modifier.weight(1f))
+            HomeAction("Practice", onPractice, Modifier.weight(1f))
+            HomeAction("Projects", onProjects, Modifier.weight(1f))
+        }
     }
 }
 
