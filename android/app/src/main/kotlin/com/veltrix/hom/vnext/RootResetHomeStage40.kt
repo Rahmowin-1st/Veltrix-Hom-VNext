@@ -137,7 +137,7 @@ fun RootHomeWorldStage40(
                             when {
                                 model == null -> "Syncing"
                                 model.remainingXp > 0 -> "${model.remainingXp} XP"
-                                else -> "Ready",
+                                else -> "Ready"
                             },
                             color = KineticColor.Ink,
                             style = MaterialTheme.typography.labelMedium,
