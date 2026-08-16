@@ -18,8 +18,10 @@ class FrontendPart3ClosureUiInstrumentedTest {
         compose.setContent { VeltrixTheme { FlashcardsWorldScreen(RepositoryState(listOf(card), DataFreshness.FRESH), {}, { _, _ -> }) } }
         compose.onNodeWithTag("flashcards-screen").assertIsDisplayed()
         compose.onNodeWithTag("flashcard-stage").assertIsDisplayed().assertHeightIsAtLeast(300.dp)
-        compose.onNodeWithTag("flashcard-primary-text").assertIsDisplayed().assertHeightIsAtLeast(72.dp)
-        compose.onNodeWithText("Explain why acceleration changes when net force changes.").assertIsDisplayed()
+        // Inspect the actual Text layout node rather than the merged clickable semantics parent.
+        // This retains the strict visible + >=72dp clipping gate while avoiding a merged-tree false negative.
+        compose.onNodeWithTag("flashcard-primary-text", useUnmergedTree = true).assertIsDisplayed().assertHeightIsAtLeast(72.dp)
+        compose.onNodeWithText("Explain why acceleration changes when net force changes.", useUnmergedTree = true).assertIsDisplayed().assertHeightIsAtLeast(72.dp)
     }
 
     @Test
