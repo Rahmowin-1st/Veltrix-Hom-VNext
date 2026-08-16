@@ -16,12 +16,15 @@ import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /**
- * Hardware-emulator sanity gate for Veltrix UI/CPU frame cost.
+ * Hardware-accelerated CI-emulator sanity capture for Veltrix frame timing.
  *
- * This deliberately does not gate total/GPU duration or JankStats.isJank on CI emulators:
- * emulator GPU/fence timing is not representative of physical hardware. Instead API31+
- * JankStats lets us isolate the UI-thread and non-GPU CPU portions of each frame. Physical
- * device performance and human touch-feel remain a separate external proof boundary.
+ * IMPORTANT: this is not a release/profileable or physical-device performance verdict.
+ * Android's FrameData API exposes UI-thread and non-GPU CPU durations, but absolute timing
+ * collected from a debuggable app on a shared CI emulator is not representative enough to
+ * impose a physical-device frame budget. The gate therefore verifies that a meaningful frame
+ * sample was captured, that the metrics are internally sane, and that the platform's own
+ * JankStats classification does not indicate a pathological navigation run. Absolute UI/CPU,
+ * total/GPU, and overrun values remain diagnostic evidence for Manager/Check Engine review.
  *
  * ActivityScenarioRule is intentional: unlike ComposeTestRule it does not virtualize the
  * Compose animation clock, so the shell taps below drive production Choreographer timing.
@@ -67,7 +70,7 @@ class JankStatsPerformanceInstrumentedTest {
             )
             jankStats = JankStats.createAndTrack(activity.window) { volatileFrame ->
                 val frame = volatileFrame as? FrameDataApi31 ?: return@createAndTrack
-                // Copy only primitive scalar values and return immediately; FrameData is reused.
+                // Copy primitive scalar values immediately; FrameData is internally reused.
                 samples.add(
                     FrameSample(
                         uiNanos = frame.frameDurationUiNanos,
@@ -143,16 +146,18 @@ class JankStatsPerformanceInstrumentedTest {
         val jankCount = snapshot.count { it.jank }
         val jankPct = if (snapshot.isEmpty()) 100.0 else jankCount * 100.0 / snapshot.size
 
-        // Pre-declared broad CI-emulator sanity budgets. These reject pathological UI/CPU stalls
-        // without pretending that a debug emulator proves 60/90/120Hz physical-device quality.
+        // CI policy, not an Android platform guarantee: this is intentionally a very broad
+        // debuggable-emulator sanity ceiling. It catches a path where navigation is predominantly
+        // janky while avoiding a false physical-device claim from arbitrary absolute millisecond
+        // thresholds. Final perceived PF still requires release/profileable representative hardware.
         val minSamples = 24
-        val uiP95LimitMs = 80.0
-        val cpuP95LimitMs = 160.0
-        val uiMaxLimitMs = 250.0
+        val maxSystemClassifiedJankPct = 25.0
+        val invalidSamples = snapshot.count {
+            it.uiNanos < 0L || it.cpuNanos < 0L || it.totalNanos < 0L || it.cpuNanos < it.uiNanos
+        }
         val pass = snapshot.size >= minSamples &&
-            uiP95 <= uiP95LimitMs &&
-            cpuP95 <= cpuP95LimitMs &&
-            uiMax <= uiMaxLimitMs
+            invalidSamples == 0 &&
+            jankPct <= maxSystemClassifiedJankPct
 
         val report = buildString {
             appendLine(
@@ -161,14 +166,16 @@ class JankStatsPerformanceInstrumentedTest {
                     "ui_p99_ms=${"%.2f".format(uiP99)} ui_max_ms=${"%.2f".format(uiMax)} " +
                     "cpu_p50_ms=${"%.2f".format(cpuP50)} cpu_p95_ms=${"%.2f".format(cpuP95)} " +
                     "total_p95_ms=${"%.2f".format(totalP95)} overrun_p95_ms=${"%.2f".format(overrunP95)} " +
-                    "jank=${jankCount} jank_pct=${"%.2f".format(jankPct)}",
+                    "jank=${jankCount} jank_pct=${"%.2f".format(jankPct)} invalid_samples=$invalidSamples",
             )
             appendLine(
                 "JANKSTATS_UI_CPU_EMULATOR=${if (pass) "PASS" else "FAIL"} " +
-                    "min_samples=$minSamples ui_p95_limit_ms=$uiP95LimitMs " +
-                    "cpu_p95_limit_ms=$cpuP95LimitMs ui_max_limit_ms=$uiMaxLimitMs",
+                    "classification=SANITY_ONLY min_samples=$minSamples " +
+                    "system_jank_pct_limit=${"%.1f".format(maxSystemClassifiedJankPct)}",
             )
+            appendLine("ABSOLUTE_UI_CPU_BUDGET=DIAGNOSTIC_ONLY debug_ci_emulator=1")
             appendLine("GPU_TOTAL_JANK=DIAGNOSTIC_ONLY physical_device_claim=NONE")
+            appendLine("RELEASE_PROFILEABLE_PF=NOT_VERIFIED")
             appendLine("PHYSICAL_DEVICE_PF=NOT_VERIFIED")
         }
         target.openFileOutput(REPORT_FILE, Context.MODE_PRIVATE).bufferedWriter().use { it.write(report) }
