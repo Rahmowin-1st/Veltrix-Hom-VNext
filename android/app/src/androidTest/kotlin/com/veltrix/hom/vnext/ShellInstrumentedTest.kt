@@ -2,10 +2,12 @@ package com.veltrix.hom.vnext
 
 import android.util.Log
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.printToLog
 import com.veltrix.hom.vnext.core.CapabilityRoute
 import kotlinx.coroutines.runBlocking
@@ -29,11 +31,6 @@ class ShellInstrumentedTest {
         assertNotNull("Seeded session must survive into the real Activity test process", persistedSession)
 
         compose.onNodeWithTag("nav-HOME").assertIsDisplayed()
-
-        // Part 2 intentionally delegates its unresolved/loading state to the accepted Part 1
-        // Home state family. During that short handoff both wrappers may temporarily expose the
-        // same diagnostic test tag. The acceptance target is the loaded real Home world, so wait
-        // for its authoritative primary action first, then keep the home-screen check strict.
         try {
             compose.waitUntil(8_000) {
                 runCatching {
@@ -65,11 +62,12 @@ class ShellInstrumentedTest {
         compose.onNodeWithTag("open-capabilities").performClick()
         compose.waitUntil(5_000) {
             runCatching {
-                compose.onNodeWithTag("capability-CHAT").assertIsDisplayed()
+                compose.onNodeWithTag("capability-list").assertIsDisplayed()
                 true
             }.getOrDefault(false)
         }
-        compose.onNodeWithTag("capability-CHAT").performClick()
+        compose.onNodeWithTag("capability-list").performScrollToNode(hasTestTag("capability-CHAT"))
+        compose.onNodeWithTag("capability-CHAT").assertIsDisplayed().performClick()
         compose.waitForIdle()
         compose.onNodeWithTag("active-route").assertIsDisplayed()
     }
