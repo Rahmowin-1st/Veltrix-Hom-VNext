@@ -11,8 +11,8 @@ android {
         applicationId = "com.veltrix.hom.vnext"
         minSdk = 26
         targetSdk = 37
-        versionCode = 5
-        versionName = "0.5.0-frontend-part2"
+        versionCode = 6
+        versionName = "0.6.0-frontend-part3-final"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "VELTRIX_API_BASE_URL", "\"${providers.gradleProperty("VELTRIX_API_BASE_URL").orElse("http://10.0.2.2:8080").get()}\"")
     }

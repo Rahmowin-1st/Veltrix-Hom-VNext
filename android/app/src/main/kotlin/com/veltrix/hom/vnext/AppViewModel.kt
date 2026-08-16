@@ -20,6 +20,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val sessionStore = SessionStore(app)
     private val part3 = Part3AndroidRepository(app)
     private val part2 = Part2FeatureRepository(app)
+    private val part3Controls = Part3ControlRepository()
 
     private val _session = MutableStateFlow<LocalSession?>(null)
     val session: StateFlow<LocalSession?> = _session.asStateFlow()
@@ -95,6 +96,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val createdConversationId = _createdConversationId.asStateFlow()
     private val _openedPracticeId = MutableStateFlow<String?>(null)
     val openedPracticeId = _openedPracticeId.asStateFlow()
+
+    private val _calculator = MutableStateFlow(RepositoryState<CalculatorResultUiModel>(null, DataFreshness.FRESH))
+    val calculator = _calculator.asStateFlow()
+    private val _calculatorHistory = MutableStateFlow<List<CalculatorResultUiModel>>(emptyList())
+    val calculatorHistory = _calculatorHistory.asStateFlow()
+    private val _translation = MutableStateFlow(RepositoryState<TranslationUiModel>(null, DataFreshness.FRESH))
+    val translation = _translation.asStateFlow()
+    private val _notificationIntents = MutableStateFlow(RepositoryState<List<NotificationIntentUiModel>>(emptyList(), DataFreshness.OFFLINE))
+    val notificationIntents = _notificationIntents.asStateFlow()
+    private val _notificationPreferences = MutableStateFlow(RepositoryState<List<NotificationPreferenceUiModel>>(emptyList(), DataFreshness.OFFLINE))
+    val notificationPreferences = _notificationPreferences.asStateFlow()
+    private val _profileControls = MutableStateFlow(RepositoryState<ProfileUiModel>(null, DataFreshness.OFFLINE))
+    val profileControls = _profileControls.asStateFlow()
+    private val _settingsControls = MutableStateFlow(RepositoryState<List<SettingUiModel>>(emptyList(), DataFreshness.OFFLINE))
+    val settingsControls = _settingsControls.asStateFlow()
+    private val _accountExport = MutableStateFlow(RepositoryState<AccountExportUiModel>(null, DataFreshness.OFFLINE))
+    val accountExport = _accountExport.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -660,6 +678,122 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         _history.value = part2.history(s, force)
+    }
+
+    fun calculate(expression: String) = viewModelScope.launch {
+        val clean = expression.trim()
+        if (clean.isEmpty()) return@launch
+        val s = apiSession() ?: run {
+            _calculator.value = RepositoryState(null, DataFreshness.OFFLINE, errorCode = "NO_SESSION")
+            return@launch
+        }
+        _calculator.value = _calculator.value.copy(loading = true, errorCode = null)
+        val result = part3Controls.calculate(s, clean)
+        _calculator.value = result
+        result.value?.let { value ->
+            _calculatorHistory.value = (_calculatorHistory.value + value).takeLast(20)
+        }
+    }
+
+    fun translate(text: String, target: String, source: String?, projectId: String?) = viewModelScope.launch {
+        val clean = text.trim()
+        if (clean.isEmpty()) return@launch
+        val s = apiSession() ?: run {
+            _translation.value = RepositoryState(null, DataFreshness.OFFLINE, errorCode = "NO_SESSION")
+            return@launch
+        }
+        _translation.value = _translation.value.copy(loading = true, errorCode = null)
+        _translation.value = part3Controls.translate(s, clean, target, source, projectId)
+        if (_translation.value.value != null) bindContext(projectId, null, "translate", "DEFAULT")
+    }
+
+    fun refreshNotifications() = viewModelScope.launch {
+        val s = apiSession() ?: run {
+            _notificationIntents.value = RepositoryState(emptyList(), DataFreshness.OFFLINE, errorCode = "NO_SESSION")
+            _notificationPreferences.value = RepositoryState(emptyList(), DataFreshness.OFFLINE, errorCode = "NO_SESSION")
+            return@launch
+        }
+        _notificationIntents.value = _notificationIntents.value.copy(loading = true, errorCode = null)
+        _notificationPreferences.value = _notificationPreferences.value.copy(loading = true, errorCode = null)
+        _notificationIntents.value = part3Controls.notificationIntents(s)
+        _notificationPreferences.value = part3Controls.notificationPreferences(s)
+    }
+
+    fun updateNotificationPreference(current: NotificationPreferenceUiModel, enabled: Boolean) = viewModelScope.launch {
+        val s = apiSession() ?: return@launch
+        try {
+            val updated = part3Controls.putNotificationPreference(s, current, enabled)
+            _notificationPreferences.value = RepositoryState(
+                _notificationPreferences.value.value.orEmpty().map { if (it.category == updated.category) updated else it },
+                DataFreshness.FRESH,
+            )
+            _mutationFeedback.value = MutationFeedback(true)
+        } catch (e: BackendUiException) {
+            _mutationFeedback.value = MutationFeedback(false, e.code, e.detail, e.retryable)
+        } catch (t: Throwable) {
+            _mutationFeedback.value = MutationFeedback(false, "OFFLINE", t.message, true)
+        }
+    }
+
+    fun refreshSettings() = viewModelScope.launch {
+        val s = apiSession() ?: run {
+            _profileControls.value = RepositoryState(null, DataFreshness.OFFLINE, errorCode = "NO_SESSION")
+            _settingsControls.value = RepositoryState(emptyList(), DataFreshness.OFFLINE, errorCode = "NO_SESSION")
+            return@launch
+        }
+        _profileControls.value = _profileControls.value.copy(loading = true, errorCode = null)
+        _settingsControls.value = _settingsControls.value.copy(loading = true, errorCode = null)
+        _profileControls.value = part3Controls.profile(s)
+        _settingsControls.value = part3Controls.settings(s)
+    }
+
+    fun saveProfile(current: ProfileUiModel, displayName: String, language: String, timezone: String, memoryEnabled: Boolean) = viewModelScope.launch {
+        val s = apiSession() ?: return@launch
+        try {
+            val updated = part3Controls.updateProfile(s, current, displayName, language, timezone, memoryEnabled)
+            _profileControls.value = RepositoryState(updated, DataFreshness.FRESH)
+            _mutationFeedback.value = MutationFeedback(true)
+            loadHome(true)
+            loadPersonal(true)
+        } catch (e: BackendUiException) {
+            _mutationFeedback.value = MutationFeedback(false, e.code, e.detail, e.retryable)
+            if (e.code.contains("CONFLICT", true) || e.code == "HTTP_409") refreshSettings()
+        } catch (t: Throwable) {
+            _mutationFeedback.value = MutationFeedback(false, "OFFLINE", t.message, true)
+        }
+    }
+
+    fun saveSetting(category: String, key: String, jsonValue: String) = viewModelScope.launch {
+        val s = apiSession() ?: return@launch
+        try {
+            val updated = part3Controls.putSetting(s, category, key, jsonValue)
+            val existing = _settingsControls.value.value.orEmpty().filterNot { it.category == updated.category && it.key == updated.key }
+            _settingsControls.value = RepositoryState(existing + updated, DataFreshness.FRESH)
+            _mutationFeedback.value = MutationFeedback(true)
+        } catch (e: BackendUiException) {
+            _mutationFeedback.value = MutationFeedback(false, e.code, e.detail, e.retryable)
+        } catch (t: Throwable) {
+            _mutationFeedback.value = MutationFeedback(false, "OFFLINE", t.message, true)
+        }
+    }
+
+    fun prepareAccountExport() = viewModelScope.launch {
+        val s = apiSession() ?: run {
+            _accountExport.value = RepositoryState(null, DataFreshness.OFFLINE, errorCode = "NO_SESSION")
+            return@launch
+        }
+        _accountExport.value = _accountExport.value.copy(loading = true, errorCode = null)
+        _accountExport.value = part3Controls.accountExport(s)
+    }
+
+    fun deleteAccount(password: String) = viewModelScope.launch {
+        val s = apiSession() ?: return@launch
+        val result = part3Controls.requestAccountDeletion(s, password)
+        _mutationFeedback.value = result
+        if (result.success) {
+            sessionStore.clear()
+            _session.value = null
+        }
     }
 
     private suspend fun bindContext(

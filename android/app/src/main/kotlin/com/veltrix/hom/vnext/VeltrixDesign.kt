@@ -204,12 +204,26 @@ fun GlassSurface(
                 startY = size.height * .55f,
                 endY = size.height,
             )
+            // Narrow edge concentration approximates the brighter/thicker optical path at a
+            // curved glass rim without allocating a full-screen backdrop blur layer.
+            val edgeConcentration = Brush.horizontalGradient(
+                listOf(Color.White.copy(alpha = .34f), Color.Transparent, Color.Transparent, Color(0x2E6D94CE)),
+                startX = 0f,
+                endX = size.width,
+            )
+            val transmittedBand = Brush.linearGradient(
+                listOf(Color.Transparent, Color.White.copy(alpha = .18f), Color.Transparent),
+                start = Offset(size.width * .04f, size.height * .72f),
+                end = Offset(size.width * .88f, size.height * .18f),
+            )
             onDrawBehind {
                 drawRoundRect(body, cornerRadius = corner)
                 if (!policy.highContrast) {
                     drawRoundRect(ambientTint, cornerRadius = corner, blendMode = BlendMode.SrcOver)
                     drawRoundRect(topCaustic, cornerRadius = corner)
                     drawRoundRect(lowerDepth, cornerRadius = corner)
+                    drawRoundRect(edgeConcentration, cornerRadius = corner)
+                    drawRoundRect(transmittedBand, cornerRadius = corner)
                     drawRoundRect(
                         Color.White.copy(alpha = .20f),
                         topLeft = Offset(1.5.dp.toPx(), 1.5.dp.toPx()),
@@ -279,7 +293,6 @@ fun PressableGlass(
     )
     GlassSurface(
         modifier = Modifier
-            .heightIn(max = 80.dp)
             .then(modifier)
             .graphicsLayer {
                 scaleX = scale

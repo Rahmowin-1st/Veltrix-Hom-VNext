@@ -65,7 +65,7 @@ fun Part2HomeScreen(
                 Column(Modifier.weight(.58f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     HomeIdentityBand(model, avatarId, asset, tier, onOpenPersonal)
                     NowWorld(model, Modifier.weight(1f), onChat, largeText = false)
-                    HomeActions(onChat, onPractice, onProjects, largeText = false)
+                    HomeActions(onPractice, onProjects, largeText = false)
                 }
                 ContinuityRail(model, projects, Modifier.weight(.42f).fillMaxHeight(), onProjects)
             }
@@ -74,7 +74,7 @@ fun Part2HomeScreen(
                 if (home.freshness != DataFreshness.FRESH) CoreFreshness(home.freshness, onRetry)
                 HomeIdentityBand(model, avatarId, asset, tier, onOpenPersonal)
                 NowWorld(model, Modifier.weight(1f).fillMaxWidth(), onChat, largeText)
-                HomeActions(onChat, onPractice, onProjects, largeText)
+                HomeActions(onPractice, onProjects, largeText)
                 if (!compact) ContinuityStrip(model, projects, onProjects)
             }
         }
@@ -137,24 +137,18 @@ private fun NowWorld(model: HomeFinalModel, modifier: Modifier, onChat: () -> Un
 }
 
 @Composable
-private fun HomeActions(onChat:()->Unit,onPractice:()->Unit,onProjects:()->Unit,largeText:Boolean) {
-    @Composable fun HomeAction(label:String, action:()->Unit, modifier:Modifier) {
-        PressableGlass(action, modifier.heightIn(min=56.dp), 20.dp) { Box(Modifier.fillMaxSize().padding(horizontal=10.dp,vertical=8.dp),contentAlignment=Alignment.Center){Text(label,color=VeltrixColors.Ink,fontWeight=FontWeight.Medium,maxLines=1,overflow=TextOverflow.Ellipsis)} }
-    }
-    if (largeText) {
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HomeAction("Ask", onChat, Modifier.weight(1f))
-                HomeAction("Practice", onPractice, Modifier.weight(1f))
+private fun HomeActions(onPractice:()->Unit,onProjects:()->Unit,largeText:Boolean) {
+    @Composable fun HomeAction(label:String, detail:String, action:()->Unit, modifier:Modifier) {
+        PressableGlass(action, modifier.heightIn(min=58.dp), 20.dp) {
+            Column(Modifier.fillMaxWidth().padding(horizontal=13.dp,vertical=9.dp),verticalArrangement=Arrangement.Center) {
+                Text(label,color=VeltrixColors.Ink,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=TextOverflow.Ellipsis)
+                if(!largeText) Text(detail,color=VeltrixColors.InkMuted,style=MaterialTheme.typography.labelSmall,maxLines=1,overflow=TextOverflow.Ellipsis)
             }
-            HomeAction("Projects", onProjects, Modifier.fillMaxWidth())
         }
-    } else {
-        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-            HomeAction("Ask", onChat, Modifier.weight(1f))
-            HomeAction("Practice", onPractice, Modifier.weight(1f))
-            HomeAction("Projects", onProjects, Modifier.weight(1f))
-        }
+    }
+    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+        HomeAction("Practice","Train the current skill",onPractice,Modifier.weight(1f))
+        HomeAction("Projects","Enter an active world",onProjects,Modifier.weight(1.12f))
     }
 }
 

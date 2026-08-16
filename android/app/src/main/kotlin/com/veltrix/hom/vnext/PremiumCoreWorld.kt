@@ -93,7 +93,7 @@ private fun PremiumHomeLoaded(
         HomeIdentity(model, compact, onOpenPersonal)
         PremiumXpProgress(model)
         LearningWorld(Modifier.weight(1f).fillMaxWidth(), model, compact, onAskVeltrix)
-        ActionLens(onAskVeltrix, onPractice, onProjects)
+        ActionLens(onPractice, onProjects)
         if (!compact) HomeSignalDock(model)
     }
 }
@@ -138,34 +138,14 @@ private fun HomeIdentity(model: HomeFinalModel, compact: Boolean, onOpenPersonal
 
 @Composable
 private fun PremiumAvatar(name: String, avatarId: String, compact: Boolean, onClick: () -> Unit) {
-    val label = name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "V"
     val diameter = if (compact) 60.dp else 72.dp
-    PressableGlass(
+    LivingVeltrixAvatar(
+        avatarId = avatarId,
+        tier = "EQUIPPED",
+        modifier = Modifier.size(diameter),
+        equipped = true,
         onClick = onClick,
-        modifier = Modifier.size(diameter).semantics {
-            contentDescription = if (avatarId.isBlank()) "Profile avatar fallback for $name" else "Equipped profile avatar for $name"
-        },
-        radius = 999.dp,
-        strong = true,
-    ) {
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.radialGradient(listOf(Color(0xFFFFFFFF), Color(0xFFD4E3FF), Color(0xFFB4F2E0))),
-            ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Canvas(Modifier.fillMaxSize()) {
-                val c = Offset(size.width / 2f, size.height / 2f)
-                drawCircle(Color.White.copy(alpha = .92f), size.minDimension * .34f, c)
-                drawCircle(Color(0x704B7DFF), size.minDimension * .38f, c, style = Stroke(1.2.dp.toPx()))
-                drawCircle(Color(0x4056D9B3), size.minDimension * .46f, c, style = Stroke(.8.dp.toPx()))
-                drawCircle(VeltrixColors.Sky, 3.dp.toPx(), Offset(size.width * .83f, size.height * .30f))
-                drawCircle(VeltrixColors.Mint, 2.6.dp.toPx(), Offset(size.width * .24f, size.height * .82f))
-                drawCircle(Color.White, 2.3.dp.toPx(), Offset(size.width * .18f, size.height * .24f))
-            }
-            Text(label, color = VeltrixColors.Ink, fontWeight = FontWeight.Bold, fontSize = if (compact) 20.sp else 25.sp)
-        }
-    }
+    )
 }
 
 @Composable
@@ -256,6 +236,12 @@ private fun LearningWorld(
                     maxLines = if (compact) 2 else 3,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (!compact && (model.currentMapUnit != null || model.unreadNotifications > 0)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        model.currentMapUnit?.let { Text("Map · ${it.premiumTitle()}", color = VeltrixColors.SkyDeep, style = MaterialTheme.typography.labelMedium) }
+                        if (model.unreadNotifications > 0) Text("${model.unreadNotifications} new signal${if (model.unreadNotifications == 1) "" else "s"}", color = VeltrixColors.InkMuted, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
             }
             PressableGlass(
                 onClick = onAskVeltrix,
@@ -282,12 +268,11 @@ private fun LearningWorld(
 }
 
 @Composable
-private fun ActionLens(onAskVeltrix: () -> Unit, onPractice: () -> Unit, onProjects: () -> Unit) {
+private fun ActionLens(onPractice: () -> Unit, onProjects: () -> Unit) {
     GlassSurface(Modifier.fillMaxWidth(), radius = 25.dp) {
         Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            PremiumAction("Ask Veltrix", onAskVeltrix, Modifier.weight(1.18f))
             PremiumAction("Practice", onPractice, Modifier.weight(1f))
-            PremiumAction("Projects", onProjects, Modifier.weight(1f))
+            PremiumAction("Enter Projects", onProjects, Modifier.weight(1.18f))
         }
     }
 }

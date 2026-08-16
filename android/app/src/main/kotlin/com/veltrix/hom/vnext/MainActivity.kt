@@ -78,6 +78,8 @@ private fun VeltrixApp(vm: AppViewModel = viewModel()) {
             CapabilityRoute.FLASHCARDS.name -> vm.refreshFlashcards()
             CapabilityRoute.MISTAKES.name -> vm.refreshMistakes()
             CapabilityRoute.LIBRARY.name -> vm.refreshSources()
+            CapabilityRoute.NOTIFICATIONS.name -> vm.refreshNotifications()
+            CapabilityRoute.SETTINGS.name -> vm.refreshSettings()
             HISTORY_ROUTE -> vm.refreshHistory()
         }
     }
@@ -350,6 +352,30 @@ private fun SecondaryWorld(
                     event.type.contains("CHAT", true) && event.objectId != null -> { onCapability(CapabilityRoute.CHAT.name); onConversation(event.objectId) }
                 }
             }
+        }
+        CapabilityRoute.CALCULATOR.name -> {
+            val state by vm.calculator.collectAsStateWithLifecycle()
+            val history by vm.calculatorHistory.collectAsStateWithLifecycle()
+            CalculatorWorldScreen(state, history, vm::calculate)
+        }
+        CapabilityRoute.TRANSLATE.name -> {
+            val state by vm.translation.collectAsStateWithLifecycle()
+            TranslateWorldScreen(state, selectedProjectId, vm::translate)
+        }
+        CapabilityRoute.NOTIFICATIONS.name -> {
+            val intents by vm.notificationIntents.collectAsStateWithLifecycle()
+            val preferences by vm.notificationPreferences.collectAsStateWithLifecycle()
+            NotificationsWorldScreen(intents, preferences, vm::refreshNotifications, vm::updateNotificationPreference)
+        }
+        CapabilityRoute.SETTINGS.name -> {
+            val profile by vm.profileControls.collectAsStateWithLifecycle()
+            val settings by vm.settingsControls.collectAsStateWithLifecycle()
+            val exportState by vm.accountExport.collectAsStateWithLifecycle()
+            val feedback by vm.mutationFeedback.collectAsStateWithLifecycle()
+            SettingsWorldScreen(
+                profile, settings, exportState, feedback, vm::refreshSettings, vm::saveProfile, vm::saveSetting,
+                vm::prepareAccountExport, vm::deleteAccount,
+            )
         }
         else -> CapabilityBridgeScreen(route)
     }

@@ -59,7 +59,7 @@ class FrontendPart2UiInstrumentedTest {
         compose.onNodeWithTag("living-avatar-personal").assertIsDisplayed()
         compose.onNodeWithTag("personal-map-live").assertExists()
         compose.onNodeWithText("Motion").assertExists()
-        compose.onNodeWithText("4/10 progress").assertExists()
+        compose.onNodeWithText("Current location · 4/10 progress").assertExists()
     }
 
     @Test

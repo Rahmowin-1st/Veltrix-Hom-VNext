@@ -41,6 +41,10 @@ class FrontendEvidenceActivity : ComponentActivity() {
                             scenario.startsWith("STORE") -> StoreEvidence(scenario)
                             scenario.startsWith("SEARCH") -> SearchEvidence(scenario)
                             scenario.startsWith("HISTORY") -> HistoryEvidence(scenario)
+                            scenario.startsWith("CALCULATOR") -> CalculatorEvidence(scenario)
+                            scenario.startsWith("TRANSLATE") -> TranslateEvidence(scenario)
+                            scenario.startsWith("NOTIFICATIONS") -> NotificationsEvidence(scenario)
+                            scenario.startsWith("SETTINGS") -> SettingsEvidence(scenario)
                             else -> Part2HomeScreen(homeEvidenceState("HOME_FOCUS"), gameEvidenceState(), projectListEvidenceState("HOME_FOCUS"), true, {}, {}, {}, {}, {})
                         }
                     }
@@ -240,4 +244,58 @@ private fun HistoryEvidence(scenario: String) {
         ActivityUiModel("e2", "ASSESSMENT_COMPLETED", "2026-08-15T11:45:00Z", "project-motion", "a1", true, "/assessments/a1"),
     )
     HistoryWorldScreen(RepositoryState(list, DataFreshness.FRESH), {}, {})
+}
+
+
+@androidx.compose.runtime.Composable
+private fun CalculatorEvidence(scenario: String) {
+    val state = when (scenario) {
+        "CALCULATOR_ERROR" -> RepositoryState<CalculatorResultUiModel>(null, DataFreshness.FRESH, errorCode = "HTTP_409", retryable = true)
+        else -> RepositoryState(CalculatorResultUiModel("(18 + 6) / 3", "8", true), DataFreshness.FRESH)
+    }
+    CalculatorWorldScreen(state, listOf(CalculatorResultUiModel("2 + 2", "4", true)), {})
+}
+
+@androidx.compose.runtime.Composable
+private fun TranslateEvidence(scenario: String) {
+    val state = when (scenario) {
+        "TRANSLATE_ERROR" -> RepositoryState<TranslationUiModel>(null, DataFreshness.OFFLINE, errorCode = "OFFLINE", retryable = true)
+        else -> RepositoryState(TranslationUiModel("Salom dunyo", "Hello world", "uz", "en", "test-mock", false, "2026-08-16T00:00:00Z"), DataFreshness.FRESH)
+    }
+    TranslateWorldScreen(state, if (scenario == "TRANSLATE_PROJECT") "project-motion" else null, { _, _, _, _ -> })
+}
+
+@androidx.compose.runtime.Composable
+private fun NotificationsEvidence(scenario: String) {
+    val intents = if (scenario == "NOTIFICATIONS_EMPTY") emptyList() else listOf(
+        NotificationIntentUiModel("n1", "project-motion", "LEARNING", "Review mechanics before your next project checkpoint", null, "PENDING", "2026-08-16T00:00:00Z"),
+        NotificationIntentUiModel("n2", null, "ACCOUNT", "Your exported data snapshot is ready", null, "DELIVERED", "2026-08-16T00:00:00Z"),
+    )
+    val prefs = listOf(
+        NotificationPreferenceUiModel("LEARNING", true, "{}", "Asia/Tashkent", 3, "now"),
+        NotificationPreferenceUiModel("ACCOUNT", true, "{}", "Asia/Tashkent", 2, "now"),
+    )
+    NotificationsWorldScreen(RepositoryState(intents, DataFreshness.FRESH), RepositoryState(prefs, DataFreshness.FRESH), {}, { _, _ -> })
+}
+
+@androidx.compose.runtime.Composable
+private fun SettingsEvidence(scenario: String) {
+    val profile = ProfileUiModel("evidence-account", "Alex", "alex", "en", "Asia/Tashkent", true, true, 9)
+    val settings = listOf(
+        SettingUiModel("ACCESSIBILITY", "reduced_motion_preference", "false", 2, "now"),
+        SettingUiModel("ACCESSIBILITY", "high_contrast_preference", "false", 2, "now"),
+        SettingUiModel("MEMORY", "personalization_enabled", "true", 4, "now"),
+    )
+    SettingsWorldScreen(
+        RepositoryState(profile, DataFreshness.FRESH),
+        RepositoryState(settings, DataFreshness.FRESH),
+        RepositoryState(if (scenario == "SETTINGS_DATA_READY") AccountExportUiModel("evidence-account", "2026-08-16T00:00:00Z", "Alex", "en", "Asia/Tashkent", true, mapOf("projects" to 2, "sources" to 4, "chats" to 5)) else null, DataFreshness.FRESH),
+        null, {}, { _, _, _, _, _ -> }, { _, _, _ -> }, {}, {},
+        initialSection = when (scenario) {
+            "SETTINGS_ACCESSIBILITY" -> "Appearance & accessibility"
+            "SETTINGS_MEMORY" -> "Memory & personalization"
+            "SETTINGS_DATA", "SETTINGS_DATA_READY" -> "Data & privacy"
+            else -> "Account"
+        },
+    )
 }
