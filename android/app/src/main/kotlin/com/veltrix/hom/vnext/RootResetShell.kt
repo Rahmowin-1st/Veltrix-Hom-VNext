@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,7 +19,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalDrawerSheet
@@ -104,11 +106,14 @@ fun RootResetApp(root: RootResetViewModel = viewModel()) {
             )
             ProductGateKind.PRODUCT -> {
                 val accountId = session?.accountId
-                if (accountId == null) RootResetBootstrapGate()
-                else RootAuthenticatedShell(
-                    root = root,
-                    featureVm = viewModel(key = "features:$accountId"),
-                )
+                if (accountId == null) {
+                    RootResetBootstrapGate()
+                } else {
+                    RootAuthenticatedShell(
+                        root = root,
+                        featureVm = viewModel(key = "features:$accountId"),
+                    )
+                }
             }
         }
     }
@@ -141,6 +146,9 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
 
     var worldName by rememberSaveable { mutableStateOf(VeltrixWorld.HOME.name) }
     var secondaryName by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingSecondaryName by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingWorldName by rememberSaveable { mutableStateOf<String?>(null) }
+
     val world = VeltrixWorld.entries.firstOrNull { it.name == worldName } ?: VeltrixWorld.HOME
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -150,6 +158,19 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
     LaunchedEffect(world) { continuity.enter(world) }
     LaunchedEffect(home?.avatarId, personal?.avatarId) {
         continuity.avatar(home?.avatarId ?: personal?.avatarId)
+    }
+
+    LaunchedEffect(drawer.currentValue, pendingSecondaryName, pendingWorldName) {
+        if (drawer.currentValue != DrawerValue.Closed) return@LaunchedEffect
+        pendingSecondaryName?.let { target ->
+            secondaryName = target
+            pendingSecondaryName = null
+        }
+        pendingWorldName?.let { target ->
+            worldName = target
+            secondaryName = null
+            pendingWorldName = null
+        }
     }
 
     BackHandler(enabled = drawer.isOpen || secondaryName != null || world != VeltrixWorld.HOME) {
@@ -166,17 +187,14 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
             RootSidebar(
                 selected = secondaryName,
                 onSecondary = { name ->
-                    scope.launch {
-                        drawer.close()
-                        secondaryName = name
-                    }
+                    pendingSecondaryName = name
+                    pendingWorldName = null
+                    scope.launch { drawer.close() }
                 },
                 onWorld = { target ->
-                    scope.launch {
-                        drawer.close()
-                        worldName = target.name
-                        secondaryName = null
-                    }
+                    pendingWorldName = target.name
+                    pendingSecondaryName = null
+                    scope.launch { drawer.close() }
                 },
             )
         },
@@ -250,41 +268,54 @@ private fun RootSidebar(
         modifier = Modifier.width(310.dp).testTag("root-sidebar"),
         drawerContainerColor = Color(0xFFF9FBFF),
     ) {
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 20.dp),
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().testTag("root-sidebar-list"),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            Text(
-                "VELTRIX",
-                color = KineticColor.Ink,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier.padding(12.dp),
-            )
-            Text(
-                "WORLDS",
-                color = KineticColor.Muted,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            )
-            VeltrixWorld.entries.forEach { world ->
+            item(key = "brand") {
+                Text(
+                    "VELTRIX",
+                    color = KineticColor.Ink,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
+            item(key = "worlds-header") {
+                Text(
+                    "WORLDS",
+                    color = KineticColor.Muted,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+            items(VeltrixWorld.entries, key = { it.name }) { world ->
                 NavigationDrawerItem(
                     label = { Text(world.name.lowercase().replaceFirstChar { it.uppercase() }) },
                     selected = false,
                     onClick = { onWorld(world) },
-                    colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent),
+                    modifier = Modifier.testTag("drawer-world-${world.name}"),
+                    colors = NavigationDrawerItemDefaults.colors(
+                        unselectedContainerColor = Color.Transparent,
+                    ),
                 )
             }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "TOOLS",
-                color = KineticColor.Muted,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            )
-            RootSecondary.entries.forEach { item ->
+            item(key = "tools-gap") { Spacer(Modifier.height(10.dp)) }
+            item(key = "tools-header") {
+                Text(
+                    "TOOLS",
+                    color = KineticColor.Muted,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+            items(RootSecondary.entries, key = { it.name }) { item ->
                 NavigationDrawerItem(
                     label = { Text(item.label) },
                     selected = selected == item.name,
                     onClick = { onSecondary(item.name) },
-                    colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent),
+                    modifier = Modifier.testTag("drawer-secondary-${item.name}"),
+                    colors = NavigationDrawerItemDefaults.colors(
+                        unselectedContainerColor = Color.Transparent,
+                    ),
                 )
             }
         }
@@ -430,7 +461,10 @@ private fun RootCapabilityBridge(name: String) {
 @Composable
 private fun RootAccountSurface(onSignOut: () -> Unit) {
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 92.dp),
+        Modifier
+            .fillMaxSize()
+            .testTag("root-account-surface")
+            .padding(horizontal = 24.dp, vertical = 92.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(
