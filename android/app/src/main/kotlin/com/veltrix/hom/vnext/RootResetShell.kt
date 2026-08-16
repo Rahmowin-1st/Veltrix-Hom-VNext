@@ -166,13 +166,17 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
             RootSidebar(
                 selected = secondaryName,
                 onSecondary = { name ->
-                    secondaryName = name
-                    scope.launch { drawer.close() }
+                    scope.launch {
+                        drawer.close()
+                        secondaryName = name
+                    }
                 },
                 onWorld = { target ->
-                    worldName = target.name
-                    secondaryName = null
-                    scope.launch { drawer.close() }
+                    scope.launch {
+                        drawer.close()
+                        worldName = target.name
+                        secondaryName = null
+                    }
                 },
             )
         },
