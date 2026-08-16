@@ -19,14 +19,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply exact reviewed frontend closure patch
+      - name: Apply exact reviewed frontend closure patches
         shell: bash
         run: |
           set -euo pipefail
           cat .frontend-part3-bootstrap/chunk-*.b64 | base64 -d | gunzip > /tmp/part3-closure.patch
           echo '8423418be9c07a306910c722d542d20d66c493638b3a0b76e7e9673e5f3431db  /tmp/part3-closure.patch' | sha256sum -c -
+
+          cat .frontend-part3-bootstrap/extra-*.b64 | base64 -d | gunzip > /tmp/part3-newfiles.patch
+          echo 'e0ce4f76358447b0c712d85685f4975c7e9d368251a18800a8b872c2e87d7c91  /tmp/part3-newfiles.patch' | sha256sum -c -
+
           git apply --check /tmp/part3-closure.patch
           git apply /tmp/part3-closure.patch
+          git apply --check /tmp/part3-newfiles.patch
+          git apply /tmp/part3-newfiles.patch
+
           rm -rf .frontend-part3-bootstrap
           rm -f .github/workflows/part3-frontend-closure-bootstrap.yml
           bash -n .github/scripts/frontend-part3-final-proof.sh
