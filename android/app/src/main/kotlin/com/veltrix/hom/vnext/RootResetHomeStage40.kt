@@ -76,48 +76,51 @@ fun RootHomeWorldStage40(
             .padding(bottom = 92.dp)
             .testTag("home-stage40"),
     ) {
-        val compact = maxHeight < 720.dp
-        val sectionGap = if (compact) 9.dp else 14.dp
-        val avatarSize = if (compact) 72.dp else 86.dp
+        // Phone width is the decisive constraint: the command center must fit without scrolling.
+        val compact = maxWidth < 600.dp || maxHeight < 900.dp
+        val sectionGap = if (compact) 6.dp else 12.dp
+        val avatarSize = if (compact) 58.dp else 78.dp
 
         Column(
             Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(sectionGap),
         ) {
             Row(
-                Modifier.fillMaxWidth().height(if (compact) 50.dp else 56.dp),
+                Modifier.fillMaxWidth().height(if (compact) 44.dp else 52.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
                     onClick = onMenu,
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(if (compact) 40.dp else 44.dp)
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = .70f))
                         .testTag("home-menu"),
                 ) {
                     Text("≡", color = KineticColor.Ink, fontWeight = FontWeight.Black)
                 }
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(10.dp))
                 Column {
                     Text("Home", color = KineticColor.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("YOUR WORLD · NOW", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
+                    if (!compact) {
+                        Text("YOUR WORLD · NOW", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
 
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         model?.displayName?.takeIf { it.isNotBlank() } ?: "Veltrix learner",
                         modifier = Modifier.semantics { heading() }.testTag("home-identity"),
-                        style = if (compact) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.headlineMedium,
+                        style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
                         color = KineticColor.Ink,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text("Level $level", color = KineticColor.Violet, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                    if ((model?.qualifiedActiveDays ?: 0) > 0) {
+                    if (!compact && (model?.qualifiedActiveDays ?: 0) > 0) {
                         Text("${model?.qualifiedActiveDays} qualified active days", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
                     }
                 }
@@ -126,10 +129,10 @@ fun RootHomeWorldStage40(
 
             Row(
                 Modifier.fillMaxWidth().testTag("home-progression"),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(Modifier.fillMaxWidth()) {
                         Text("NEXT LEVEL", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
                         Spacer(Modifier.weight(1f))
@@ -146,27 +149,30 @@ fun RootHomeWorldStage40(
                     }
                     LinearProgressIndicator(
                         progress = { progress },
-                        modifier = Modifier.fillMaxWidth().height(7.dp).clip(CircleShape),
+                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
                         color = KineticColor.Sky,
                         trackColor = Color.White.copy(alpha = .68f),
                     )
                 }
-                KineticGlass(radius = 20.dp, strong = true) {
-                    Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), horizontalAlignment = Alignment.End) {
-                        Text("COINS", style = MaterialTheme.typography.labelSmall, color = KineticColor.Muted)
+                KineticGlass(radius = if (compact) 17.dp else 20.dp, strong = true) {
+                    Column(
+                        Modifier.padding(horizontal = if (compact) 10.dp else 14.dp, vertical = if (compact) 6.dp else 8.dp),
+                        horizontalAlignment = Alignment.End,
+                    ) {
+                        if (!compact) Text("COINS", style = MaterialTheme.typography.labelSmall, color = KineticColor.Muted)
                         Text(coins.toString(), style = MaterialTheme.typography.titleMedium, color = KineticColor.Ink, fontWeight = FontWeight.Bold)
                     }
                 }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(if (compact) 3.dp else 6.dp)) {
                 Text("WHAT MATTERS NOW", style = MaterialTheme.typography.labelMedium, color = KineticColor.Sky, fontWeight = FontWeight.Bold)
                 Text(
                     focus ?: if (model == null) "Loading your verified focus…" else "Choose a meaningful next focus",
-                    style = if (compact) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.displaySmall,
+                    style = if (compact) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.headlineMedium,
                     color = KineticColor.Ink,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = if (compact) 2 else 3,
+                    maxLines = if (compact) 1 else 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.testTag("home-focus"),
                 )
@@ -180,36 +186,41 @@ fun RootHomeWorldStage40(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.testTag("home-active-project"),
                     )
-                    project.purpose?.takeIf { it.isNotBlank() }?.let { purpose ->
-                        Text(
-                            purpose,
-                            color = KineticColor.Muted,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                    if (!compact) {
+                        project.purpose?.takeIf { it.isNotBlank() }?.let { purpose ->
+                            Text(
+                                purpose,
+                                color = KineticColor.Muted,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }
 
-            KineticGlass(Modifier.fillMaxWidth().testTag("home-brain-pulse"), radius = 24.dp) {
+            KineticGlass(Modifier.fillMaxWidth().testTag("home-brain-pulse"), radius = if (compact) 20.dp else 24.dp) {
                 Row(
-                    Modifier.padding(horizontal = 16.dp, vertical = if (compact) 12.dp else 15.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    Modifier.padding(horizontal = if (compact) 12.dp else 16.dp, vertical = if (compact) 9.dp else 15.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (compact) 9.dp else 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(
-                        Modifier.size(38.dp).clip(CircleShape).background(KineticColor.Violet.copy(alpha = .14f)),
+                        Modifier
+                            .size(if (compact) 32.dp else 38.dp)
+                            .clip(CircleShape)
+                            .background(KineticColor.Violet.copy(alpha = .14f)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text("V", color = KineticColor.Violet, fontWeight = FontWeight.Black)
                     }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text("VELTRIX BRAIN PULSE", style = MaterialTheme.typography.labelSmall, color = KineticColor.Violet, fontWeight = FontWeight.Bold)
                         Text(
                             brain,
                             color = KineticColor.Ink,
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium,
                             maxLines = if (compact) 2 else 3,
                             overflow = TextOverflow.Ellipsis,
@@ -224,20 +235,22 @@ fun RootHomeWorldStage40(
                 enabled = nextMove.enabled && nextMove.route != null,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 54.dp)
+                    .heightIn(min = if (compact) 48.dp else 54.dp)
                     .testTag("home-next-move")
-                    .semantics { contentDescription = "Next move: ${nextMove.label}" },
+                    .semantics { contentDescription = "Next move: ${nextMove.label}. ${nextMove.reason}" },
             ) {
-                Text(nextMove.label, fontWeight = FontWeight.SemiBold)
+                Text(nextMove.label, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text(
-                nextMove.reason,
-                color = KineticColor.Muted,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.testTag("home-next-move-reason"),
-            )
+            if (!compact) {
+                Text(
+                    nextMove.reason,
+                    color = KineticColor.Muted,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("home-next-move-reason"),
+                )
+            }
         }
     }
 }
