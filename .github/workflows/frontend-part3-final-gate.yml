@@ -1,0 +1,216 @@
+name: Veltrix Frontend Part 3 Final Gate
+
+on:
+  push:
+    branches: [veltrix-hom-frontend-part3-final]
+  workflow_dispatch:
+
+concurrency:
+  group: veltrix-frontend-part3-final-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  ACCEPTED_BACKEND_SHA: 4ed13cfcf7d4bb1fe6215b231426e0b4f208343a
+  PART1_SHA: ae8499fec896bd8715f5f114fc0eb95f12e8ebe1
+  PART2_BASELINE_SHA: b032bad2771b7abbee3ee1de8ff9f2d9491c0eb3
+  VELTRIX_ENV: test
+  VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_DATABASE_USER: postgres
+  VELTRIX_DATABASE_PASSWORD: postgres
+  VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_TEST_DATABASE_USER: postgres
+  VELTRIX_TEST_DATABASE_PASSWORD: postgres
+  VELTRIX_AI_PROVIDER: disabled
+  VELTRIX_TEST_AI_MOCK: 'true'
+  VELTRIX_EMBEDDING_PROVIDER: disabled
+  VELTRIX_TEST_EMBEDDING_MOCK: 'true'
+  VELTRIX_EMBEDDING_DIMENSIONS: '64'
+  VELTRIX_TEST_OCR_MOCK: 'true'
+  VELTRIX_TEST_TRANSLATE_MOCK: 'true'
+  VELTRIX_STORAGE_PROVIDER: local
+  VELTRIX_WORKERS_ENABLED: 'true'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Exact provenance and backend preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence package
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          for sha in "$ACCEPTED_BACKEND_SHA" "$PART1_SHA" "$PART2_BASELINE_SHA"; do git cat-file -e "$sha^{commit}"; done
+          git merge-base --is-ancestor "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA"
+          git merge-base --is-ancestor "$PART1_SHA" "$GITHUB_SHA"
+          git merge-base --is-ancestor "$PART2_BASELINE_SHA" "$GITHUB_SHA"
+          if git diff --name-only "$PART2_BASELINE_SHA" "$GITHUB_SHA" | grep -E '^(server/|database/migrations/|core/src/main/)'; then
+            echo 'Backend-owned source changed after Part2 baseline.' >&2
+            exit 1
+          fi
+          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\npart1=%s\npart2_baseline=%s\nrun=%s\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" "$PART1_SHA" "$PART2_BASELINE_SHA" "$GITHUB_RUN_ID" | tee evidence/provenance.txt
+          git diff --stat "$PART2_BASELINE_SHA" "$GITHUB_SHA" | tee evidence/frontend-diff-stat.txt
+          git diff --name-only "$PART2_BASELINE_SHA" "$GITHUB_SHA" | tee evidence/frontend-changed-files.txt
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+
+      - name: Backend regressions and exact Android build
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :core:test :server:test | tee evidence/backend-regression.txt
+          bash scripts/run_local_regressions.sh | tee evidence/frozen-regressions.txt
+          gradle --no-daemon -PVELTRIX_API_BASE_URL=http://127.0.0.1:8080 \
+            :android:app:testDebugUnitTest :android:app:assembleDebug :android:app:assembleDebugAndroidTest | tee evidence/android-build.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/android-build.txt
+          grep -q 'LOCAL_REGRESSION_GATE=PASS total=105' evidence/frozen-regressions.txt
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          test -s android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee evidence/apk-sha256-build.txt
+
+      - name: Start accepted backend runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup gradle --no-daemon :server:run > evidence/server-runtime.log 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8080/ready > evidence/ready.json; then break; fi
+            sleep 2
+          done
+          grep -q '"ready":true' evidence/ready.json
+          grep -q '"testAiConfigured":true' evidence/ready.json
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Runtime packages and video probe tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'emulator' 'build-tools;37.0.0' 'platforms;android-37.0' 'system-images;android-36;google_apis;x86_64'
+          if ! command -v ffprobe >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y ffmpeg; fi
+          ffprobe -version | head -1 | tee evidence/ffprobe-version.txt
+
+      - name: Require KVM hardware acceleration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+            ls -l /dev/kvm | tee evidence/kvm.txt
+          else
+            echo '/dev/kvm unavailable: final runtime proof cannot be labeled hardware-accelerated.' | tee evidence/kvm.txt
+            exit 1
+          fi
+
+      - name: API36 final runtime visual motion A11Y adaptive and PF proof
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          cores: 4
+          emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          script: bash .github/scripts/frontend-part3-final-proof.sh
+
+      - name: Package exact source and final evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf package Veltrix-Hom-Frontend-Part3-FINAL-EVIDENCE.zip
+          mkdir -p package
+          git archive --format=zip --output=package/Veltrix-Hom-Frontend-Part3-EXACT-SOURCE.zip "$GITHUB_SHA"
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          test -s android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk package/Veltrix-Hom-Frontend-Part3.apk
+          cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk package/Veltrix-Hom-Frontend-Part3-androidTest.apk
+          cp -a evidence package/evidence
+          test -s evidence/VELTRIX_FRONTEND_PART3_FINAL_MANAGER_HANDOFF_2026-08-16.md
+          cp evidence/VELTRIX_FRONTEND_PART3_FINAL_MANAGER_HANDOFF_2026-08-16.md package/
+          (cd package && find . -type f ! -name 'SHA256SUMS.txt' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+          zip -qr Veltrix-Hom-Frontend-Part3-FINAL-EVIDENCE.zip package
+
+      - name: Fail-closed final package verification
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s evidence/runtime/final-gate.txt
+          grep -q 'PART1=CLOSED' evidence/runtime/final-gate.txt
+          grep -q 'PART2=CLOSED' evidence/runtime/final-gate.txt
+          grep -q 'PART3=CLOSED' evidence/runtime/final-gate.txt
+          grep -q 'NO_KNOWN_P0_FRONTEND_DEFECT=PASS' evidence/runtime/final-gate.txt
+          grep -q 'NO_KNOWN_P1_MISSION_DEFECT=PASS' evidence/runtime/final-gate.txt
+          grep -q 'FRONTEND_ACCEPTANCE_CANDIDATE=PASS' evidence/runtime/final-gate.txt
+          grep -q 'PHYSICAL_DEVICE_PF=UNVERIFIED_EXTERNAL' evidence/runtime/final-gate.txt
+          grep -q 'VISUAL_MATRIX=PASS count=35 semantic=35 complete_render=35 bounds_gate=PASS fresh_manifest=PASS' evidence/screens/visual-matrix-gate.txt
+          grep -q 'CRITICAL_LAYOUT_BOUNDS=PASS count=8' evidence/screens/layout-bounds-gate.txt
+          grep -q 'HIGH_FIDELITY_MOTION=PASS clips=3 threshold_fps=24' evidence/motion/motion-gate.txt
+          grep -q 'PART3_FINAL_PROOF=PASS' evidence/runtime/final-progress.txt
+          test "$(wc -l < evidence/screens/screenshot-sha256.txt)" -eq 35
+          sha256sum -c evidence/screens/screenshot-sha256.txt
+          test "$(find evidence/screens -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 49
+          test "$(find evidence/motion -maxdepth 1 -type f -name '*.mp4' | wc -l)" -eq 3
+          for f in evidence/motion/*-ffprobe.json; do test -s "$f"; done
+          test -s evidence/accessibility/adaptive-gate.txt
+          test -s evidence/accessibility/talkback-gate.txt
+          test -s evidence/performance/renderer-environment.txt
+          test -s evidence/performance/performance-gate.txt
+          test -s evidence/apk-sha256.txt
+          test -s evidence/androidtest-apk-sha256.txt
+          test -s evidence/source-sha256.txt
+          test -s evidence/VELTRIX_FRONTEND_PART3_FINAL_MANAGER_HANDOFF_2026-08-16.md
+          test -s package/Veltrix-Hom-Frontend-Part3-EXACT-SOURCE.zip
+          test -s package/Veltrix-Hom-Frontend-Part3.apk
+          test -s package/Veltrix-Hom-Frontend-Part3-androidTest.apk
+          test -s package/SHA256SUMS.txt
+          (cd package && sha256sum -c evidence/screens/screenshot-sha256.txt)
+          (cd package && sha256sum -c SHA256SUMS.txt)
+          test -s Veltrix-Hom-Frontend-Part3-FINAL-EVIDENCE.zip
+          unzip -tq Veltrix-Hom-Frontend-Part3-FINAL-EVIDENCE.zip >/dev/null
+          test "$(unzip -Z1 Veltrix-Hom-Frontend-Part3-FINAL-EVIDENCE.zip | grep -Ec '^package/evidence/screens/[^/]+\.png$')" -eq 49
+          test "$(unzip -Z1 Veltrix-Hom-Frontend-Part3-FINAL-EVIDENCE.zip | grep -Ec '^package/evidence/motion/[^/]+\.mp4$')" -eq 3
+
+      - name: Upload Part 3 final evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-frontend-part3-final-${{ github.run_id }}
+          path: |
+            package/
+            evidence/
+            Veltrix-Hom-Frontend-Part3-FINAL-EVIDENCE.zip
+          if-no-files-found: error
+          retention-days: 30
