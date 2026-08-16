@@ -1,5 +1,6 @@
 package com.veltrix.hom.vnext
 
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
@@ -19,7 +20,7 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * Runtime acceptance for the account-first root shell.
+ * Runtime acceptance for the account-first root shell and completed Root Reset stages.
  *
  * This intentionally uses the real MainActivity, SessionStore and VeltrixApiClient. The host CI
  * supplies the accepted backend over adb reverse. A stored session only enters PRODUCT after the
@@ -107,9 +108,68 @@ class RootResetRuntimeInstrumentedTest {
         }
     }
 
+    @Test
+    fun homeStage40ShowsFreshProjectBrainAndNextMovePerformsARealRoute() {
+        val stamp = System.currentTimeMillis()
+        val login = "home40-runtime-$stamp"
+        val projectTitle = "Stage 40 Runtime $stamp"
+        val apiSession = VeltrixApiClient().register(
+            login = login,
+            password = "Veltrix!Runtime2026",
+            displayName = "Home Runtime",
+        )
+        runBlocking {
+            Part2FeatureRepository(targetContext).createProject(
+                session = apiSession,
+                title = projectTitle,
+                purpose = "Prove the live Home command center route.",
+            )
+            SessionStore(targetContext).save(LocalSession(apiSession.accountId, apiSession.token))
+        }
+
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            awaitTag("home-stage40", 30_000L)
+            awaitText(projectTitle, 30_000L, substring = true)
+            awaitTag("home-brain-pulse", 30_000L)
+            awaitTag("home-next-move", 30_000L)
+
+            compose.onNodeWithTag("home-stage40").assertIsDisplayed()
+            compose.onNodeWithTag("home-brain-pulse").assertIsDisplayed()
+            compose.onNodeWithTag("home-next-move").assertIsDisplayed()
+            compose.onNodeWithTag("home-active-project").assertIsDisplayed()
+            compose.onNodeWithTag("home-progression").assertIsDisplayed()
+
+            compose.onNodeWithTag("home-next-move").performClick()
+            compose.waitForIdle()
+            compose.waitUntil(5_000L) {
+                val secondaryVisible = compose.onAllNodesWithTag("root-menu").fetchSemanticsNodes().isNotEmpty()
+                val nonHomeWorldSelected = listOf("PERSONAL", "STORE", "PROJECTS").any { world ->
+                    compose.onAllNodesWithTag("world-$world").fetchSemanticsNodes().any { node ->
+                        node.config.getOrNull(SemanticsProperties.Selected) == true
+                    }
+                }
+                secondaryVisible || nonHomeWorldSelected
+            }
+
+            scenario.onActivity { activity ->
+                activity.onBackPressedDispatcher.onBackPressed()
+            }
+            compose.waitForIdle()
+            awaitTag("home-stage40")
+            compose.onNodeWithTag("world-HOME").assertIsSelected()
+            compose.onNodeWithTag("home-stage40").assertIsDisplayed()
+        }
+    }
+
     private fun awaitTag(tag: String, timeoutMillis: Long = 15_000L) {
         compose.waitUntil(timeoutMillis) {
             compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    private fun awaitText(text: String, timeoutMillis: Long = 15_000L, substring: Boolean = false) {
+        compose.waitUntil(timeoutMillis) {
+            compose.onAllNodesWithText(text, substring = substring).fetchSemanticsNodes().isNotEmpty()
         }
     }
 }

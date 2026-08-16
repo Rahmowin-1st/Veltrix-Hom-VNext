@@ -154,6 +154,9 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val continuity = rememberWorldContinuityCoordinator()
+    val activeProject = projects
+        .sortedWith(compareByDescending<ProjectCardModel> { it.priority }.thenByDescending { it.lastActiveAt })
+        .firstOrNull()
 
     LaunchedEffect(world) { continuity.enter(world) }
     LaunchedEffect(home?.avatarId, personal?.avatarId) {
@@ -208,11 +211,27 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
                 if (secondaryName == null) {
                     AnimatedContent(targetState = world, label = "primary-world") { target ->
                         when (target) {
-                            VeltrixWorld.HOME -> RootHomeWorld(
-                                home,
-                                game,
-                                projects.firstOrNull(),
+                            VeltrixWorld.HOME -> RootHomeWorldStage40(
+                                model = home,
+                                game = game,
+                                activeProject = activeProject,
                                 onMenu = { scope.launch { drawer.open() } },
+                                onNextMove = { route ->
+                                    when (route) {
+                                        RootHomeRoute.PROJECTS -> {
+                                            continuity.project(activeProject?.id)
+                                            worldName = VeltrixWorld.PROJECTS.name
+                                            secondaryName = null
+                                        }
+                                        RootHomeRoute.PERSONAL -> {
+                                            worldName = VeltrixWorld.PERSONAL.name
+                                            secondaryName = null
+                                        }
+                                        RootHomeRoute.MISTAKES -> secondaryName = RootSecondary.MISTAKES.name
+                                        RootHomeRoute.LIBRARY -> secondaryName = RootSecondary.LIBRARY.name
+                                        RootHomeRoute.CHAT -> secondaryName = RootSecondary.CHAT.name
+                                    }
+                                },
                             )
                             VeltrixWorld.PERSONAL -> RootPersonalWorld(
                                 personal,

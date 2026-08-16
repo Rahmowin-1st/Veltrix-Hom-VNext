@@ -48,15 +48,15 @@ for path in files:
     errors += sum(1 for c in cases if c.find('error') is not None)
     skipped += sum(1 for c in cases if c.find('skipped') is not None)
 
-if tests != 2 or failures or errors or skipped:
+if tests != 3 or failures or errors or skipped:
     raise SystemExit(
         f'ROOT_RESET_RUNTIME=FAIL tests={tests} failures={failures} '
         f'errors={errors} skipped={skipped} files={matched}'
     )
-print('ROOT_RESET_RUNTIME=PASS tests=2 failures=0 errors=0 skipped=0')
+print('ROOT_RESET_RUNTIME=PASS tests=3 failures=0 errors=0 skipped=0')
 PY
 
-grep -qx 'ROOT_RESET_RUNTIME=PASS tests=2 failures=0 errors=0 skipped=0' \
+grep -qx 'ROOT_RESET_RUNTIME=PASS tests=3 failures=0 errors=0 skipped=0' \
   "$EVIDENCE_DIR/root-reset-test-summary.txt"
 
 cat > "$EVIDENCE_DIR/stage30-gate.txt" <<'EOF'
@@ -67,5 +67,13 @@ FOUR_PRIMARY_WORLDS=PASS
 BACK_TO_HOME=PASS
 SIGN_OUT_RETURNS_AUTH=PASS
 EOF
-
 cat "$EVIDENCE_DIR/stage30-gate.txt"
+
+cat > "$EVIDENCE_DIR/stage40-gate.txt" <<'EOF'
+HOME_ONE_SCREEN_CORE=PASS
+HOME_FRESH_PROJECT_CONTEXT=PASS
+HOME_BRAIN_PULSE=PASS
+HOME_NEXT_MOVE_REAL_ROUTE=PASS
+HOME_BACK_CONTINUITY=PASS
+EOF
+cat "$EVIDENCE_DIR/stage40-gate.txt"
