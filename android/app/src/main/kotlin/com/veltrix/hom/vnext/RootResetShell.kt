@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -26,6 +25,7 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -60,12 +61,17 @@ fun RootResetApp(root: RootResetViewModel = viewModel()) {
     var autoGoogleAttempted by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(gate.kind, session?.accountId) {
-        if (gate.kind == ProductGateKind.AUTH && !autoGoogleAttempted && !root.wasExplicitlySignedOut() && BuildConfig.VELTRIX_GOOGLE_SERVER_CLIENT_ID.isNotBlank()) {
+        if (
+            gate.kind == ProductGateKind.AUTH &&
+            !autoGoogleAttempted &&
+            !root.wasExplicitlySignedOut() &&
+            BuildConfig.VELTRIX_GOOGLE_SERVER_CLIENT_ID.isNotBlank()
+        ) {
             autoGoogleAttempted = true
             runAuthorizedGoogleCredentialFlow(
                 context = context,
                 onCredential = root::completeGoogleSignIn,
-                onFailure = { /* persistent Google action remains available */ },
+                onFailure = { /* Persistent Google action remains available. */ },
             )
         }
     }
@@ -91,11 +97,18 @@ fun RootResetApp(root: RootResetViewModel = viewModel()) {
                 onGoogleToken = root::completeGoogleSignIn,
                 onGoogleFailure = root::reportAuthError,
             )
-            ProductGateKind.CONNECTION -> RootResetConnectionGate(gate.connectionIssue, gate.message, root::retryConnection)
+            ProductGateKind.CONNECTION -> RootResetConnectionGate(
+                gate.connectionIssue,
+                gate.message,
+                root::retryConnection,
+            )
             ProductGateKind.PRODUCT -> {
                 val accountId = session?.accountId
                 if (accountId == null) RootResetBootstrapGate()
-                else RootAuthenticatedShell(root = root, featureVm = viewModel(key = "features:$accountId"))
+                else RootAuthenticatedShell(
+                    root = root,
+                    featureVm = viewModel(key = "features:$accountId"),
+                )
             }
         }
     }
@@ -125,7 +138,6 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
     val avatars by root.avatars.collectAsStateWithLifecycle()
     val map by root.map.collectAsStateWithLifecycle()
     val game by root.game.collectAsStateWithLifecycle()
-    val session by root.session.collectAsStateWithLifecycle()
 
     var worldName by rememberSaveable { mutableStateOf(VeltrixWorld.HOME.name) }
     var secondaryName by rememberSaveable { mutableStateOf<String?>(null) }
@@ -136,7 +148,9 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
     val continuity = rememberWorldContinuityCoordinator()
 
     LaunchedEffect(world) { continuity.enter(world) }
-    LaunchedEffect(home?.avatarId, personal?.avatarId) { continuity.avatar(home?.avatarId ?: personal?.avatarId) }
+    LaunchedEffect(home?.avatarId, personal?.avatarId) {
+        continuity.avatar(home?.avatarId ?: personal?.avatarId)
+    }
 
     BackHandler(enabled = drawer.isOpen || secondaryName != null || world != VeltrixWorld.HOME) {
         when {
@@ -151,35 +165,70 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
         drawerContent = {
             RootSidebar(
                 selected = secondaryName,
-                onSecondary = { name -> secondaryName = name; scope.launch { drawer.close() } },
-                onWorld = { target -> worldName = target.name; secondaryName = null; scope.launch { drawer.close() } },
+                onSecondary = { name ->
+                    secondaryName = name
+                    scope.launch { drawer.close() }
+                },
+                onWorld = { target ->
+                    worldName = target.name
+                    secondaryName = null
+                    scope.launch { drawer.close() }
+                },
             )
         },
         scrimColor = Color(0x330F172A),
     ) {
-        VeltrixKineticWorld(world = world, reducedMotion = rememberVeltrixEffectPolicy().reducedMotion) {
+        VeltrixKineticWorld(
+            world = world,
+            reducedMotion = rememberVeltrixEffectPolicy().reducedMotion,
+        ) {
             Box(Modifier.fillMaxSize()) {
                 if (secondaryName == null) {
                     AnimatedContent(targetState = world, label = "primary-world") { target ->
                         when (target) {
-                            VeltrixWorld.HOME -> RootHomeWorld(home, game, projects.firstOrNull(), onMenu = { scope.launch { drawer.open() } })
-                            VeltrixWorld.PERSONAL -> RootPersonalWorld(personal, map, game, onMenu = { scope.launch { drawer.open() } })
-                            VeltrixWorld.STORE -> RootStoreWorld(store, inventory, avatars, game, onMenu = { scope.launch { drawer.open() } })
-                            VeltrixWorld.PROJECTS -> RootProjectsWorld(projects, onMenu = { scope.launch { drawer.open() } })
+                            VeltrixWorld.HOME -> RootHomeWorld(
+                                home,
+                                game,
+                                projects.firstOrNull(),
+                                onMenu = { scope.launch { drawer.open() } },
+                            )
+                            VeltrixWorld.PERSONAL -> RootPersonalWorld(
+                                personal,
+                                map,
+                                game,
+                                onMenu = { scope.launch { drawer.open() } },
+                            )
+                            VeltrixWorld.STORE -> RootStoreWorld(
+                                store,
+                                inventory,
+                                avatars,
+                                game,
+                                onMenu = { scope.launch { drawer.open() } },
+                            )
+                            VeltrixWorld.PROJECTS -> RootProjectsWorld(
+                                projects,
+                                onMenu = { scope.launch { drawer.open() } },
+                            )
                         }
                     }
                     RootKineticBottomBar(
-                        selected = world,
-                        onSelected = { target -> worldName = target.name; secondaryName = null },
+                        selectedWorld = world,
+                        onSelected = { target ->
+                            worldName = target.name
+                            secondaryName = null
+                        },
                         modifier = Modifier.align(Alignment.BottomCenter),
                     )
                 } else {
                     RootSecondaryHost(
                         name = secondaryName.orEmpty(),
                         featureVm = featureVm,
-                        accountId = session?.accountId.orEmpty(),
                         onMenu = { scope.launch { drawer.open() } },
-                        onSignOut = { root.signOut { scope.launch { clearGoogleCredentialState(context) } } },
+                        onSignOut = {
+                            root.signOut {
+                                scope.launch { clearGoogleCredentialState(context) }
+                            }
+                        },
                     )
                 }
             }
@@ -188,14 +237,30 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
 }
 
 @Composable
-private fun RootSidebar(selected: String?, onSecondary: (String) -> Unit, onWorld: (VeltrixWorld) -> Unit) {
+private fun RootSidebar(
+    selected: String?,
+    onSecondary: (String) -> Unit,
+    onWorld: (VeltrixWorld) -> Unit,
+) {
     ModalDrawerSheet(
-        modifier = Modifier.width(310.dp),
+        modifier = Modifier.width(310.dp).testTag("root-sidebar"),
         drawerContainerColor = Color(0xFFF9FBFF),
     ) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text("VELTRIX", color = KineticColor.Ink, fontWeight = FontWeight.Black, modifier = Modifier.padding(12.dp))
-            Text("WORLDS", color = KineticColor.Muted, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+        Column(
+            Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Text(
+                "VELTRIX",
+                color = KineticColor.Ink,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.padding(12.dp),
+            )
+            Text(
+                "WORLDS",
+                color = KineticColor.Muted,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
             VeltrixWorld.entries.forEach { world ->
                 NavigationDrawerItem(
                     label = { Text(world.name.lowercase().replaceFirstChar { it.uppercase() }) },
@@ -205,7 +270,11 @@ private fun RootSidebar(selected: String?, onSecondary: (String) -> Unit, onWorl
                 )
             }
             Spacer(Modifier.height(10.dp))
-            Text("TOOLS", color = KineticColor.Muted, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+            Text(
+                "TOOLS",
+                color = KineticColor.Muted,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
             RootSecondary.entries.forEach { item ->
                 NavigationDrawerItem(
                     label = { Text(item.label) },
@@ -219,30 +288,63 @@ private fun RootSidebar(selected: String?, onSecondary: (String) -> Unit, onWorl
 }
 
 @Composable
-private fun RootKineticBottomBar(selected: VeltrixWorld, onSelected: (VeltrixWorld) -> Unit, modifier: Modifier = Modifier) {
+private fun RootKineticBottomBar(
+    selectedWorld: VeltrixWorld,
+    onSelected: (VeltrixWorld) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val itemWidth = 76.dp
-    val index = VeltrixWorld.entries.indexOf(selected).coerceAtLeast(0)
-    val lensX by animateDpAsState(itemWidth * index, spring(dampingRatio = .78f, stiffness = 420f), label = "world-lens")
+    val index = VeltrixWorld.entries.indexOf(selectedWorld).coerceAtLeast(0)
+    val lensX by animateDpAsState(
+        targetValue = itemWidth * index,
+        animationSpec = spring(dampingRatio = .78f, stiffness = 420f),
+        label = "world-lens",
+    )
     KineticGlass(
-        modifier.navigationBarsPadding().padding(bottom = 10.dp).height(66.dp).width(itemWidth * 4f).semantics { contentDescription = "Primary worlds" },
+        modifier
+            .navigationBarsPadding()
+            .padding(bottom = 10.dp)
+            .height(66.dp)
+            .width(itemWidth * 4f)
+            .testTag("primary-worlds")
+            .semantics { contentDescription = "Primary worlds" },
         radius = 26.dp,
         strong = true,
     ) {
         Box(Modifier.fillMaxSize()) {
             Box(
-                Modifier.padding(start = lensX + 5.dp, top = 5.dp).size(itemWidth - 10.dp, 56.dp).clip(RoundedCornerShape(21.dp))
-                    .background(Color.White.copy(alpha = .82f)),
+                Modifier
+                    .padding(start = lensX + 5.dp, top = 5.dp)
+                    .size(itemWidth - 10.dp, 56.dp)
+                    .clip(RoundedCornerShape(21.dp))
+                    .background(Color.White.copy(alpha = .82f))
+                    .testTag("world-lens"),
             )
             Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
                 VeltrixWorld.entries.forEach { item ->
                     Column(
-                        Modifier.width(itemWidth).fillMaxSize().clickable { onSelected(item) }
-                            .semantics { selected = item == selected; role = Role.Tab },
+                        Modifier
+                            .width(itemWidth)
+                            .fillMaxSize()
+                            .clickable { onSelected(item) }
+                            .testTag("world-${item.name}")
+                            .semantics {
+                                this.selected = item == selectedWorld
+                                role = Role.Tab
+                            },
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text(item.name.take(1), color = if (item == selected) KineticColor.Ink else KineticColor.Muted, fontWeight = FontWeight.Black)
-                        Text(item.name.lowercase().replaceFirstChar { it.uppercase() }, color = KineticColor.Muted, style = androidx.compose.material3.MaterialTheme.typography.labelSmall)
+                        Text(
+                            item.name.take(1),
+                            color = if (item == selectedWorld) KineticColor.Ink else KineticColor.Muted,
+                            fontWeight = FontWeight.Black,
+                        )
+                        Text(
+                            item.name.lowercase().replaceFirstChar { it.uppercase() },
+                            color = KineticColor.Muted,
+                            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                        )
                     }
                 }
             }
@@ -251,8 +353,16 @@ private fun RootKineticBottomBar(selected: VeltrixWorld, onSelected: (VeltrixWor
 }
 
 @Composable
-private fun RootSecondaryHost(name: String, featureVm: AppViewModel, accountId: String, onMenu: () -> Unit, onSignOut: () -> Unit) {
-    RootCapabilityFrame(title = RootSecondary.entries.firstOrNull { it.name == name }?.label ?: "Veltrix", onMenu = onMenu) {
+private fun RootSecondaryHost(
+    name: String,
+    featureVm: AppViewModel,
+    onMenu: () -> Unit,
+    onSignOut: () -> Unit,
+) {
+    RootCapabilityFrame(
+        title = RootSecondary.entries.firstOrNull { it.name == name }?.label ?: "Veltrix",
+        onMenu = onMenu,
+    ) {
         when (name) {
             RootSecondary.CALCULATOR.name -> {
                 val state by featureVm.calculator.collectAsStateWithLifecycle()
@@ -266,20 +376,39 @@ private fun RootSecondaryHost(name: String, featureVm: AppViewModel, accountId: 
             RootSecondary.NOTIFICATIONS.name -> {
                 val intents by featureVm.notificationIntents.collectAsStateWithLifecycle()
                 val prefs by featureVm.notificationPreferences.collectAsStateWithLifecycle()
-                NotificationsWorldScreen(intents, prefs, featureVm::refreshNotifications, featureVm::updateNotificationPreference)
+                NotificationsWorldScreen(
+                    intents,
+                    prefs,
+                    featureVm::refreshNotifications,
+                    featureVm::updateNotificationPreference,
+                )
             }
-            RootSecondary.SETTINGS.name -> RootAccountSurface(accountId = accountId, onSignOut = onSignOut)
+            RootSecondary.SETTINGS.name -> RootAccountSurface(onSignOut = onSignOut)
             else -> RootCapabilityBridge(name)
         }
     }
 }
 
 @Composable
-private fun RootCapabilityFrame(title: String, onMenu: () -> Unit, content: @Composable BoxScope.() -> Unit) {
+private fun RootCapabilityFrame(
+    title: String,
+    onMenu: () -> Unit,
+    content: @Composable BoxScope.() -> Unit,
+) {
     Box(Modifier.fillMaxSize().padding(bottom = 8.dp)) {
         content()
-        KineticGlass(Modifier.padding(start = 14.dp, top = 14.dp).height(46.dp).clip(RoundedCornerShape(23.dp)).clickable(onClick = onMenu), radius = 23.dp) {
-            Box(Modifier.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text("≡  $title", color = KineticColor.Ink, fontWeight = FontWeight.SemiBold) }
+        KineticGlass(
+            Modifier
+                .padding(start = 14.dp, top = 14.dp)
+                .height(46.dp)
+                .clip(RoundedCornerShape(23.dp))
+                .clickable(onClick = onMenu)
+                .testTag("root-menu"),
+            radius = 23.dp,
+        ) {
+            Box(Modifier.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                Text("≡  $title", color = KineticColor.Ink, fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }
@@ -287,16 +416,31 @@ private fun RootCapabilityFrame(title: String, onMenu: () -> Unit, content: @Com
 @Composable
 private fun RootCapabilityBridge(name: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("${RootSecondary.entries.firstOrNull { it.name == name }?.label ?: name} is retained and is being moved into the new Veltrix shell.", color = KineticColor.Muted)
+        Text(
+            "${RootSecondary.entries.firstOrNull { it.name == name }?.label ?: name} is retained and is being moved into the new Veltrix shell.",
+            color = KineticColor.Muted,
+        )
     }
 }
 
 @Composable
-private fun RootAccountSurface(accountId: String, onSignOut: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 92.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("Account", style = androidx.compose.material3.MaterialTheme.typography.displaySmall, color = KineticColor.Ink, fontWeight = FontWeight.SemiBold)
-        Text("Signed in account", color = KineticColor.Muted)
-        Text(accountId, color = KineticColor.Ink, fontWeight = FontWeight.Medium)
-        androidx.compose.material3.OutlinedButton(onClick = onSignOut, modifier = Modifier.height(52.dp)) { Text("Sign out") }
+private fun RootAccountSurface(onSignOut: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 92.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(
+            "Account",
+            style = androidx.compose.material3.MaterialTheme.typography.displaySmall,
+            color = KineticColor.Ink,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text("Your Veltrix account is active on this device.", color = KineticColor.Muted)
+        OutlinedButton(
+            onClick = onSignOut,
+            modifier = Modifier.height(52.dp).testTag("sign-out"),
+        ) {
+            Text("Sign out")
+        }
     }
 }
