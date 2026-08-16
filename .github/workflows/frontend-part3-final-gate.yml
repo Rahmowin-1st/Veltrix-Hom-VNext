@@ -178,8 +178,8 @@ jobs:
           grep -q 'VISUAL_MATRIX=PASS count=35 semantic=35 complete_render=35 bounds_gate=PASS fresh_manifest=PASS' evidence/screens/visual-matrix-gate.txt
           grep -q 'CRITICAL_LAYOUT_BOUNDS=PASS count=8' evidence/screens/layout-bounds-gate.txt
           grep -q 'MOTION_TEMPORAL_EVIDENCE=PASS clips=3 vfr_safe=1' evidence/motion/motion-gate.txt
-          grep -q 'MOTION_FRAME_PACING_EMULATOR=PASS source=gfxinfo_framestats' evidence/motion/motion-gate.txt
-          test -s evidence/motion/shell-motion-framestats-gate.txt
+          grep -q 'MOTION_FRAME_PACING_EMULATOR=PASS source=gfxinfo_summary screenrecord_free=1' evidence/motion/motion-gate.txt
+          test -s evidence/motion/shell-motion-gfxinfo-gate.txt
           grep -q 'PART3_FINAL_PROOF=PASS' evidence/runtime/final-progress.txt
           test "$(wc -l < evidence/screens/screenshot-sha256.txt)" -eq 35
           sha256sum -c evidence/screens/screenshot-sha256.txt
