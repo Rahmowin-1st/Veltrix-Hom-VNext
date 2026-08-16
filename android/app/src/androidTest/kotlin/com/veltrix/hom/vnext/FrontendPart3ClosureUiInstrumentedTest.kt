@@ -18,14 +18,12 @@ class FrontendPart3ClosureUiInstrumentedTest {
         compose.setContent { VeltrixTheme { FlashcardsWorldScreen(RepositoryState(listOf(card), DataFreshness.FRESH), {}, { _, _ -> }) } }
         compose.onNodeWithTag("flashcards-screen").assertIsDisplayed()
         compose.onNodeWithTag("flashcard-stage").assertIsDisplayed().assertHeightIsAtLeast(300.dp)
-        // Inspect the actual Text layout node rather than the merged clickable semantics parent.
-        // This retains the strict visible + >=72dp clipping gate while avoiding a merged-tree false negative.
         compose.onNodeWithTag("flashcard-primary-text", useUnmergedTree = true).assertIsDisplayed().assertHeightIsAtLeast(72.dp)
         compose.onNodeWithText("Explain why acceleration changes when net force changes.", useUnmergedTree = true).assertIsDisplayed().assertHeightIsAtLeast(72.dp)
     }
 
     @Test
-    fun calculatorAndTranslatePresentBackendResultsWithoutInventingAuthority() {
+    fun calculatorPresentsBackendResultWithoutInventingAuthority() {
         compose.setContent {
             VeltrixTheme {
                 CalculatorWorldScreen(
@@ -38,7 +36,10 @@ class FrontendPart3ClosureUiInstrumentedTest {
         compose.onNodeWithTag("calculator-screen").assertIsDisplayed()
         compose.onNodeWithTag("calculator-result").assertIsDisplayed()
         compose.onNodeWithText("Deterministic backend result").assertIsDisplayed()
+    }
 
+    @Test
+    fun translatePresentsProviderTruthWithoutInventingAuthority() {
         compose.setContent {
             VeltrixTheme {
                 TranslateWorldScreen(
@@ -54,14 +55,17 @@ class FrontendPart3ClosureUiInstrumentedTest {
     }
 
     @Test
-    fun notificationAndSettingsStatesRemainExplicit() {
+    fun notificationStateSeparatesBackendPreferenceFromAndroidPermission() {
         val intents = listOf(NotificationIntentUiModel("n1", null, "LEARNING", "Review mechanics", null, "PENDING", "now"))
         val prefs = listOf(NotificationPreferenceUiModel("LEARNING", true, "{}", "Asia/Tashkent", 3, "now"))
         compose.setContent { VeltrixTheme { NotificationsWorldScreen(RepositoryState(intents, DataFreshness.FRESH), RepositoryState(prefs, DataFreshness.FRESH), {}, { _, _ -> }) } }
         compose.onNodeWithTag("notifications-screen").assertIsDisplayed()
         compose.onNodeWithText("Review mechanics").assertIsDisplayed()
         compose.onNodeWithText("Backend preference truth remains separate from Android permission state.").assertIsDisplayed()
+    }
 
+    @Test
+    fun settingsStatePreservesRevisionConflictTruth() {
         val profile = ProfileUiModel("account", "Alex", "alex", "en", "Asia/Tashkent", true, true, 9)
         compose.setContent {
             VeltrixTheme {
