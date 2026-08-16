@@ -100,12 +100,22 @@ jobs:
         run: |
           set -euo pipefail
           nohup gradle --no-daemon :server:run > evidence/runtime/server-runtime.log 2>&1 &
-          for i in $(seq 1 90); do
-            if curl -fsS --max-time 3 http://127.0.0.1:8080/ready > evidence/runtime/ready.json; then break; fi
+          ready=0
+          for i in $(seq 1 120); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8080/ready > evidence/runtime/ready.json; then
+              ready=1
+              break
+            fi
             sleep 2
           done
+          if [ "$ready" -ne 1 ]; then
+            echo 'BACKEND_RUNTIME=FAIL' | tee evidence/runtime/backend-runtime-gate.txt
+            tail -n 160 evidence/runtime/server-runtime.log || true
+            exit 1
+          fi
           grep -q '"ready":true' evidence/runtime/ready.json
           grep -q '"testAiConfigured":true' evidence/runtime/ready.json
+          echo 'BACKEND_RUNTIME=PASS' | tee evidence/runtime/backend-runtime-gate.txt
 
       - uses: android-actions/setup-android@v3
 
@@ -132,51 +142,13 @@ jobs:
           cores: 4
           disable-animations: false
           emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
-          script: |
-            set -euo pipefail
-            mkdir -p evidence/runtime
-            adb reverse tcp:8080 tcp:8080
-            gradle --no-daemon \
-              -PVELTRIX_API_BASE_URL=http://127.0.0.1:8080 \
-              -Pandroid.testInstrumentationRunnerArguments.class=com.veltrix.hom.vnext.RootResetRuntimeInstrumentedTest \
-              :android:app:connectedDebugAndroidTest | tee evidence/runtime/root-reset-instrumentation.txt
-            grep -q 'BUILD SUCCESSFUL' evidence/runtime/root-reset-instrumentation.txt
-            python3 - <<'PY' | tee evidence/runtime/root-reset-test-summary.txt
-            import glob
-            import xml.etree.ElementTree as ET
-            files = glob.glob('android/app/build/outputs/androidTest-results/connected/**/*.xml', recursive=True)
-            matched = []
-            tests = failures = errors = skipped = 0
-            for path in files:
-                try:
-                    root = ET.parse(path).getroot()
-                except ET.ParseError:
-                    continue
-                cases = [c for c in root.iter('testcase') if 'RootResetRuntimeInstrumentedTest' in c.attrib.get('classname', '')]
-                if not cases:
-                    continue
-                matched.append(path)
-                tests += len(cases)
-                failures += sum(1 for c in cases if c.find('failure') is not None)
-                errors += sum(1 for c in cases if c.find('error') is not None)
-                skipped += sum(1 for c in cases if c.find('skipped') is not None)
-            if tests != 2 or failures or errors or skipped:
-                raise SystemExit(f'ROOT_RESET_RUNTIME=FAIL tests={tests} failures={failures} errors={errors} skipped={skipped} files={matched}')
-            print(f'ROOT_RESET_RUNTIME=PASS tests={tests} failures=0 errors=0 skipped=0')
-            PY
-            grep -q 'ROOT_RESET_RUNTIME=PASS tests=2 failures=0 errors=0 skipped=0' evidence/runtime/root-reset-test-summary.txt
-            echo 'ACCOUNT_FIRST=PASS' | tee evidence/runtime/stage30-gate.txt
-            echo 'NO_GUEST_MODE=PASS' | tee -a evidence/runtime/stage30-gate.txt
-            echo 'SERVER_VALIDATED_SESSION=PASS' | tee -a evidence/runtime/stage30-gate.txt
-            echo 'FOUR_PRIMARY_WORLDS=PASS' | tee -a evidence/runtime/stage30-gate.txt
-            echo 'BACK_TO_HOME=PASS' | tee -a evidence/runtime/stage30-gate.txt
-            echo 'SIGN_OUT_RETURNS_AUTH=PASS' | tee -a evidence/runtime/stage30-gate.txt
-            adb reverse --remove-all || true
+          script: bash scripts/root_reset_runtime_gate.sh
 
       - name: Fail-closed Stage 30 verification
         shell: bash
         run: |
           set -euo pipefail
+          grep -qx 'BACKEND_RUNTIME=PASS' evidence/runtime/backend-runtime-gate.txt
           test -s evidence/runtime/stage30-gate.txt
           for marker in \
             ACCOUNT_FIRST=PASS \
@@ -187,7 +159,7 @@ jobs:
             SIGN_OUT_RETURNS_AUTH=PASS; do
             grep -qx "$marker" evidence/runtime/stage30-gate.txt
           done
-          grep -q 'ROOT_RESET_RUNTIME=PASS tests=2 failures=0 errors=0 skipped=0' evidence/runtime/root-reset-test-summary.txt
+          grep -qx 'ROOT_RESET_RUNTIME=PASS tests=2 failures=0 errors=0 skipped=0' evidence/runtime/root-reset-test-summary.txt
           echo 'ROOT_RESET_STAGE30_RUNTIME=PASS' | tee evidence/runtime/final.txt
 
       - name: Upload root-reset runtime evidence
