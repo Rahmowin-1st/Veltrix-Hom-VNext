@@ -88,7 +88,7 @@ class FrontendPart2UiInstrumentedTest {
         // WorldHeading deliberately renders compact context eyebrows in uppercase; assert the
         // exact visible label rather than weakening the Project Space acceptance check.
         compose.onNodeWithText("PROJECT SPACE").assertExists()
-        compose.onNodeWithText("Use SI units").assertExists()
+        compose.onNodeWithText("AI instruction · Use SI units").assertExists()
         compose.onNodeWithText("Finish mechanics").assertExists()
     }
 
