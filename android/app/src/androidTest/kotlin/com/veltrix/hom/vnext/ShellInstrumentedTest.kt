@@ -15,6 +15,7 @@ import com.veltrix.hom.vnext.core.CapabilityRoute
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -65,8 +66,14 @@ class ShellInstrumentedTest {
         assertEquals(11, CapabilityRoute.entries.size)
         compose.onNodeWithTag("open-capabilities").assertIsDisplayed().assertHasClickAction().performClick()
         compose.waitForIdle()
-        compose.onNodeWithTag("capability-list").assertIsDisplayed()
-        compose.onNodeWithTag("capability-list").performScrollToNode(hasTestTag("capability-CHAT"))
+        val capabilityList = compose.onNodeWithTag("capability-list").assertIsDisplayed()
+        val listBounds = capabilityList.fetchSemanticsNode().boundsInRoot
+        val minUsableHeightPx = 160f * compose.activity.resources.displayMetrics.density
+        assertTrue(
+            "Capability list must retain a usable viewport; bounds=$listBounds minHeightPx=$minUsableHeightPx",
+            listBounds.height >= minUsableHeightPx,
+        )
+        capabilityList.performScrollToNode(hasTestTag("capability-CHAT"))
         compose.onNodeWithTag("capability-CHAT").assertIsDisplayed().assertHasClickAction().performClick()
         compose.waitForIdle()
         compose.onNodeWithTag("active-route").assertTextEquals("Chat")
