@@ -377,7 +377,7 @@ private fun SecondaryWorld(
                 vm::prepareAccountExport, vm::deleteAccount,
             )
         }
-        else -> CapabilityBridgeScreen(route)
+        else -> RouteRecoveryScreen(route)
     }
 }
 

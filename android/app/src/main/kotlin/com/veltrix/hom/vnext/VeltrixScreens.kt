@@ -576,26 +576,17 @@ fun TransitionalProjectsScreen(
 }
 
 @Composable
-fun TransitionalStoreScreen() {
-    Box(Modifier.fillMaxSize().padding(22.dp), contentAlignment = Alignment.Center) {
-        Surface(color = Color.White.copy(alpha = .72f), shape = RoundedCornerShape(30.dp)) {
-            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Store", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, color = VeltrixColors.Ink)
-                Text("Reachable now. Final Store and Inventory experience is reserved for Frontend Part 2.", color = VeltrixColors.InkMuted)
-                Text("No local prices, balances, ownership, or unlock logic is created here.", color = VeltrixColors.InkMuted, style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }
-}
-
-@Composable
-fun CapabilityBridgeScreen(name: String) {
+fun RouteRecoveryScreen(name: String) {
     Box(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
-        Surface(color = Color.White.copy(alpha = .74f), shape = RoundedCornerShape(30.dp)) {
-            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(name.titleCase(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = VeltrixColors.Ink)
-                Text("Capability route retained in the global shell.", color = VeltrixColors.InkMuted)
-                Text("Its final product surface is owned by Frontend Part 2 or Part 3.", color = VeltrixColors.InkMuted, style = MaterialTheme.typography.bodySmall)
+        GlassSurface(Modifier.fillMaxWidth(), radius = 30.dp, strong = true) {
+            Column(
+                Modifier.fillMaxWidth().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("This destination is unavailable", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = VeltrixColors.Ink)
+                Text("Veltrix could not restore ${name.titleCase()} safely. Use Back or choose another destination.", color = VeltrixColors.InkMuted)
+                Text("No account, learning, progression, or economy state was changed.", color = VeltrixColors.InkMuted, style = MaterialTheme.typography.bodySmall)
             }
         }
     }

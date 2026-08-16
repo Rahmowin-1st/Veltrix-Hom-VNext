@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -519,6 +520,53 @@ private fun FlashcardFace(card: FlashcardUiModel, back: Boolean) {
             modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).testTag("flashcard-primary-text").semantics { contentDescription = if (back) "Flashcard answer" else "Flashcard prompt" },
         )
         if (back) card.explanation?.let { Text(it, color = VeltrixColors.InkMuted, modifier = Modifier.fillMaxWidth()) }
+    }
+}
+
+@Composable
+fun MistakesWorldScreen(
+    state: RepositoryState<List<MistakeUiModel>>,
+    onRetry: () -> Unit,
+    onResolve: (MistakeUiModel) -> Unit,
+    onPractice: (String) -> Unit,
+    onFlashcard: (String) -> Unit,
+) {
+    StateFrame(
+        state = state,
+        label = "mistakes",
+        onRetry = onRetry,
+        isEmpty = { it.isEmpty() },
+        emptyText = "No active mistake patterns. Keep learning; recurrence will be tracked constructively.",
+    ) { mistakes ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(horizontal = 18.dp).testTag("mistakes-screen"),
+            contentPadding = PaddingValues(top = 10.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(11.dp),
+        ) {
+            item {
+                WorldHeading("Mistakes", "Pattern review", "Use mistakes as learning signals, never punishment.")
+                FreshnessLine(state.freshness, onRetry)
+            }
+            items(mistakes, key = { it.id }) { m ->
+                WorldPanel(accent = if (m.status == "RESOLVED") VeltrixColors.Mint else VeltrixColors.Amber) {
+                    Row(verticalAlignment = Alignment.Top) {
+                        Column(Modifier.weight(1f)) {
+                            Text(m.topic.ifBlank { "Review" }, color = VeltrixColors.SkyDeep, style = MaterialTheme.typography.labelMedium)
+                            Text(m.prompt, color = VeltrixColors.Ink, fontWeight = FontWeight.SemiBold)
+                            Text("Seen ${m.occurrenceCount} time${if (m.occurrenceCount == 1) "" else "s"}", color = VeltrixColors.InkMuted)
+                        }
+                        StatusBadge(m.status)
+                    }
+                    m.userAnswer?.let { Text("Your answer · $it", color = VeltrixColors.InkMuted) }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { onPractice(m.id) }) { Text("Practice") }
+                        TextButton(onClick = { onFlashcard(m.id) }) { Text("Make card") }
+                        Spacer(Modifier.weight(1f))
+                        if (m.status != "RESOLVED") TextButton(onClick = { onResolve(m) }) { Text("Resolved") }
+                    }
+                }
+            }
+        }
     }
 }
 
