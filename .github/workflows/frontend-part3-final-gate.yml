@@ -142,7 +142,9 @@ jobs:
           cores: 4
           emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
           disable-animations: false
-          script: bash .github/scripts/frontend-part3-final-proof.sh
+          script: >-
+            bash .github/scripts/frontend-part3-final-proof.sh &&
+            bash .github/scripts/frontend-part3-motion-fidelity-proof.sh
 
       - name: Package exact source and final evidence
         if: always()
@@ -179,6 +181,13 @@ jobs:
           grep -q 'CRITICAL_LAYOUT_BOUNDS=PASS count=8' evidence/screens/layout-bounds-gate.txt
           grep -q 'MOTION_TEMPORAL_EVIDENCE=PASS clips=3 vfr_safe=1' evidence/motion/motion-gate.txt
           grep -q 'MOTION_FRAME_PACING_EMULATOR=PASS source=jankstats_ui_cpu screenrecord_free=1' evidence/motion/motion-gate.txt
+          grep -q 'MOTION_HIGH_FIDELITY=PASS source=compose_main_test_clock source_frames=49 minimum_distinct=12 minimum_lens_positions=12 playback_fps=60 runtime_fps_claim=NONE' evidence/motion/motion-gate.txt
+          grep -q 'MOTION_HIGH_FIDELITY=PASS source=compose_main_test_clock source_frames=49 minimum_distinct=12 minimum_lens_positions=12 playback_fps=60 runtime_fps_claim=NONE' evidence/runtime/final-gate.txt
+          test -s evidence/motion/high-fidelity/high-fidelity-gate.txt
+          test -s evidence/motion/high-fidelity/04-primary-nav-deterministic.mp4
+          test -s evidence/motion/high-fidelity/deterministic-ffprobe.json
+          test "$(find evidence/motion/high-fidelity/frames -maxdepth 1 -type f -name 'frame-*.jpg' | wc -l)" -eq 49
+          sha256sum -c evidence/motion/high-fidelity/frame-sha256.txt
           test -s evidence/motion/shell-motion-jankstats-gate.txt
           test -s evidence/performance/jankstats-ui-cpu.txt
           grep -q 'JANKSTATS_UI_CPU_EMULATOR=PASS' evidence/performance/jankstats-ui-cpu.txt
@@ -206,6 +215,8 @@ jobs:
           unzip -tq Veltrix-Hom-Frontend-Part3-FINAL-EVIDENCE.zip >/dev/null
           test "$(unzip -Z1 Veltrix-Hom-Frontend-Part3-FINAL-EVIDENCE.zip | grep -Ec '^package/evidence/screens/[^/]+\.png$')" -eq 49
           test "$(unzip -Z1 Veltrix-Hom-Frontend-Part3-FINAL-EVIDENCE.zip | grep -Ec '^package/evidence/motion/[^/]+\.mp4$')" -eq 3
+          test "$(unzip -Z1 Veltrix-Hom-Frontend-Part3-FINAL-EVIDENCE.zip | grep -Ec '^package/evidence/motion/high-fidelity/04-primary-nav-deterministic\.mp4$')" -eq 1
+          test "$(unzip -Z1 Veltrix-Hom-Frontend-Part3-FINAL-EVIDENCE.zip | grep -Ec '^package/evidence/motion/high-fidelity/frames/frame-[0-9]{3}\.jpg$')" -eq 49
 
       - name: Upload Part 3 final evidence
         if: always()
