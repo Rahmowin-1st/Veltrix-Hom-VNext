@@ -1,10 +1,12 @@
 package com.veltrix.hom.vnext
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -59,11 +61,11 @@ class FrontendPart2UiInstrumentedTest {
         compose.onNodeWithTag("personal-screen").assertIsDisplayed()
         compose.onNodeWithTag("living-avatar-personal").assertIsDisplayed()
         compose.onNodeWithTag("personal-map-live").assertExists()
-        // The redesigned spatial map intentionally repeats a unit label in both the world node and
-        // its selected-detail stage. Target the canonical selected-title semantic instead of
-        // incorrectly requiring the user-facing word "Motion" to occur only once.
+        // The spatial map intentionally exposes the active unit in both the selected-detail stage
+        // and the accessible route node. Verify the canonical selected title plus both truthful
+        // current-location representations instead of incorrectly requiring duplicated copy to be unique.
         compose.onNodeWithTag("map-selected-title").assertTextEquals("Motion")
-        compose.onNodeWithText("Current location · 4/10 progress").assertExists()
+        compose.onAllNodesWithText("Current location · 4/10 progress").assertCountEquals(2)
     }
 
     @Test
