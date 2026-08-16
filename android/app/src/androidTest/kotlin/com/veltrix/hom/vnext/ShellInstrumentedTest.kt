@@ -59,13 +59,9 @@ class ShellInstrumentedTest {
         compose.onNodeWithTag("projects-screen").assertIsDisplayed()
 
         assertEquals(11,CapabilityRoute.entries.size)
-        compose.onNodeWithTag("open-capabilities").performClick()
-        compose.waitUntil(5_000) {
-            runCatching {
-                compose.onNodeWithTag("capability-list").assertIsDisplayed()
-                true
-            }.getOrDefault(false)
-        }
+        compose.onNodeWithTag("open-capabilities").assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("capability-list").assertIsDisplayed()
         compose.onNodeWithTag("capability-list").performScrollToNode(hasTestTag("capability-CHAT"))
         compose.onNodeWithTag("capability-CHAT").assertIsDisplayed().performClick()
         compose.waitForIdle()
