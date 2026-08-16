@@ -4,7 +4,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.UUID
 
 enum class DataFreshness { FRESH, STALE, OFFLINE }
 data class RepositoryState<T>(val value:T?,val freshness:DataFreshness,val loading:Boolean=false,val errorCode:String?=null,val retryable:Boolean=false,val serverRevision:Long=0)
@@ -76,7 +75,6 @@ class Part3AndroidRepository(
     private val context:android.content.Context,
     private val remote:Part3RemoteDataSource=Part3RemoteDataSource(),
     private val local:Part3LocalDatabase=Part3LocalDatabase.get(context),
-    private val syncDb:VeltrixLocalDatabase=VeltrixLocalDatabase.get(context),
 ) {
     suspend fun home(session:ApiSession,forceRefresh:Boolean=false):RepositoryState<HomeFinalModel> = snapshot(session,"HOME","GLOBAL",forceRefresh,::parseHome)
     suspend fun personal(session:ApiSession,forceRefresh:Boolean=false):RepositoryState<PersonalFinalModel> = snapshot(session,"PERSONAL","GLOBAL",forceRefresh,::parsePersonal)
@@ -98,22 +96,20 @@ class Part3AndroidRepository(
         }
     }
 
-    suspend fun updateContextCarryOfflineFirst(session:ApiSession,value:ContextCarryModel):RepositoryState<ContextCarryModel> = withContext(Dispatchers.IO) {
+    suspend fun updateContextCarryOnlineOnly(session:ApiSession,value:ContextCarryModel):RepositoryState<ContextCarryModel> = withContext(Dispatchers.IO) {
         require(value.accountId==session.accountId)
-        val nextRevision=(value.contextRevision+1).coerceAtLeast(1)
-        val localValue=value.copy(contextRevision=nextRevision)
-        local.contextCarry().put(contextEntity(localValue,"PENDING"))
-        val mutation=LocalSyncMutationEntity(
-            id=UUID.randomUUID().toString(), accountId=session.accountId, entityType="CONTEXT_CARRY", entityId=session.accountId, operation="UPSERT",
-            expectedRevision=value.contextRevision.takeIf{it>0}, idempotencyKey="context:${session.accountId}:$nextRevision",
-            payload=JSONObject().put("projectId",value.projectId).put("sourceIdsJson",JSONArray(value.sourceIds).toString()).put("conversationId",value.conversationId)
-                .put("assessmentId",value.assessmentId).put("topic",value.topic).put("learningMode",value.learningMode).put("origin",value.origin)
-                .put("returnDestination",value.returnDestination).toString(), createdAtEpochMs=System.currentTimeMillis(),attemptCount=0,state="PENDING"
-        )
-        syncDb.sync().enqueue(mutation)
-        SyncScheduler.ensure(context)
-        RepositoryState(localValue,DataFreshness.OFFLINE,serverRevision=nextRevision)
+        val json = remote.putContextCarry(session, value)
+        val confirmed = parseContext(session.accountId, json)
+        local.contextCarry().put(contextEntity(confirmed,"ACKED"))
+        RepositoryState(confirmed, DataFreshness.FRESH, serverRevision = confirmed.contextRevision)
     }
+
+    @Deprecated(
+        message = "Offline product mutation mode was removed by the Final Root Reset mission.",
+        replaceWith = ReplaceWith("updateContextCarryOnlineOnly(session, value)"),
+    )
+    suspend fun updateContextCarryOfflineFirst(session: ApiSession, value: ContextCarryModel): RepositoryState<ContextCarryModel> =
+        updateContextCarryOnlineOnly(session, value)
 
     suspend fun resolveCommand(session:ApiSession,text:String,projectId:String?=null,sourceId:String?=null):UniversalCommandResultModel=withContext(Dispatchers.IO) {
         val o=remote.resolveCommand(session,text,projectId,sourceId)
