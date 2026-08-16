@@ -1,6 +1,7 @@
 package com.veltrix.hom.vnext
 
 import android.util.Log
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -8,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.printToLog
 import com.veltrix.hom.vnext.core.CapabilityRoute
 import kotlinx.coroutines.runBlocking
@@ -59,11 +61,17 @@ class ShellInstrumentedTest {
         compose.onNodeWithTag("projects-screen").assertIsDisplayed()
 
         assertEquals(11,CapabilityRoute.entries.size)
-        compose.onNodeWithTag("open-capabilities").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("open-capabilities")
+            .assertIsDisplayed()
+            .assertHasClickAction()
+            .performTouchInput { click() }
         compose.waitForIdle()
         compose.onNodeWithTag("capability-list").assertIsDisplayed()
         compose.onNodeWithTag("capability-list").performScrollToNode(hasTestTag("capability-CHAT"))
-        compose.onNodeWithTag("capability-CHAT").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("capability-CHAT")
+            .assertIsDisplayed()
+            .assertHasClickAction()
+            .performTouchInput { click() }
         compose.waitForIdle()
         compose.onNodeWithTag("active-route").assertIsDisplayed()
     }
