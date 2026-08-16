@@ -265,7 +265,7 @@ avg=frac(s.get('avg_frame_rate')); effective=frames/dur if dur>0 else 0; w=int(s
 print(f'MOTION_CLIP={label} file={file} duration={dur:.3f}s encoded_frames={frames} encoded_avg_fps={avg:.2f} encoded_effective_fps={effective:.2f} bytes={size} size={w}x{h}')
 # Android screenrecord may emit sparse/VFR frames for static intervals. Encoded FPS is therefore
 # temporal-recording metadata, not a render-pacing metric. Render pacing is gated separately from
-# screenrecord-free gfxinfo summary on the real MainActivity interaction sequence below.
+# screenrecord-free JankStats UI/CPU timing on the real MainActivity interaction sequence below.
 if dur < 5 or frames < 6 or size < 120000 or w < 720 or h < 1200:
     raise SystemExit(47)
 print('MOTION_TEMPORAL_RECORDING=PASS vfr_safe=1 render_fps_claim=NONE')
@@ -318,41 +318,18 @@ adb shell input swipe "$DRAWER_END" "$MID" "$EDGE" "$MID" 650; sleep 1.2
 wait "$REC" || true
 adb pull /sdcard/p3-shell.mp4 evidence/motion/02-shell-direct-manipulation.mp4 >/dev/null
 probe_motion evidence/motion/02-shell-direct-manipulation.mp4 shell-direct-manipulation
-# Frame pacing is measured in a second, screenrecord-free replay so capture overhead cannot
-# masquerade as app jank. Use the same real shell input sequence, then parse Android gfxinfo summary.
-adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
-timeout 20s adb shell am start -W -n "$ACTIVITY" >/dev/null; sleep 1
-adb shell dumpsys gfxinfo "$PACKAGE" reset >/dev/null 2>&1 || true
-sleep .2
-for x in "$X2" "$X3" "$X4" "$X1"; do adb shell input tap "$x" "$Y" >/dev/null 2>&1 || true; sleep .65; done
-adb shell input swipe "$EDGE" "$MID" "$DRAWER_END" "$MID" 650 >/dev/null 2>&1 || true; sleep .7
-adb shell input swipe "$DRAWER_END" "$MID" "$EDGE" "$MID" 650 >/dev/null 2>&1 || true; sleep .7
-adb shell pidof "$PACKAGE" | tee evidence/motion/shell-process-after-gesture.txt
-test -s evidence/motion/shell-process-after-gesture.txt
-adb shell dumpsys gfxinfo "$PACKAGE" > evidence/motion/shell-motion-gfxinfo.txt || true
-python3 - evidence/motion/shell-motion-gfxinfo.txt <<'PYFRAME' | tee evidence/motion/shell-motion-gfxinfo-gate.txt
-import re,sys
-text=open(sys.argv[1],errors='replace').read()
-def one(pattern,name,cast=float):
-    m=re.search(pattern,text,re.M)
-    if not m: raise SystemExit(f'MOTION_FRAME_PACING_FAIL reason=missing_{name}')
-    return cast(m.group(1))
-total=one(r'^Total frames rendered:\s*(\d+)', 'total_frames', int)
-janky=one(r'^Janky frames:\s*(\d+)\s*\(([0-9.]+)%\)', 'janky_frames', int)
-m=re.search(r'^Janky frames:\s*\d+\s*\(([0-9.]+)%\)',text,re.M)
-janky_pct=float(m.group(1)) if m else 100.0
-p50=one(r'^50th percentile:\s*(\d+)ms', 'p50')
-p90=one(r'^90th percentile:\s*(\d+)ms', 'p90')
-p95=one(r'^95th percentile:\s*(\d+)ms', 'p95')
-p99=one(r'^99th percentile:\s*(\d+)ms', 'p99')
-missed=one(r'^Number Frame deadline missed:\s*(\d+)', 'deadline_missed', int)
-print(f'MOTION_FRAME_PACING frames={total} janky={janky} janky_pct={janky_pct:.2f} p50_ms={p50:.0f} p90_ms={p90:.0f} p95_ms={p95:.0f} p99_ms={p99:.0f} deadline_missed={missed}')
-# Hardware-accelerated CI-emulator sanity gate only. These intentionally broad limits reject
-# pathological rendering while avoiding a fabricated physical-device or 120 Hz smoothness claim.
-if total < 12 or janky_pct > 60 or p95 > 250:
-    raise SystemExit(48)
-print('MOTION_FRAME_PACING_EMULATOR=PASS source=gfxinfo_summary screenrecord_free=1 physical_device_claim=NONE')
-PYFRAME
+# Frame pacing is measured separately from screenrecord with AndroidX JankStats on the
+# production MainActivity window. API31+ exposes UI-thread and non-GPU CPU frame durations;
+# total/GPU/jank classification remains diagnostic on CI emulators and is not a physical claim.
+run_test 'com.veltrix.hom.vnext.JankStatsPerformanceInstrumentedTest#warmedPrimaryNavigationKeepsUiAndCpuWithinEmulatorSanityBudget' evidence/performance/jankstats-ui-cpu-test.txt 'OK (1 test)'
+adb shell run-as "$PACKAGE" cat files/jankstats-ui-cpu.txt > evidence/performance/jankstats-ui-cpu.txt
+cat evidence/performance/jankstats-ui-cpu.txt
+grep -q 'JANKSTATS_UI_CPU_EMULATOR=PASS' evidence/performance/jankstats-ui-cpu.txt
+grep -q 'PHYSICAL_DEVICE_PF=NOT_VERIFIED' evidence/performance/jankstats-ui-cpu.txt
+# Retain gfxinfo as diagnostic evidence only. It is intentionally not an acceptance threshold
+# because emulator GPU/fence timing can be non-representative and physical-device PF is separate.
+adb shell dumpsys gfxinfo "$PACKAGE" > evidence/performance/gfxinfo-after-jankstats.txt || true
+printf 'MOTION_FRAME_PACING_EMULATOR=PASS source=jankstats_ui_cpu screenrecord_free=1\n' | tee evidence/motion/shell-motion-jankstats-gate.txt
 
 # Clip 3: Part 3 production tools/control worlds.
 prepare_scenario CALCULATOR_RESULT 'Deterministic backend result|Calculator'
@@ -367,7 +344,7 @@ wait "$REC" || true
 adb pull /sdcard/p3-tools.mp4 evidence/motion/03-part3-tools.mp4 >/dev/null
 probe_motion evidence/motion/03-part3-tools.mp4 part3-tools
 cat evidence/motion/*-gate.txt > evidence/motion/motion-gate.txt
-printf 'MOTION_TEMPORAL_EVIDENCE=PASS clips=3 vfr_safe=1\nMOTION_FRAME_PACING_EMULATOR=PASS source=gfxinfo_summary screenrecord_free=1\nPHYSICAL_TOUCH_FEEL=NOT_VERIFIED\n' | tee -a evidence/motion/motion-gate.txt
+printf 'MOTION_TEMPORAL_EVIDENCE=PASS clips=3 vfr_safe=1\nMOTION_FRAME_PACING_EMULATOR=PASS source=jankstats_ui_cpu screenrecord_free=1\nPHYSICAL_TOUCH_FEEL=NOT_VERIFIED\n' | tee -a evidence/motion/motion-gate.txt
 mark 'MOTION=PASS'
 
 # Accessibility/adaptive matrix.
@@ -485,7 +462,7 @@ Status: FRONTEND_ACCEPTANCE_CANDIDATE (frontend-owned gates passed in this exact
 - Backend preservation: accepted backend remains an ancestor; protected backend/server/core/database source is unchanged from accepted backend authority.
 - Flashcard P0: global interactive-glass height cap removed; explicit Compose and runtime semantic-bounds gates pass.
 - Visual QA: 35 core fresh scenarios + 13 adaptation scenarios + live Home; critical bounds gate is fail-closed.
-- Motion: 3 runtime MP4 clips are ffprobe-gated for decodability, duration, resolution and temporal frames. Encoded screenrecord VFR is not treated as render FPS; MainActivity direct-manipulation frame pacing is replayed without screenrecord and fail-closed separately from Android gfxinfo summary.
+- Motion: 3 runtime MP4 clips are ffprobe-gated for decodability, duration, resolution and temporal frames. Encoded screenrecord VFR is not treated as render FPS; MainActivity frame pacing is fail-closed separately with AndroidX JankStats UI-thread/non-GPU CPU timing, while total/GPU emulator timing remains diagnostic.
 - Accessibility/adaptive: extreme font, reduced motion, high contrast, RTL, narrow and expanded layouts executed. TalkBack status is recorded separately.
 - Offline/process death: inherited durability/offline and fresh-process restoration tests pass.
 - Performance: hardware-accelerated API36 emulator smoke/environment captured; physical-device performance/touch feel remains explicitly UNVERIFIED.
@@ -499,7 +476,7 @@ CHANGED: frontend visual hierarchy/material primitives, avatar identity language
 - Backend/Android tests: evidence/runtime/
 - Visual matrix + XML + hash manifest: evidence/screens/
 - Critical bounds: evidence/screens/layout-bounds-gate.txt
-- Motion clips + ffprobe metadata + screenrecord-free MainActivity gfxinfo gate: evidence/motion/
+- Motion clips + ffprobe metadata: evidence/motion/; JankStats UI/CPU + gfxinfo diagnostics: evidence/performance/
 - A11Y/adaptive: evidence/accessibility/
 - Renderer/performance: evidence/performance/
 - APK/test APK/source hashes: evidence/*sha256.txt
@@ -511,5 +488,5 @@ Physical-device performance and human touch-feel are not fabricated. Current pro
 Inspect full-resolution screenshots, motion clips and ffprobe metadata, TalkBack gate, renderer fingerprint, exact package hashes, and the physical-device limitation. Do not infer release approval from this handoff.
 EOF_HANDOFF
 
-printf 'PART1=CLOSED\nPART2=CLOSED\nPART3=CLOSED\nNO_KNOWN_P0_FRONTEND_DEFECT=PASS\nNO_KNOWN_P1_MISSION_DEFECT=PASS\nVISUAL_CORE_MATRIX=PASS count=35\nADAPTIVE_SCREENSHOTS=PASS count=%s\nTOTAL_PNG=PASS count=%s\nCRITICAL_BOUNDS=PASS\nMOTION_TEMPORAL_EVIDENCE=PASS clips=3 vfr_safe=1\nMOTION_FRAME_PACING_EMULATOR=PASS source=gfxinfo_summary screenrecord_free=1\nA11Y_ADAPTIVE=PASS\nOFFLINE_PROCESS_DEATH=PASS\nPERFORMANCE_EMULATOR=PASS\nPHYSICAL_DEVICE_PF=UNVERIFIED_EXTERNAL\nFRONTEND_ACCEPTANCE_CANDIDATE=PASS\n' "$ADAPTIVE_COUNT" "$TOTAL_PNG" | tee evidence/runtime/final-gate.txt
+printf 'PART1=CLOSED\nPART2=CLOSED\nPART3=CLOSED\nNO_KNOWN_P0_FRONTEND_DEFECT=PASS\nNO_KNOWN_P1_MISSION_DEFECT=PASS\nVISUAL_CORE_MATRIX=PASS count=35\nADAPTIVE_SCREENSHOTS=PASS count=%s\nTOTAL_PNG=PASS count=%s\nCRITICAL_BOUNDS=PASS\nMOTION_TEMPORAL_EVIDENCE=PASS clips=3 vfr_safe=1\nMOTION_FRAME_PACING_EMULATOR=PASS source=jankstats_ui_cpu screenrecord_free=1\nA11Y_ADAPTIVE=PASS\nOFFLINE_PROCESS_DEATH=PASS\nPERFORMANCE_EMULATOR=PASS\nPHYSICAL_DEVICE_PF=UNVERIFIED_EXTERNAL\nFRONTEND_ACCEPTANCE_CANDIDATE=PASS\n' "$ADAPTIVE_COUNT" "$TOTAL_PNG" | tee evidence/runtime/final-gate.txt
 mark 'PART3_FINAL_PROOF=PASS'
