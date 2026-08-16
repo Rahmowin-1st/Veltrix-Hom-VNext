@@ -9,7 +9,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
@@ -88,9 +88,12 @@ class RootResetRuntimeInstrumentedTest {
             compose.waitForIdle()
             awaitTag("root-sidebar")
 
-            compose.onNodeWithTag("drawer-secondary-SETTINGS")
-                .performScrollTo()
-                .performClick()
+            // Settings is the final LazyColumn item (index 18). Scroll the lazy container itself
+            // so the virtualized item is composed before resolving/clicking its semantics node.
+            compose.onNodeWithTag("root-sidebar-list").performScrollToIndex(18)
+            compose.waitForIdle()
+            awaitTag("drawer-secondary-SETTINGS")
+            compose.onNodeWithTag("drawer-secondary-SETTINGS").performClick()
             compose.mainClock.advanceTimeBy(1_000L)
             compose.waitForIdle()
             awaitTag("root-account-surface")
