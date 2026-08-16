@@ -97,7 +97,9 @@ class Part3ControlIntegrationInstrumentedTest {
         assertEquals(session.accountId, export.value?.accountId)
         assertEquals("Part3 Final $suffix", export.value?.displayName)
         assertEquals("Asia/Tashkent", export.value?.timezone)
-        assertTrue(export.value?.entityCounts?.containsKey("projects") == true)
+        // /v1/account/export is the accepted Part 3 schema-v3 export and its canonical table key is
+        // singular "project". Keep the frontend test aligned to that backend-owned contract.
+        assertTrue(export.value?.entityCounts?.containsKey("project") == true)
 
         // Account deletion is intentionally excluded here: ordinary integration evidence must not
         // destroy the session whose remaining assertions/provenance are still needed.
