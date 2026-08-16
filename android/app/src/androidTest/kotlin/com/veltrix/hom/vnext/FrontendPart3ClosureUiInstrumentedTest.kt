@@ -1,5 +1,6 @@
 package com.veltrix.hom.vnext
 
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -23,60 +24,58 @@ class FrontendPart3ClosureUiInstrumentedTest {
     }
 
     @Test
-    fun calculatorPresentsBackendResultWithoutInventingAuthority() {
+    fun calculatorAndTranslatePresentBackendResultsWithoutInventingAuthority() {
+        val surface = mutableIntStateOf(0)
         compose.setContent {
             VeltrixTheme {
-                CalculatorWorldScreen(
-                    RepositoryState(CalculatorResultUiModel("(18 + 6) / 3", "8", true), DataFreshness.FRESH),
-                    listOf(CalculatorResultUiModel("2 + 2", "4", true)),
-                    {},
-                )
+                if (surface.intValue == 0) {
+                    CalculatorWorldScreen(
+                        RepositoryState(CalculatorResultUiModel("(18 + 6) / 3", "8", true), DataFreshness.FRESH),
+                        listOf(CalculatorResultUiModel("2 + 2", "4", true)),
+                        {},
+                    )
+                } else {
+                    TranslateWorldScreen(
+                        RepositoryState(TranslationUiModel("Salom", "Hello", "uz", "en", "test-mock", false, "now"), DataFreshness.FRESH),
+                        null,
+                        { _, _, _, _ -> },
+                    )
+                }
             }
         }
         compose.onNodeWithTag("calculator-screen").assertIsDisplayed()
         compose.onNodeWithTag("calculator-result").assertIsDisplayed()
         compose.onNodeWithText("Deterministic backend result").assertIsDisplayed()
-    }
-
-    @Test
-    fun translatePresentsProviderTruthWithoutInventingAuthority() {
-        compose.setContent {
-            VeltrixTheme {
-                TranslateWorldScreen(
-                    RepositoryState(TranslationUiModel("Salom", "Hello", "uz", "en", "test-mock", false, "now"), DataFreshness.FRESH),
-                    null,
-                    { _, _, _, _ -> },
-                )
-            }
-        }
+        compose.runOnIdle { surface.intValue = 1 }
         compose.onNodeWithTag("translate-screen").assertIsDisplayed()
         compose.onNodeWithTag("translate-result").assertIsDisplayed()
         compose.onNodeWithText("Deterministic/test provider · test-mock").assertIsDisplayed()
     }
 
     @Test
-    fun notificationStateSeparatesBackendPreferenceFromAndroidPermission() {
+    fun notificationAndSettingsStatesRemainExplicit() {
+        val surface = mutableIntStateOf(0)
         val intents = listOf(NotificationIntentUiModel("n1", null, "LEARNING", "Review mechanics", null, "PENDING", "now"))
         val prefs = listOf(NotificationPreferenceUiModel("LEARNING", true, "{}", "Asia/Tashkent", 3, "now"))
-        compose.setContent { VeltrixTheme { NotificationsWorldScreen(RepositoryState(intents, DataFreshness.FRESH), RepositoryState(prefs, DataFreshness.FRESH), {}, { _, _ -> }) } }
-        compose.onNodeWithTag("notifications-screen").assertIsDisplayed()
-        compose.onNodeWithText("Review mechanics").assertIsDisplayed()
-        compose.onNodeWithText("Backend preference truth remains separate from Android permission state.").assertIsDisplayed()
-    }
-
-    @Test
-    fun settingsStatePreservesRevisionConflictTruth() {
         val profile = ProfileUiModel("account", "Alex", "alex", "en", "Asia/Tashkent", true, true, 9)
         compose.setContent {
             VeltrixTheme {
-                SettingsWorldScreen(
-                    RepositoryState(profile, DataFreshness.FRESH),
-                    RepositoryState(emptyList(), DataFreshness.FRESH),
-                    RepositoryState(null, DataFreshness.FRESH), null,
-                    {}, { _, _, _, _, _ -> }, { _, _, _ -> }, {}, {},
-                )
+                if (surface.intValue == 0) {
+                    NotificationsWorldScreen(RepositoryState(intents, DataFreshness.FRESH), RepositoryState(prefs, DataFreshness.FRESH), {}, { _, _ -> })
+                } else {
+                    SettingsWorldScreen(
+                        RepositoryState(profile, DataFreshness.FRESH),
+                        RepositoryState(emptyList(), DataFreshness.FRESH),
+                        RepositoryState(null, DataFreshness.FRESH), null,
+                        {}, { _, _, _, _, _ -> }, { _, _, _ -> }, {}, {},
+                    )
+                }
             }
         }
+        compose.onNodeWithTag("notifications-screen").assertIsDisplayed()
+        compose.onNodeWithText("Review mechanics").assertIsDisplayed()
+        compose.onNodeWithText("Backend preference truth remains separate from Android permission state.").assertIsDisplayed()
+        compose.runOnIdle { surface.intValue = 1 }
         compose.onNodeWithTag("settings-screen").assertIsDisplayed()
         compose.onNodeWithText("Account profile").assertIsDisplayed()
         compose.onNodeWithText("Revision 9 · conflicts are never overwritten silently.").assertIsDisplayed()
