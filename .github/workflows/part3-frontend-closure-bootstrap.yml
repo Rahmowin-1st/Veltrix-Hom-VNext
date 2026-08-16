@@ -1,0 +1,44 @@
+name: Part 3 Frontend Closure Bootstrap
+
+on:
+  push:
+    branches:
+      - veltrix-hom-frontend-part3-final
+
+permissions:
+  contents: write
+
+jobs:
+  apply-reviewed-closure:
+    if: ${{ !contains(github.event.head_commit.message, 'complete Part3 final closure') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout continuation branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact reviewed frontend closure patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .frontend-part3-bootstrap/chunk-*.b64 | base64 -d | gunzip > /tmp/part3-closure.patch
+          echo '8423418be9c07a306910c722d542d20d66c493638b3a0b76e7e9673e5f3431db  /tmp/part3-closure.patch' | sha256sum -c -
+          git apply --check /tmp/part3-closure.patch
+          git apply /tmp/part3-closure.patch
+          rm -rf .frontend-part3-bootstrap
+          rm -f .github/workflows/part3-frontend-closure-bootstrap.yml
+          bash -n .github/scripts/frontend-part3-final-proof.sh
+          git diff --check
+          git status --short
+
+      - name: Persist final frontend source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'VELTRIX FRONTEND MASTER'
+          git config user.email 'frontend-master@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat(frontend): complete Part3 final closure'
+          git push origin HEAD:${{ github.ref_name }}
