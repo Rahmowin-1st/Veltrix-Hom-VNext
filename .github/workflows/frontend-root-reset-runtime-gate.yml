@@ -48,12 +48,9 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
           --health-interval 5s --health-timeout 5s --health-retries 30
-
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
+        with: {fetch-depth: 0}
       - name: Exact runtime provenance and frontend-only boundary
         shell: bash
         run: |
@@ -64,74 +61,43 @@ jobs:
           git cat-file -e "$ROOT_RESET_BASE_SHA^{commit}"
           git merge-base --is-ancestor "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA"
           git merge-base --is-ancestor "$ROOT_RESET_BASE_SHA" "$GITHUB_SHA"
-          if git diff --name-only "$ROOT_RESET_BASE_SHA" "$GITHUB_SHA" | grep -E '^(server/|database/migrations/|core/src/main/)'; then
-            echo 'Backend-owned source changed during frontend root reset.' >&2
-            exit 1
-          fi
-          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\nrun=%s\n' \
-            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" "$GITHUB_RUN_ID" \
-            | tee evidence/runtime/provenance.txt
-
+          if git diff --name-only "$ROOT_RESET_BASE_SHA" "$GITHUB_SHA" | grep -E '^(server/|database/migrations/|core/src/main/)'; then echo 'Backend-owned source changed during frontend root reset.' >&2; exit 1; fi
+          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\nrun=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" "$GITHUB_RUN_ID" | tee evidence/runtime/provenance.txt
       - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
-
+        with: {distribution: temurin, java-version: '17'}
       - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.5.1'
-
+        with: {gradle-version: '9.5.1'}
       - name: Build exact target and instrumentation APKs
         shell: bash
         run: |
           set -euo pipefail
-          gradle --no-daemon \
-            -PVELTRIX_API_BASE_URL=http://127.0.0.1:8080 \
-            :android:app:assembleDebug \
-            :android:app:assembleDebugAndroidTest | tee evidence/runtime/android-build.txt
+          gradle --no-daemon -PVELTRIX_API_BASE_URL=http://127.0.0.1:8080 :android:app:assembleDebug :android:app:assembleDebugAndroidTest | tee evidence/runtime/android-build.txt
           grep -q 'BUILD SUCCESSFUL' evidence/runtime/android-build.txt
           test -s android/app/build/outputs/apk/debug/app-debug.apk
           test -s android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
           sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee evidence/runtime/apk-sha256.txt
           sha256sum android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk | tee evidence/runtime/androidtest-apk-sha256.txt
-
       - name: Start accepted backend runtime
         shell: bash
         run: |
           set -euo pipefail
           nohup gradle --no-daemon :server:run > evidence/runtime/server-runtime.log 2>&1 &
           ready=0
-          for i in $(seq 1 120); do
-            if curl -fsS --max-time 3 http://127.0.0.1:8080/ready > evidence/runtime/ready.json; then
-              ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "$ready" -ne 1 ]; then
-            echo 'BACKEND_RUNTIME=FAIL' | tee evidence/runtime/backend-runtime-gate.txt
-            tail -n 160 evidence/runtime/server-runtime.log || true
-            exit 1
-          fi
+          for i in $(seq 1 120); do if curl -fsS --max-time 3 http://127.0.0.1:8080/ready > evidence/runtime/ready.json; then ready=1; break; fi; sleep 2; done
+          if [ "$ready" -ne 1 ]; then echo 'BACKEND_RUNTIME=FAIL' | tee evidence/runtime/backend-runtime-gate.txt; tail -n 160 evidence/runtime/server-runtime.log || true; exit 1; fi
           grep -q '"ready":true' evidence/runtime/ready.json
           grep -q '"testAiConfigured":true' evidence/runtime/ready.json
           echo 'BACKEND_RUNTIME=PASS' | tee evidence/runtime/backend-runtime-gate.txt
-
       - uses: android-actions/setup-android@v3
-
       - name: Provision API36 runtime
         shell: bash
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'emulator' 'platforms;android-36' 'system-images;android-36;google_apis;x86_64'
-          if [ ! -e /dev/kvm ]; then
-            echo 'KVM unavailable: API36 runtime proof cannot be accepted.' | tee evidence/runtime/kvm.txt
-            exit 1
-          fi
+          if [ ! -e /dev/kvm ]; then echo 'KVM unavailable: API36 runtime proof cannot be accepted.' | tee evidence/runtime/kvm.txt; exit 1; fi
           sudo chmod 666 /dev/kvm
           ls -l /dev/kvm | tee evidence/runtime/kvm.txt
-
       - name: API36 account shell runtime acceptance
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -143,34 +109,16 @@ jobs:
           disable-animations: false
           emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
           script: bash scripts/root_reset_runtime_gate.sh
-
-      - name: Fail-closed Stage 30 and Stage 40 verification
+      - name: Fail-closed Stage 30 through Stage 50 verification
         shell: bash
         run: |
           set -euo pipefail
           grep -qx 'BACKEND_RUNTIME=PASS' evidence/runtime/backend-runtime-gate.txt
-          test -s evidence/runtime/stage30-gate.txt
-          for marker in \
-            ACCOUNT_FIRST=PASS \
-            NO_GUEST_MODE=PASS \
-            SERVER_VALIDATED_SESSION=PASS \
-            FOUR_PRIMARY_WORLDS=PASS \
-            BACK_TO_HOME=PASS \
-            SIGN_OUT_RETURNS_AUTH=PASS; do
-            grep -qx "$marker" evidence/runtime/stage30-gate.txt
-          done
-          test -s evidence/runtime/stage40-gate.txt
-          for marker in \
-            HOME_ONE_SCREEN_CORE=PASS \
-            HOME_FRESH_PROJECT_CONTEXT=PASS \
-            HOME_BRAIN_PULSE=PASS \
-            HOME_NEXT_MOVE_REAL_ROUTE=PASS \
-            HOME_BACK_CONTINUITY=PASS; do
-            grep -qx "$marker" evidence/runtime/stage40-gate.txt
-          done
-          grep -qx 'ROOT_RESET_RUNTIME=PASS tests=3 failures=0 errors=0 skipped=0' evidence/runtime/root-reset-test-summary.txt
-          echo 'ROOT_RESET_STAGE40_RUNTIME=PASS' | tee evidence/runtime/final.txt
-
+          for marker in ACCOUNT_FIRST=PASS NO_GUEST_MODE=PASS SERVER_VALIDATED_SESSION=PASS FOUR_PRIMARY_WORLDS=PASS BACK_TO_HOME=PASS SIGN_OUT_RETURNS_AUTH=PASS; do grep -qx "$marker" evidence/runtime/stage30-gate.txt; done
+          for marker in HOME_ONE_SCREEN_CORE=PASS HOME_FRESH_PROJECT_CONTEXT=PASS HOME_BRAIN_PULSE=PASS HOME_NEXT_MOVE_REAL_ROUTE=PASS HOME_BACK_CONTINUITY=PASS; do grep -qx "$marker" evidence/runtime/stage40-gate.txt; done
+          for marker in PERSONAL_IDENTITY_FIRST=PASS PERSISTENT_CHARACTER_IDENTITY=PASS PERSONAL_GROWTH_REAL_DATA=PASS MAP_BACKEND_GATING_PRESERVED=PASS MAP_PROGRESSION_WORLD_NOT_NODE_CHART=PASS PERSONAL_BACK_TO_HOME=PASS; do grep -qx "$marker" evidence/runtime/stage50-gate.txt; done
+          grep -qx 'ROOT_RESET_RUNTIME=PASS tests=4 failures=0 errors=0 skipped=0' evidence/runtime/root-reset-test-summary.txt
+          echo 'ROOT_RESET_STAGE50_RUNTIME=PASS' | tee evidence/runtime/final.txt
       - name: Upload root-reset runtime evidence
         if: always()
         uses: actions/upload-artifact@v4
