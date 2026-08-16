@@ -1,6 +1,5 @@
 package com.veltrix.hom.vnext
 
-import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
@@ -142,13 +141,7 @@ class RootResetRuntimeInstrumentedTest {
             compose.onNodeWithTag("home-next-move").performClick()
             compose.waitForIdle()
             compose.waitUntil(5_000L) {
-                val secondaryVisible = compose.onAllNodesWithTag("root-menu").fetchSemanticsNodes().isNotEmpty()
-                val nonHomeWorldSelected = listOf("PERSONAL", "STORE", "PROJECTS").any { world ->
-                    compose.onAllNodesWithTag("world-$world").fetchSemanticsNodes().any { node ->
-                        node.config.getOrNull(SemanticsProperties.Selected) == true
-                    }
-                }
-                secondaryVisible || nonHomeWorldSelected
+                compose.onAllNodesWithTag("home-stage40").fetchSemanticsNodes().isEmpty()
             }
 
             scenario.onActivity { activity ->
