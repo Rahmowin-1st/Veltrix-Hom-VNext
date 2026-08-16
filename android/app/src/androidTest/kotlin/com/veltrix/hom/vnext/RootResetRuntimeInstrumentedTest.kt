@@ -7,8 +7,8 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
@@ -46,7 +46,6 @@ class RootResetRuntimeInstrumentedTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             awaitTag("continue-google")
             compose.onNodeWithTag("continue-google").assertIsDisplayed()
-            // The selected Sign in mode has both a chip and the submit action; both must exist.
             compose.onAllNodesWithText("Sign in").assertCountEquals(2)
             compose.onAllNodesWithText("Create account").assertCountEquals(1)
             compose.onAllNodesWithTag("primary-worlds").assertCountEquals(0)
@@ -83,15 +82,18 @@ class RootResetRuntimeInstrumentedTest {
             compose.waitForIdle()
             compose.onNodeWithTag("world-HOME").assertIsSelected()
 
-            compose.onNodeWithText("≡").performClick()
+            compose.onNodeWithTag("root-menu").performClick()
             compose.mainClock.advanceTimeBy(1_000L)
             compose.waitForIdle()
             awaitTag("root-sidebar")
-            compose.onNodeWithText("Settings / Account").performClick()
-            // Drawer close is a real Compose animation. Advance the deterministic test clock before
-            // asking for the now-uncovered Settings semantics instead of wall-clock polling it.
+
+            compose.onNodeWithTag("drawer-secondary-SETTINGS")
+                .performScrollTo()
+                .performClick()
             compose.mainClock.advanceTimeBy(1_000L)
             compose.waitForIdle()
+            awaitTag("root-account-surface")
+            compose.onNodeWithTag("root-account-surface").assertIsDisplayed()
             awaitTag("sign-out")
             compose.onNodeWithTag("sign-out").performClick()
 
