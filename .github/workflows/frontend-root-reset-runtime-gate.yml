@@ -144,7 +144,7 @@ jobs:
           emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
           script: bash scripts/root_reset_runtime_gate.sh
 
-      - name: Fail-closed Stage 30 verification
+      - name: Fail-closed Stage 30 and Stage 40 verification
         shell: bash
         run: |
           set -euo pipefail
@@ -159,8 +159,17 @@ jobs:
             SIGN_OUT_RETURNS_AUTH=PASS; do
             grep -qx "$marker" evidence/runtime/stage30-gate.txt
           done
-          grep -qx 'ROOT_RESET_RUNTIME=PASS tests=2 failures=0 errors=0 skipped=0' evidence/runtime/root-reset-test-summary.txt
-          echo 'ROOT_RESET_STAGE30_RUNTIME=PASS' | tee evidence/runtime/final.txt
+          test -s evidence/runtime/stage40-gate.txt
+          for marker in \
+            HOME_ONE_SCREEN_CORE=PASS \
+            HOME_FRESH_PROJECT_CONTEXT=PASS \
+            HOME_BRAIN_PULSE=PASS \
+            HOME_NEXT_MOVE_REAL_ROUTE=PASS \
+            HOME_BACK_CONTINUITY=PASS; do
+            grep -qx "$marker" evidence/runtime/stage40-gate.txt
+          done
+          grep -qx 'ROOT_RESET_RUNTIME=PASS tests=3 failures=0 errors=0 skipped=0' evidence/runtime/root-reset-test-summary.txt
+          echo 'ROOT_RESET_STAGE40_RUNTIME=PASS' | tee evidence/runtime/final.txt
 
       - name: Upload root-reset runtime evidence
         if: always()
