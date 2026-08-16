@@ -34,8 +34,11 @@ jobs:
           git apply --check /tmp/part3-newfiles.patch
           git apply /tmp/part3-newfiles.patch
 
+          # GitHub Actions token cannot modify workflow files. The connector installs
+          # the final workflow after this source commit. Keep this bootstrap workflow
+          # unchanged so the push is accepted, and remove only the generated final one.
+          rm -f .github/workflows/frontend-part3-final-gate.yml
           rm -rf .frontend-part3-bootstrap
-          rm -f .github/workflows/part3-frontend-closure-bootstrap.yml
           bash -n .github/scripts/frontend-part3-final-proof.sh
           git diff --check
           git status --short
@@ -47,5 +50,5 @@ jobs:
           git config user.name 'VELTRIX FRONTEND MASTER'
           git config user.email 'frontend-master@users.noreply.github.com'
           git add -A
-          git commit -m 'feat(frontend): complete Part3 final closure'
+          git commit -m 'feat(frontend): complete Part3 final closure source'
           git push origin HEAD:${{ github.ref_name }}
