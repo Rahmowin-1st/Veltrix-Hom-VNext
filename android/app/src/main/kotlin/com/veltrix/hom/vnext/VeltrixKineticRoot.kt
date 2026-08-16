@@ -159,7 +159,7 @@ fun KineticGlass(
             .clip(shape)
             .background(if (strong) Color.White.copy(alpha = .80f) else Color.White.copy(alpha = .61f)),
     ) {
-        Canvas(Modifier.fillMaxSize()) {
+        Canvas(Modifier.matchParentSize()) {
             drawRoundRect(
                 brush = Brush.linearGradient(
                     listOf(Color.White.copy(alpha = .92f), KineticColor.Sky.copy(alpha = .07f), KineticColor.Mint.copy(alpha = .06f)),
