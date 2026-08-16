@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -45,8 +46,9 @@ class RootResetRuntimeInstrumentedTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             awaitTag("continue-google")
             compose.onNodeWithTag("continue-google").assertIsDisplayed()
-            compose.onNodeWithText("Sign in").assertIsDisplayed()
-            compose.onNodeWithText("Create account").assertIsDisplayed()
+            // The selected Sign in mode has both a chip and the submit action; both must exist.
+            compose.onAllNodesWithText("Sign in").assertCountEquals(2)
+            compose.onAllNodesWithText("Create account").assertCountEquals(1)
             compose.onAllNodesWithTag("primary-worlds").assertCountEquals(0)
         }
     }
@@ -82,8 +84,14 @@ class RootResetRuntimeInstrumentedTest {
             compose.onNodeWithTag("world-HOME").assertIsSelected()
 
             compose.onNodeWithText("≡").performClick()
+            compose.mainClock.advanceTimeBy(1_000L)
+            compose.waitForIdle()
             awaitTag("root-sidebar")
             compose.onNodeWithText("Settings / Account").performClick()
+            // Drawer close is a real Compose animation. Advance the deterministic test clock before
+            // asking for the now-uncovered Settings semantics instead of wall-clock polling it.
+            compose.mainClock.advanceTimeBy(1_000L)
+            compose.waitForIdle()
             awaitTag("sign-out")
             compose.onNodeWithTag("sign-out").performClick()
 
