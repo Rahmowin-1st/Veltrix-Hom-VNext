@@ -1,6 +1,6 @@
 package com.veltrix.hom.vnext
 
-import androidx.compose.ui.test.assertDoesNotExist
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -47,7 +47,7 @@ class RootResetRuntimeInstrumentedTest {
             compose.onNodeWithTag("continue-google").assertIsDisplayed()
             compose.onNodeWithText("Sign in").assertIsDisplayed()
             compose.onNodeWithText("Create account").assertIsDisplayed()
-            compose.onNodeWithTag("primary-worlds").assertDoesNotExist()
+            compose.onAllNodesWithTag("primary-worlds").assertCountEquals(0)
         }
     }
 
@@ -88,7 +88,7 @@ class RootResetRuntimeInstrumentedTest {
             compose.onNodeWithTag("sign-out").performClick()
 
             awaitTag("continue-google")
-            compose.onNodeWithTag("primary-worlds").assertDoesNotExist()
+            compose.onAllNodesWithTag("primary-worlds").assertCountEquals(0)
             compose.onNodeWithTag("continue-google").assertIsDisplayed()
         }
     }
