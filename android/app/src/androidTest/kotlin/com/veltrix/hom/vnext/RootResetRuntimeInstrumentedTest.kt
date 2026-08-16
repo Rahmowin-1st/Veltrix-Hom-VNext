@@ -1,10 +1,10 @@
 package com.veltrix.hom.vnext
 
-import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -75,7 +75,7 @@ class RootResetRuntimeInstrumentedTest {
             compose.waitForIdle()
             compose.onNodeWithTag("world-PERSONAL").assertIsSelected()
 
-            scenario.onActivity { activity: ComponentActivity ->
+            scenario.onActivity { activity ->
                 activity.onBackPressedDispatcher.onBackPressed()
             }
             compose.waitForIdle()
