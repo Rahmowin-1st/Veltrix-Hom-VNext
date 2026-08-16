@@ -1,0 +1,131 @@
+name: Veltrix Frontend Root Reset Gate
+
+on:
+  push:
+    branches: [veltrix-hom-final-root-reset]
+  workflow_dispatch:
+
+concurrency:
+  group: veltrix-frontend-root-reset-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  ACCEPTED_BACKEND_SHA: 4ed13cfcf7d4bb1fe6215b231426e0b4f208343a
+  PART2_BASELINE_SHA: b032bad2771b7abbee3ee1de8ff9f2d9491c0eb3
+  ROOT_RESET_BASE_SHA: e8bf2d2ae382c3fadbe66a66431db494156419e9
+  VELTRIX_ENV: test
+  VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_DATABASE_USER: postgres
+  VELTRIX_DATABASE_PASSWORD: postgres
+  VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_TEST_DATABASE_USER: postgres
+  VELTRIX_TEST_DATABASE_PASSWORD: postgres
+  VELTRIX_AI_PROVIDER: disabled
+  VELTRIX_TEST_AI_MOCK: 'true'
+  VELTRIX_EMBEDDING_PROVIDER: disabled
+  VELTRIX_TEST_EMBEDDING_MOCK: 'true'
+  VELTRIX_EMBEDDING_DIMENSIONS: '64'
+  VELTRIX_TEST_OCR_MOCK: 'true'
+  VELTRIX_TEST_TRANSLATE_MOCK: 'true'
+  VELTRIX_STORAGE_PROVIDER: local
+  VELTRIX_WORKERS_ENABLED: 'true'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Exact provenance and backend preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          for sha in "$ACCEPTED_BACKEND_SHA" "$PART2_BASELINE_SHA" "$ROOT_RESET_BASE_SHA"; do
+            git cat-file -e "$sha^{commit}"
+            git merge-base --is-ancestor "$sha" "$GITHUB_SHA"
+          done
+          if git diff --name-only "$ROOT_RESET_BASE_SHA" "$GITHUB_SHA" | grep -E '^(server/|database/migrations/|core/src/main/)'; then
+            echo 'Backend-owned source changed during frontend root reset.' >&2
+            exit 1
+          fi
+          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\nroot_reset_base=%s\nrun=%s\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" "$ROOT_RESET_BASE_SHA" "$GITHUB_RUN_ID" | tee evidence/provenance.txt
+          git diff --stat "$ROOT_RESET_BASE_SHA" "$GITHUB_SHA" | tee evidence/root-reset-diff-stat.txt
+          git diff --name-only "$ROOT_RESET_BASE_SHA" "$GITHUB_SHA" | tee evidence/root-reset-changed-files.txt
+
+      - name: Root-reset security and contract invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'androidx.credentials:credentials:1.6.0' android/app/build.gradle.kts
+          grep -q 'com.google.android.libraries.identity.googleid:googleid:1.2.0' android/app/build.gradle.kts
+          grep -q 'VELTRIX_GOOGLE_SERVER_CLIENT_ID' android/app/build.gradle.kts
+          grep -q 'VELTRIX_GOOGLE_AUTH_ENDPOINT' android/app/build.gradle.kts
+          grep -q 'GoogleBackendContractMissingException' android/app/src/main/kotlin/com/veltrix/hom/vnext/VeltrixApiClient.kt
+          grep -q 'clearCredentialState' android/app/src/main/kotlin/com/veltrix/hom/vnext/RootResetAuth.kt
+          grep -q 'setNonce' android/app/src/main/kotlin/com/veltrix/hom/vnext/RootResetAuth.kt
+          grep -q 'NET_CAPABILITY_VALIDATED' android/app/src/main/kotlin/com/veltrix/hom/vnext/RootResetGate.kt
+          if grep -RniE 'google.{0,40}(id.?token|credential|oauth)|id.?token.{0,40}google' server/src/main/kotlin > evidence/google-backend-search.txt; then
+            echo 'GOOGLE_BACKEND_EXCHANGE=REVIEW_REQUIRED' | tee evidence/google-backend-contract.txt
+          else
+            echo 'GOOGLE_BACKEND_EXCHANGE=MISSING_CROSS_CUTTING_CONTRACT' | tee evidence/google-backend-contract.txt
+          fi
+          echo 'GOOGLE_FRONTEND_LOCAL_TRUST=FORBIDDEN' | tee -a evidence/google-backend-contract.txt
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+
+      - name: Backend regressions and root-reset Android build
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :core:test :server:test | tee evidence/backend-regression.txt
+          bash scripts/run_local_regressions.sh | tee evidence/frozen-regressions.txt
+          gradle --no-daemon \
+            -PVELTRIX_API_BASE_URL=http://127.0.0.1:8080 \
+            :android:app:testDebugUnitTest \
+            :android:app:assembleDebug \
+            :android:app:assembleDebugAndroidTest | tee evidence/android-build.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/android-build.txt
+          grep -q 'LOCAL_REGRESSION_GATE=PASS total=105' evidence/frozen-regressions.txt
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          test -s android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee evidence/apk-sha256.txt
+          sha256sum android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk | tee evidence/androidtest-apk-sha256.txt
+          echo 'ROOT_RESET_FOUNDATION_BUILD=PASS' | tee evidence/foundation-gate.txt
+
+      - name: Upload root-reset evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-frontend-root-reset-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
