@@ -467,10 +467,19 @@ private fun Sidebar(onCapability: (String) -> Unit, onDestination: (PrimaryDesti
                     }
                 }
                 HorizontalDivider(Modifier.padding(vertical = 10.dp), color = Color(0x1F4A638A))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().height(52.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     listOf(PrimaryDestination.HOME, PrimaryDestination.PERSONAL).forEach { destination ->
-                        PressableGlass({ onDestination(destination) }, Modifier.weight(1f).heightIn(min = 48.dp), 18.dp) {
-                            Box(Modifier.fillMaxSize().padding(10.dp), contentAlignment = Alignment.Center) { Text(destination.labelP2(), color = VeltrixColors.Ink) }
+                        PressableGlass(
+                            onClick = { onDestination(destination) },
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            radius = 18.dp,
+                        ) {
+                            Box(Modifier.fillMaxSize().padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                                Text(destination.labelP2(), color = VeltrixColors.Ink)
+                            }
                         }
                     }
                 }
