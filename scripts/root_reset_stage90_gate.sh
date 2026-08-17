@@ -46,14 +46,33 @@ print('ROOT_STAGE90_TESTS=PASS tests=4 failures=0 errors=0 skipped=0')
 PY
 grep -qx 'ROOT_STAGE90_TESTS=PASS tests=4 failures=0 errors=0 skipped=0' "$OUT/test-summary.txt"
 
-# Android's shell uid cannot reliably traverse /sdcard/Android/data on current platform builds.
-# The debug target is debuggable, so read its own external-files directory through run-as and stream
-# one tar archive to the host. This preserves proof bytes without granting broad storage access.
+# Proof lives in the debuggable target app's internal files directory. Export only the fixed,
+# known proof filenames through the app uid. This avoids scoped-storage and tar dependencies.
 APP_ID='com.veltrix.hom.vnext.dev'
-REMOTE='/sdcard/Android/data/com.veltrix.hom.vnext.dev/files/stage90'
-adb shell run-as "$APP_ID" sh -c "test -d '$REMOTE' && test -s '$REMOTE/visual-a11y-report.txt' && test -s '$REMOTE/jankstats-root.txt'"
-adb exec-out run-as "$APP_ID" sh -c "cd '$REMOTE' && tar -cf - ." | tar -xf - -C "$OUT/screens"
-printf 'transport=RUN_AS_TAR\napp_id=%s\nremote=%s\n' "$APP_ID" "$REMOTE" | tee "$OUT/proof-pull.txt"
+REMOTE_REL='files/stage90'
+FILES=(
+  home.png
+  personal.png
+  store.png
+  projects.png
+  project-workspace.png
+  font200-home.png
+  font200-auth.png
+  reduced-motion-home.png
+  visual-a11y-report.txt
+  font200-report.txt
+  reduced-motion-report.txt
+  jankstats-root.txt
+)
+
+adb shell run-as "$APP_ID" test -d "$REMOTE_REL"
+for name in "${FILES[@]}"; do
+  adb shell run-as "$APP_ID" test -s "$REMOTE_REL/$name"
+  adb exec-out run-as "$APP_ID" cat "$REMOTE_REL/$name" > "$OUT/screens/$name"
+  test -s "$OUT/screens/$name"
+done
+printf 'transport=RUN_AS_CAT_INTERNAL_FILES\napp_id=%s\nremote=%s\nfiles=%s\n' \
+  "$APP_ID" "$REMOTE_REL" "${#FILES[@]}" | tee "$OUT/proof-pull.txt"
 
 for report in visual-a11y-report.txt font200-report.txt reduced-motion-report.txt jankstats-root.txt; do
   test -s "$OUT/screens/$report"
