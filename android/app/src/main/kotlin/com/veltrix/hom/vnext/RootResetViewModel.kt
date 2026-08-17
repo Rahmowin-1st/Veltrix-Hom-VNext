@@ -241,6 +241,10 @@ class RootResetViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             if (!results.allFresh) {
+                // Repository snapshots intentionally collapse auth and transport failures into
+                // freshness. Revalidate the trusted session before classifying the root failure so
+                // a token revoked while PRODUCT is open can never masquerade as a connection error.
+                if (!validateServerSession(local)) return@launch
                 clearWorldState()
                 val connected = network.currentValidated()
                 _gate.value = ProductGateState(
