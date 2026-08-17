@@ -46,11 +46,14 @@ printf 'runner=%s\n' "$RUNNER" | tee "$OUT/instrumentation-runner.txt"
 
 # Never allow one silent Android instrumentation hang to consume the whole CI job. Every Stage 90
 # criterion runs in its own instrumentation process with a hard timeout and a durable per-test log.
+# The PF invocation gets more wall-clock allowance because account materialization/activity startup
+# are setup only and excluded from the measured JankStats window. Acceptance stays >=24 samples and
+# <=25% jank inside RootStage90PerformanceInstrumentedTest.
 TESTS=(
   'visual|com.veltrix.hom.vnext.RootStage90InstrumentedTest#realRootVisualMatrixAndCriticalTouchTargetsAreValid|240'
   'font200|com.veltrix.hom.vnext.RootStage90InstrumentedTest#twoHundredPercentFontKeepsSignedInAndAccountFlowsReachable|180'
   'reduced-motion|com.veltrix.hom.vnext.RootStage90InstrumentedTest#reducedMotionSystemPathKeepsNavigationFunctional|180'
-  'performance|com.veltrix.hom.vnext.RootStage90PerformanceInstrumentedTest#warmedCurrentRootPrimaryNavigationHasNonPathologicalFrameClassification|240'
+  'performance|com.veltrix.hom.vnext.RootStage90PerformanceInstrumentedTest#warmedCurrentRootPrimaryNavigationHasNonPathologicalFrameClassification|360'
 )
 : > "$OUT/instrumentation.txt"
 PASS_COUNT=0
