@@ -1,0 +1,175 @@
+name: Veltrix Frontend Root Reset Stage 90 Gate
+
+on:
+  push:
+    branches: [veltrix-hom-final-root-reset]
+  workflow_dispatch:
+
+concurrency:
+  group: veltrix-frontend-root-reset-stage90-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  ACCEPTED_BACKEND_SHA: 4ed13cfcf7d4bb1fe6215b231426e0b4f208343a
+  ROOT_RESET_BASE_SHA: e8bf2d2ae382c3fadbe66a66431db494156419e9
+  VELTRIX_ENV: test
+  VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_DATABASE_USER: postgres
+  VELTRIX_DATABASE_PASSWORD: postgres
+  VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_TEST_DATABASE_USER: postgres
+  VELTRIX_TEST_DATABASE_PASSWORD: postgres
+  VELTRIX_AI_PROVIDER: disabled
+  VELTRIX_TEST_AI_MOCK: 'true'
+  VELTRIX_EMBEDDING_PROVIDER: disabled
+  VELTRIX_TEST_EMBEDDING_MOCK: 'true'
+  VELTRIX_EMBEDDING_DIMENSIONS: '64'
+  VELTRIX_TEST_OCR_MOCK: 'true'
+  VELTRIX_TEST_TRANSLATE_MOCK: 'true'
+  VELTRIX_STORAGE_PROVIDER: local
+  VELTRIX_WORKERS_ENABLED: 'true'
+
+jobs:
+  stage90:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+
+      - name: Exact provenance and frontend-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/stage90
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git cat-file -e "$ACCEPTED_BACKEND_SHA^{commit}"
+          git cat-file -e "$ROOT_RESET_BASE_SHA^{commit}"
+          git merge-base --is-ancestor "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA"
+          git merge-base --is-ancestor "$ROOT_RESET_BASE_SHA" "$GITHUB_SHA"
+          if git diff --name-only "$ROOT_RESET_BASE_SHA" "$GITHUB_SHA" | grep -E '^(server/|database/migrations/|core/src/main/)'; then
+            echo 'Backend-owned source changed during frontend root reset.' >&2
+            exit 1
+          fi
+          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\nrun=%s\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" "$GITHUB_RUN_ID" \
+            | tee evidence/stage90/provenance.txt
+
+      - name: Current-root proof source gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEST=android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/RootStage90InstrumentedTest.kt
+          test -s "$TEST"
+          grep -Fq 'ActivityScenario.launch(MainActivity::class.java)' "$TEST"
+          grep -Fq 'takeScreenshot()' "$TEST"
+          grep -Fq 'minDp: Float = 48f' "$TEST"
+          grep -Fq 'font_scale 2.0' "$TEST"
+          grep -Fq 'animator_duration_scale 0.0' "$TEST"
+          grep -Fq 'JankStats.createAndTrack' "$TEST"
+          if grep -q 'FrontendEvidenceActivity' "$TEST"; then
+            echo 'Stage 90 must prove MainActivity, not the legacy evidence activity.' >&2
+            exit 1
+          fi
+          echo 'CURRENT_ROOT_STAGE90_SOURCE=PASS' | tee evidence/stage90/source-gate.txt
+
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.5.1'}
+
+      - name: Backend regression and exact Android builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :server:test :android:app:assembleDebug :android:app:assembleDebugAndroidTest :android:app:assembleRelease | tee evidence/stage90/build.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/stage90/build.txt
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          test -s android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          RELEASE_APK="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$RELEASE_APK" && test -s "$RELEASE_APK"
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee evidence/stage90/debug-apk-sha256.txt
+          sha256sum android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk | tee evidence/stage90/androidtest-apk-sha256.txt
+          sha256sum "$RELEASE_APK" | tee evidence/stage90/release-apk-sha256.txt
+          printf 'release_apk=%s\n' "$RELEASE_APK" | tee evidence/stage90/release-apk-path.txt
+
+      - name: Start accepted backend runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup gradle --no-daemon :server:run > evidence/stage90/server-runtime.log 2>&1 &
+          ready=0
+          for i in $(seq 1 120); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8080/ready > evidence/stage90/ready.json; then ready=1; break; fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then tail -n 160 evidence/stage90/server-runtime.log || true; exit 1; fi
+          grep -q '"ready":true' evidence/stage90/ready.json
+          grep -q '"testAiConfigured":true' evidence/stage90/ready.json
+          echo 'BACKEND_RUNTIME=PASS' | tee evidence/stage90/backend-runtime-gate.txt
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Provision API36 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'emulator' 'platforms;android-36' 'system-images;android-36;google_apis;x86_64'
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+          ls -l /dev/kvm | tee evidence/stage90/kvm.txt
+
+      - name: API36 current-root visual accessibility and PF proof
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          cores: 4
+          disable-animations: false
+          emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
+          script: bash scripts/root_reset_stage90_gate.sh
+
+      - name: Fail-closed Stage 90 verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx 'CURRENT_ROOT_STAGE90_SOURCE=PASS' evidence/stage90/source-gate.txt
+          grep -qx 'BACKEND_RUNTIME=PASS' evidence/stage90/backend-runtime-gate.txt
+          grep -qx 'ROOT_STAGE90_TESTS=PASS tests=4 failures=0 errors=0 skipped=0' evidence/stage90/test-summary.txt
+          for marker in CURRENT_ROOT_VISUAL_PROOF=PASS CORE_SCREEN_MATRIX=PASS CRITICAL_TOUCH_TARGETS=PASS FONT_SCALE_200=PASS REDUCED_MOTION_PATH=PASS API36_JANKSTATS_SANITY=PASS; do
+            grep -qx "$marker" evidence/stage90/stage90-gate.txt
+          done
+          grep -qx 'RELEASE_PROFILEABLE_PF=NOT_VERIFIED' evidence/stage90/stage90-gate.txt
+          grep -qx 'PHYSICAL_DEVICE_PF=NOT_VERIFIED' evidence/stage90/stage90-gate.txt
+          grep -qx 'PNG_DIMENSIONS=PASS count=8' evidence/stage90/png-dimensions.txt
+          test "$(wc -l < evidence/stage90/screenshot-sha256.txt | tr -d ' ')" = '8'
+          echo 'ROOT_RESET_STAGE90=PASS' | tee evidence/stage90/final.txt
+
+      - name: Upload Stage 90 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-frontend-root-reset-stage90-${{ github.run_id }}
+          path: evidence/stage90/
+          if-no-files-found: error
+          retention-days: 30
