@@ -1,7 +1,6 @@
 package com.veltrix.hom.vnext
 
 import android.graphics.Rect
-import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.metrics.performance.FrameDataApi31
@@ -36,18 +35,29 @@ class RootStage90PerformanceInstrumentedTest {
     fun warmedCurrentRootPrimaryNavigationHasNonPathologicalFrameClassification() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val target = instrumentation.targetContext
+        val out = File(target.filesDir, "stage90").apply { mkdirs() }
+        val phaseFile = File(out, "performance-phases.txt").apply { writeText("") }
+        fun phase(value: String) {
+            phaseFile.appendText("${SystemClock.uptimeMillis()} $value\n")
+        }
+
+        phase("start")
         val apiSession = VeltrixApiClient().register(
             "stage90-realpf-${System.currentTimeMillis()}",
             "Veltrix!Runtime2026",
             "Stage 90 Real PF",
         )
+        phase("account_registered")
         runBlocking { SessionStore(target).save(LocalSession(apiSession.accountId, apiSession.token)) }
+        phase("session_saved")
 
         val samples = Collections.synchronizedList(ArrayList<FrameSample>(256))
         var tracker: JankStats? = null
 
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            phase("activity_launched")
             val navBounds = waitForPrimaryWorldsBounds(instrumentation, 30_000L)
+            phase("primary_worlds_found_${navBounds.width()}x${navBounds.height()}")
             val navY = navBounds.centerY()
             val navX = IntArray(4) { index ->
                 navBounds.left + ((index * 2 + 1) * navBounds.width()) / 8
@@ -65,15 +75,20 @@ class RootStage90PerformanceInstrumentedTest {
                     )
                 }.also { it.isTrackingEnabled = false }
             }
+            phase("tracker_created")
 
             fun shellTap(x: Int, y: Int) {
-                val pfd = instrumentation.uiAutomation.executeShellCommand("input tap $x $y")
-                ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.readBytes() }
+                // `input tap` is a fire-and-settle input source. Reading this shell pipe to EOF can
+                // block indefinitely on some emulator/adb combinations even though the tap was
+                // already delivered. Closing the descriptor immediately avoids contaminating the PF
+                // measurement with an unbounded transport wait; the bounded settle below owns timing.
+                instrumentation.uiAutomation.executeShellCommand("input tap $x $y").close()
             }
 
-            fun navigationCycle(settleMs: Long) {
+            fun navigationCycle(settleMs: Long, label: String) {
                 // Personal -> Store -> Projects -> Home on the persistent production shell.
                 for (index in intArrayOf(1, 2, 3, 0)) {
+                    phase("${label}_tap_$index")
                     shellTap(navX[index], navY)
                     SystemClock.sleep(settleMs)
                 }
@@ -82,16 +97,21 @@ class RootStage90PerformanceInstrumentedTest {
             // Exclude cold composition, class loading and first network materialization from the
             // steady-state interaction sample; every destination is exercised once before capture.
             SystemClock.sleep(1_500L)
-            navigationCycle(420L)
+            phase("warmup_start")
+            navigationCycle(420L, "warmup")
             instrumentation.waitForIdleSync()
             SystemClock.sleep(350L)
             synchronized(samples) { samples.clear() }
+            phase("warmup_complete")
 
             scenario.onActivity { requireNotNull(tracker).isTrackingEnabled = true }
-            repeat(3) { navigationCycle(420L) }
+            phase("tracking_enabled")
+            repeat(3) { cycle -> navigationCycle(420L, "measure_$cycle") }
             SystemClock.sleep(450L)
             scenario.onActivity { requireNotNull(tracker).isTrackingEnabled = false }
+            phase("tracking_disabled")
         }
+        phase("activity_closed")
 
         val snapshot = synchronized(samples) { samples.toList() }
         val jankCount = snapshot.count { it.jank }
@@ -122,8 +142,8 @@ class RootStage90PerformanceInstrumentedTest {
             appendLine("RELEASE_PROFILEABLE_PF=NOT_VERIFIED")
             appendLine("PHYSICAL_DEVICE_PF=NOT_VERIFIED")
         }
-        val out = File(target.filesDir, "stage90").apply { mkdirs() }
         File(out, "jankstats-root.txt").writeText(report)
+        phase("report_written")
         assertTrue(report, pass)
     }
 
