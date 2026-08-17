@@ -10,45 +10,59 @@ adb reverse tcp:8080 tcp:8080
 adb reverse --list | tee "$OUT/adb-reverse.txt"
 grep -q 'tcp:8080 tcp:8080' "$OUT/adb-reverse.txt"
 
+# The workflow has already built these exact APKs from the current checkout. Run instrumentation
+# manually so Android Test Orchestrator/Gradle cleanup cannot uninstall the target before we export
+# the proof files written into its internal files directory.
+DEBUG_APK='android/app/build/outputs/apk/debug/app-debug.apk'
+TEST_APK='android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk'
+test -s "$DEBUG_APK"
+test -s "$TEST_APK"
+
+AAPT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/build-tools/37.0.0/aapt"
+if [ ! -x "$AAPT" ]; then
+  AAPT="$(find "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}/build-tools" -type f -name aapt -perm -111 | sort -V | tail -n 1)"
+fi
+test -x "$AAPT"
+
+APP_ID="$($AAPT dump badging "$DEBUG_APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
+TEST_APP_ID="$($AAPT dump badging "$TEST_APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
+test "$APP_ID" = 'com.veltrix.hom.vnext.dev'
+test -n "$TEST_APP_ID"
+printf 'app_id=%s\ntest_app_id=%s\n' "$APP_ID" "$TEST_APP_ID" | tee "$OUT/apk-package-ids.txt"
+sha256sum "$DEBUG_APK" | tee "$OUT/runtime-debug-apk-sha256.txt"
+sha256sum "$TEST_APK" | tee "$OUT/runtime-androidtest-apk-sha256.txt"
+
+adb uninstall "$TEST_APP_ID" >/dev/null 2>&1 || true
+adb uninstall "$APP_ID" >/dev/null 2>&1 || true
+adb install -r -t "$DEBUG_APK" | tee "$OUT/install-target.txt"
+adb install -r -t "$TEST_APK" | tee "$OUT/install-test.txt"
+grep -q '^Success$' "$OUT/install-target.txt"
+grep -q '^Success$' "$OUT/install-test.txt"
+
+adb shell pm list instrumentation | tr -d '\r' | tee "$OUT/instrumentations.txt"
+RUNNER="$(sed -n "s#^instrumentation:\(${TEST_APP_ID}/[^ ]*\) (target=${APP_ID})$#\1#p" "$OUT/instrumentations.txt" | head -n 1)"
+test -n "$RUNNER"
+printf 'runner=%s\n' "$RUNNER" | tee "$OUT/instrumentation-runner.txt"
+
 STAGE90_CLASSES='com.veltrix.hom.vnext.RootStage90InstrumentedTest,com.veltrix.hom.vnext.RootStage90PerformanceInstrumentedTest'
-gradle --no-daemon \
-  -PVELTRIX_API_BASE_URL=http://127.0.0.1:8080 \
-  -Pandroid.testInstrumentationRunnerArguments.class="$STAGE90_CLASSES" \
-  :android:app:connectedDebugAndroidTest > "$OUT/instrumentation.txt" 2>&1 || {
-    cat "$OUT/instrumentation.txt"
-    exit 1
-  }
-cat "$OUT/instrumentation.txt"
-grep -q 'BUILD SUCCESSFUL' "$OUT/instrumentation.txt"
+set +e
+adb shell am instrument -w -r -e class "$STAGE90_CLASSES" "$RUNNER" | tr -d '\r' | tee "$OUT/instrumentation.txt"
+INSTRUMENT_EXIT=${PIPESTATUS[0]}
+set -e
+test "$INSTRUMENT_EXIT" -eq 0
+PASS_COUNT="$(grep -c '^INSTRUMENTATION_STATUS_CODE: 0$' "$OUT/instrumentation.txt" || true)"
+NEGATIVE_COUNT="$(grep -cE '^INSTRUMENTATION_STATUS_CODE: -[0-9]+$' "$OUT/instrumentation.txt" || true)"
+test "$PASS_COUNT" = '4'
+test "$NEGATIVE_COUNT" = '0'
+grep -q '^INSTRUMENTATION_CODE: -1$' "$OUT/instrumentation.txt"
+if grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' "$OUT/instrumentation.txt"; then
+  cat "$OUT/instrumentation.txt"
+  exit 1
+fi
+printf 'ROOT_STAGE90_TESTS=PASS tests=4 failures=0 errors=0 skipped=0\n' | tee "$OUT/test-summary.txt"
 
-python3 - <<'PY' | tee "$OUT/test-summary.txt"
-import glob, xml.etree.ElementTree as ET
-files=glob.glob('android/app/build/outputs/androidTest-results/connected/**/*.xml', recursive=True)
-tests=failures=errors=skipped=0
-matched=[]
-classes={'RootStage90InstrumentedTest','RootStage90PerformanceInstrumentedTest'}
-for path in files:
-    try: root=ET.parse(path).getroot()
-    except ET.ParseError: continue
-    cases=[]
-    for c in root.iter('testcase'):
-        classname=c.attrib.get('classname','')
-        if any(name in classname for name in classes): cases.append(c)
-    if not cases: continue
-    matched.append(path)
-    tests += len(cases)
-    failures += sum(1 for c in cases if c.find('failure') is not None)
-    errors += sum(1 for c in cases if c.find('error') is not None)
-    skipped += sum(1 for c in cases if c.find('skipped') is not None)
-if tests != 4 or failures or errors or skipped:
-    raise SystemExit(f'ROOT_STAGE90_TESTS=FAIL tests={tests} failures={failures} errors={errors} skipped={skipped} files={matched}')
-print('ROOT_STAGE90_TESTS=PASS tests=4 failures=0 errors=0 skipped=0')
-PY
-grep -qx 'ROOT_STAGE90_TESTS=PASS tests=4 failures=0 errors=0 skipped=0' "$OUT/test-summary.txt"
-
-# Proof lives in the debuggable target app's internal files directory. Export only the fixed,
-# known proof filenames through the app uid. This avoids scoped-storage and tar dependencies.
-APP_ID='com.veltrix.hom.vnext.dev'
+# Proof lives in the still-installed debuggable target app's internal files directory. Export only
+# the fixed known proof filenames through the target app uid; no broad private-data export occurs.
 REMOTE_REL='files/stage90'
 FILES=(
   home.png
@@ -71,7 +85,7 @@ for name in "${FILES[@]}"; do
   adb exec-out run-as "$APP_ID" cat "$REMOTE_REL/$name" > "$OUT/screens/$name"
   test -s "$OUT/screens/$name"
 done
-printf 'transport=RUN_AS_CAT_INTERNAL_FILES\napp_id=%s\nremote=%s\nfiles=%s\n' \
+printf 'transport=MANUAL_INSTRUMENTATION_RUN_AS_CAT_INTERNAL_FILES\napp_id=%s\nremote=%s\nfiles=%s\n' \
   "$APP_ID" "$REMOTE_REL" "${#FILES[@]}" | tee "$OUT/proof-pull.txt"
 
 for report in visual-a11y-report.txt font200-report.txt reduced-motion-report.txt jankstats-root.txt; do
