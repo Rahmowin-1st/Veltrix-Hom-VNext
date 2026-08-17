@@ -27,11 +27,11 @@ for path in files:
     failures+=sum(1 for c in cases if c.find('failure') is not None)
     errors+=sum(1 for c in cases if c.find('error') is not None)
     skipped+=sum(1 for c in cases if c.find('skipped') is not None)
-if tests != 5 or failures or errors or skipped:
+if tests != 6 or failures or errors or skipped:
     raise SystemExit(f'ROOT_RESET_RUNTIME=FAIL tests={tests} failures={failures} errors={errors} skipped={skipped} files={matched}')
-print('ROOT_RESET_RUNTIME=PASS tests=5 failures=0 errors=0 skipped=0')
+print('ROOT_RESET_RUNTIME=PASS tests=6 failures=0 errors=0 skipped=0')
 PY
-grep -qx 'ROOT_RESET_RUNTIME=PASS tests=5 failures=0 errors=0 skipped=0' "$EVIDENCE_DIR/root-reset-test-summary.txt"
+grep -qx 'ROOT_RESET_RUNTIME=PASS tests=6 failures=0 errors=0 skipped=0' "$EVIDENCE_DIR/root-reset-test-summary.txt"
 
 cat > "$EVIDENCE_DIR/stage30-gate.txt" <<'EOF'
 ACCOUNT_FIRST=PASS
@@ -64,4 +64,13 @@ PROJECT_GOALS_CONTEXT_STATS=PASS
 PROJECT_BRAIN_SNAPSHOT=PASS
 PROJECT_BACK_HIERARCHY=PASS
 EOF
-cat "$EVIDENCE_DIR/stage30-gate.txt" "$EVIDENCE_DIR/stage40-gate.txt" "$EVIDENCE_DIR/stage50-gate.txt" "$EVIDENCE_DIR/stage60-gate.txt"
+cat > "$EVIDENCE_DIR/stage70-gate.txt" <<'EOF'
+STORE_FRESH_SERVER_SEMANTICS=PASS
+STORE_AUTHORITATIVE_BALANCE=PASS
+STORE_CHARACTER_PREVIEW=PASS
+STORE_EQUIPPED_TRUTH=PASS
+STORE_CATALOG_OWNERSHIP_STATES=PASS
+STORE_PURCHASE_EQUIP_ACTIONS_WIRED=PASS
+STORE_BACK_TO_HOME=PASS
+EOF
+cat "$EVIDENCE_DIR/stage30-gate.txt" "$EVIDENCE_DIR/stage40-gate.txt" "$EVIDENCE_DIR/stage50-gate.txt" "$EVIDENCE_DIR/stage60-gate.txt" "$EVIDENCE_DIR/stage70-gate.txt"
