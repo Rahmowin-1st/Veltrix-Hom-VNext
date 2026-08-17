@@ -79,25 +79,45 @@ class RootResetRuntimeInstrumentedTest {
         val stamp = System.currentTimeMillis()
         val apiSession = VeltrixApiClient().register("personal50-runtime-$stamp", "Veltrix!Runtime2026", "Personal Runtime")
         val expectedAvatar = runBlocking {
-            val profile = Part2FeatureRepository(targetContext).gameProfile(apiSession, true).value
-                ?: error("Fresh game profile required")
+            val profile = Part2FeatureRepository(targetContext).gameProfile(apiSession, true).value ?: error("Fresh game profile required")
             SessionStore(targetContext).save(LocalSession(apiSession.accountId, apiSession.token))
             profile.avatarId
         }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            awaitTag("home-stage40", 30_000L)
-            awaitTag("veltrix-character-$expectedAvatar", 30_000L)
-            compose.onNodeWithTag("veltrix-character-$expectedAvatar").assertIsDisplayed()
+            awaitTag("home-stage40", 30_000L); awaitTag("veltrix-character-$expectedAvatar", 30_000L)
             compose.onNodeWithTag("world-PERSONAL").performClick(); compose.waitForIdle()
             awaitTag("personal-stage50", 30_000L); awaitTag("personal-character", 30_000L); awaitTag("personal-map-world", 30_000L)
-            compose.onNodeWithTag("personal-stage50").assertIsDisplayed(); compose.onNodeWithTag("personal-character").assertIsDisplayed(); compose.onNodeWithTag("personal-map-world").assertIsDisplayed()
-            awaitTag("veltrix-character-$expectedAvatar", 30_000L); compose.onNodeWithTag("veltrix-character-$expectedAvatar").assertIsDisplayed()
-            compose.waitUntil(10_000L) {
-                compose.onAllNodesWithTag("map-locked-gate").fetchSemanticsNodes().isNotEmpty() ||
-                    compose.onAllNodesWithTag("map-active-world").fetchSemanticsNodes().isNotEmpty()
-            }
+            compose.onNodeWithTag("personal-character").assertIsDisplayed(); awaitTag("veltrix-character-$expectedAvatar", 30_000L)
+            compose.waitUntil(10_000L) { compose.onAllNodesWithTag("map-locked-gate").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("map-active-world").fetchSemanticsNodes().isNotEmpty() }
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }; compose.waitForIdle(); awaitTag("home-stage40")
             compose.onNodeWithTag("world-HOME").assertIsSelected(); awaitTag("veltrix-character-$expectedAvatar")
+        }
+    }
+
+    @Test
+    fun projectsStage60OpensFreshWorkspaceAndBackPreservesProjectHierarchy() {
+        val stamp = System.currentTimeMillis()
+        val apiSession = VeltrixApiClient().register("projects60-runtime-$stamp", "Veltrix!Runtime2026", "Projects Runtime")
+        val title = "Operating World $stamp"
+        val created = runBlocking {
+            val project = Part2FeatureRepository(targetContext).createProject(apiSession, title, "Keep one verified goal context isolated.")
+            SessionStore(targetContext).save(LocalSession(apiSession.accountId, apiSession.token))
+            project
+        }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            awaitTag("home-stage40", 30_000L)
+            compose.onNodeWithTag("world-PROJECTS").performClick(); compose.waitForIdle()
+            awaitTag("projects-stage60", 30_000L); awaitTag("project-card-${created.id}", 30_000L)
+            compose.onNodeWithTag("project-card-${created.id}").assertIsDisplayed().performClick()
+            awaitTag("project-workspace", 30_000L); awaitText(title, 30_000L, true); awaitTag("project-workspace-stats", 30_000L); awaitTag("project-brain", 30_000L)
+            compose.onNodeWithTag("project-workspace").assertIsDisplayed(); compose.onNodeWithTag("project-workspace-title").assertIsDisplayed()
+
+            scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            compose.waitForIdle(); awaitTag("projects-stage60", 10_000L); compose.onNodeWithTag("world-PROJECTS").assertIsSelected()
+            compose.onAllNodesWithTag("project-workspace").assertCountEquals(0)
+
+            scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            compose.waitForIdle(); awaitTag("home-stage40", 10_000L); compose.onNodeWithTag("world-HOME").assertIsSelected()
         }
     }
 
