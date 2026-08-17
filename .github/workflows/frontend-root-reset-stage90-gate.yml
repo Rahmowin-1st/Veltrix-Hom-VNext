@@ -75,15 +75,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TEST=android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/RootStage90InstrumentedTest.kt
-          test -s "$TEST"
-          grep -Fq 'ActivityScenario.launch(MainActivity::class.java)' "$TEST"
-          grep -Fq 'takeScreenshot()' "$TEST"
-          grep -Fq 'minDp: Float = 48f' "$TEST"
-          grep -Fq 'font_scale 2.0' "$TEST"
-          grep -Fq 'animator_duration_scale 0.0' "$TEST"
-          grep -Fq 'JankStats.createAndTrack' "$TEST"
-          if grep -q 'FrontendEvidenceActivity' "$TEST"; then
+          VISUAL=android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/RootStage90InstrumentedTest.kt
+          PF=android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/RootStage90PerformanceInstrumentedTest.kt
+          test -s "$VISUAL" && test -s "$PF"
+          grep -Fq 'ActivityScenario.launch(MainActivity::class.java)' "$VISUAL"
+          grep -Fq 'takeScreenshot()' "$VISUAL"
+          grep -Fq 'minDp: Float = 48f' "$VISUAL"
+          grep -Fq 'font_scale 2.0' "$VISUAL"
+          grep -Fq 'animator_duration_scale 0.0' "$VISUAL"
+          grep -Fq 'ActivityScenario.launch(MainActivity::class.java)' "$PF"
+          grep -Fq 'JankStats.createAndTrack' "$PF"
+          grep -Fq 'input tap' "$PF"
+          grep -Fq 'RAW_SHELL_INPUT_REAL_CHOREOGRAPHER' "$PF"
+          if grep -q 'androidx.compose.ui.test' "$PF"; then
+            echo 'Stage 90 PF must not use a Compose test clock.' >&2
+            exit 1
+          fi
+          if grep -q 'FrontendEvidenceActivity' "$VISUAL" "$PF"; then
             echo 'Stage 90 must prove MainActivity, not the legacy evidence activity.' >&2
             exit 1
           fi
