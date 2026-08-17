@@ -48,9 +48,11 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
           --health-interval 5s --health-timeout 5s --health-retries 30
+
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
+
       - name: Exact runtime provenance and frontend-only boundary
         shell: bash
         run: |
@@ -61,12 +63,38 @@ jobs:
           git cat-file -e "$ROOT_RESET_BASE_SHA^{commit}"
           git merge-base --is-ancestor "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA"
           git merge-base --is-ancestor "$ROOT_RESET_BASE_SHA" "$GITHUB_SHA"
-          if git diff --name-only "$ROOT_RESET_BASE_SHA" "$GITHUB_SHA" | grep -E '^(server/|database/migrations/|core/src/main/)'; then echo 'Backend-owned source changed during frontend root reset.' >&2; exit 1; fi
-          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\nrun=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" "$GITHUB_RUN_ID" | tee evidence/runtime/provenance.txt
+          if git diff --name-only "$ROOT_RESET_BASE_SHA" "$GITHUB_SHA" | grep -E '^(server/|database/migrations/|core/src/main/)'; then
+            echo 'Backend-owned source changed during frontend root reset.' >&2
+            exit 1
+          fi
+          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\nrun=%s\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" "$GITHUB_RUN_ID" \
+            | tee evidence/runtime/provenance.txt
+
+      - name: Stage 70 no-placeholder source gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT_SRC=android/app/src/main/kotlin/com/veltrix/hom/vnext
+          if grep -R -E 'RootCapabilityBridge|is retained and is being moved into the new Veltrix shell' "$ROOT_SRC"; then
+            echo 'Stage 70 capability placeholder remains.' >&2
+            exit 1
+          fi
+          for symbol in \
+            ChatWorldScreen LibraryWorldScreen AssessmentWorldScreen PracticeWorldScreen \
+            FlashcardsWorldScreen MistakesWorldScreen CalculatorWorldScreen TranslateWorldScreen \
+            NotificationsWorldScreen SettingsWorldScreen; do
+            grep -q "$symbol" "$ROOT_SRC/RootSecondaryStage70.kt"
+          done
+          grep -q 'RootStoreWorldStage70' "$ROOT_SRC/RootResetShell.kt"
+          echo 'STAGE70_NO_PLACEHOLDERS=PASS' | tee evidence/runtime/stage70-source-gate.txt
+
       - uses: actions/setup-java@v5
         with: {distribution: temurin, java-version: '17'}
+
       - uses: gradle/actions/setup-gradle@v4
         with: {gradle-version: '9.5.1'}
+
       - name: Build exact target and instrumentation APKs
         shell: bash
         run: |
@@ -77,27 +105,41 @@ jobs:
           test -s android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
           sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee evidence/runtime/apk-sha256.txt
           sha256sum android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk | tee evidence/runtime/androidtest-apk-sha256.txt
+
       - name: Start accepted backend runtime
         shell: bash
         run: |
           set -euo pipefail
           nohup gradle --no-daemon :server:run > evidence/runtime/server-runtime.log 2>&1 &
           ready=0
-          for i in $(seq 1 120); do if curl -fsS --max-time 3 http://127.0.0.1:8080/ready > evidence/runtime/ready.json; then ready=1; break; fi; sleep 2; done
-          if [ "$ready" -ne 1 ]; then echo 'BACKEND_RUNTIME=FAIL' | tee evidence/runtime/backend-runtime-gate.txt; tail -n 160 evidence/runtime/server-runtime.log || true; exit 1; fi
+          for i in $(seq 1 120); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8080/ready > evidence/runtime/ready.json; then ready=1; break; fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo 'BACKEND_RUNTIME=FAIL' | tee evidence/runtime/backend-runtime-gate.txt
+            tail -n 160 evidence/runtime/server-runtime.log || true
+            exit 1
+          fi
           grep -q '"ready":true' evidence/runtime/ready.json
           grep -q '"testAiConfigured":true' evidence/runtime/ready.json
           echo 'BACKEND_RUNTIME=PASS' | tee evidence/runtime/backend-runtime-gate.txt
+
       - uses: android-actions/setup-android@v3
+
       - name: Provision API36 runtime
         shell: bash
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'emulator' 'platforms;android-36' 'system-images;android-36;google_apis;x86_64'
-          if [ ! -e /dev/kvm ]; then echo 'KVM unavailable: API36 runtime proof cannot be accepted.' | tee evidence/runtime/kvm.txt; exit 1; fi
+          if [ ! -e /dev/kvm ]; then
+            echo 'KVM unavailable: API36 runtime proof cannot be accepted.' | tee evidence/runtime/kvm.txt
+            exit 1
+          fi
           sudo chmod 666 /dev/kvm
           ls -l /dev/kvm | tee evidence/runtime/kvm.txt
+
       - name: API36 account shell runtime acceptance
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -109,18 +151,29 @@ jobs:
           disable-animations: false
           emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
           script: bash scripts/root_reset_runtime_gate.sh
-      - name: Fail-closed Stage 30 through Stage 70 verification
+
+      - name: Fail-closed Stage 30 through complete Stage 70 verification
         shell: bash
         run: |
           set -euo pipefail
           grep -qx 'BACKEND_RUNTIME=PASS' evidence/runtime/backend-runtime-gate.txt
+          grep -qx 'STAGE70_NO_PLACEHOLDERS=PASS' evidence/runtime/stage70-source-gate.txt
           for marker in ACCOUNT_FIRST=PASS NO_GUEST_MODE=PASS SERVER_VALIDATED_SESSION=PASS FOUR_PRIMARY_WORLDS=PASS BACK_TO_HOME=PASS SIGN_OUT_RETURNS_AUTH=PASS; do grep -qx "$marker" evidence/runtime/stage30-gate.txt; done
           for marker in HOME_ONE_SCREEN_CORE=PASS HOME_FRESH_PROJECT_CONTEXT=PASS HOME_BRAIN_PULSE=PASS HOME_NEXT_MOVE_REAL_ROUTE=PASS HOME_BACK_CONTINUITY=PASS; do grep -qx "$marker" evidence/runtime/stage40-gate.txt; done
           for marker in PERSONAL_IDENTITY_FIRST=PASS PERSISTENT_CHARACTER_IDENTITY=PASS PERSONAL_GROWTH_REAL_DATA=PASS MAP_BACKEND_GATING_PRESERVED=PASS MAP_PROGRESSION_WORLD_NOT_NODE_CHART=PASS PERSONAL_BACK_TO_HOME=PASS; do grep -qx "$marker" evidence/runtime/stage50-gate.txt; done
           for marker in PROJECTS_OPERATING_WORLDS=PASS PROJECT_CARD_OPENS_REAL_WORKSPACE=PASS PROJECT_WORKSPACE_FRESH_ONLY=PASS PROJECT_GOALS_CONTEXT_STATS=PASS PROJECT_BRAIN_SNAPSHOT=PASS PROJECT_BACK_HIERARCHY=PASS; do grep -qx "$marker" evidence/runtime/stage60-gate.txt; done
-          for marker in STORE_FRESH_SERVER_SEMANTICS=PASS STORE_AUTHORITATIVE_BALANCE=PASS STORE_CHARACTER_PREVIEW=PASS STORE_EQUIPPED_TRUTH=PASS STORE_CATALOG_OWNERSHIP_STATES=PASS STORE_PURCHASE_EQUIP_ACTIONS_WIRED=PASS STORE_BACK_TO_HOME=PASS; do grep -qx "$marker" evidence/runtime/stage70-gate.txt; done
-          grep -qx 'ROOT_RESET_RUNTIME=PASS tests=6 failures=0 errors=0 skipped=0' evidence/runtime/root-reset-test-summary.txt
+          for marker in \
+            STORE_FRESH_SERVER_SEMANTICS=PASS STORE_AUTHORITATIVE_BALANCE=PASS STORE_CHARACTER_PREVIEW=PASS \
+            STORE_EQUIPPED_TRUTH=PASS STORE_CATALOG_OWNERSHIP_STATES=PASS STORE_PURCHASE_EQUIP_ACTIONS_WIRED=PASS \
+            STORE_BACK_TO_HOME=PASS CHAT_CALM_REAL=PASS CHAT_HISTORY_THREAD_REAL=PASS LIBRARY_REAL=PASS TESTING_REAL=PASS \
+            PRACTICE_REAL=PASS QUIZZES_REAL=PASS FLASHCARDS_REAL=PASS MISTAKES_REAL=PASS CALCULATOR_REAL=PASS \
+            TRANSLATE_REAL=PASS NOTIFICATIONS_REAL=PASS SETTINGS_ACCOUNT_REAL=PASS NO_CAPABILITY_PLACEHOLDERS=PASS \
+            GLOBAL_SECONDARY_BACK=PASS; do
+            grep -qx "$marker" evidence/runtime/stage70-gate.txt
+          done
+          grep -qx 'ROOT_RESET_RUNTIME=PASS tests=7 failures=0 errors=0 skipped=0' evidence/runtime/root-reset-test-summary.txt
           echo 'ROOT_RESET_STAGE70_RUNTIME=PASS' | tee evidence/runtime/final.txt
+
       - name: Upload root-reset runtime evidence
         if: always()
         uses: actions/upload-artifact@v4
