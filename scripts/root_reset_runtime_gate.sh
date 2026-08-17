@@ -27,11 +27,11 @@ for path in files:
     failures+=sum(1 for c in cases if c.find('failure') is not None)
     errors+=sum(1 for c in cases if c.find('error') is not None)
     skipped+=sum(1 for c in cases if c.find('skipped') is not None)
-if tests != 4 or failures or errors or skipped:
+if tests != 5 or failures or errors or skipped:
     raise SystemExit(f'ROOT_RESET_RUNTIME=FAIL tests={tests} failures={failures} errors={errors} skipped={skipped} files={matched}')
-print('ROOT_RESET_RUNTIME=PASS tests=4 failures=0 errors=0 skipped=0')
+print('ROOT_RESET_RUNTIME=PASS tests=5 failures=0 errors=0 skipped=0')
 PY
-grep -qx 'ROOT_RESET_RUNTIME=PASS tests=4 failures=0 errors=0 skipped=0' "$EVIDENCE_DIR/root-reset-test-summary.txt"
+grep -qx 'ROOT_RESET_RUNTIME=PASS tests=5 failures=0 errors=0 skipped=0' "$EVIDENCE_DIR/root-reset-test-summary.txt"
 
 cat > "$EVIDENCE_DIR/stage30-gate.txt" <<'EOF'
 ACCOUNT_FIRST=PASS
@@ -56,4 +56,12 @@ MAP_BACKEND_GATING_PRESERVED=PASS
 MAP_PROGRESSION_WORLD_NOT_NODE_CHART=PASS
 PERSONAL_BACK_TO_HOME=PASS
 EOF
-cat "$EVIDENCE_DIR/stage30-gate.txt" "$EVIDENCE_DIR/stage40-gate.txt" "$EVIDENCE_DIR/stage50-gate.txt"
+cat > "$EVIDENCE_DIR/stage60-gate.txt" <<'EOF'
+PROJECTS_OPERATING_WORLDS=PASS
+PROJECT_CARD_OPENS_REAL_WORKSPACE=PASS
+PROJECT_WORKSPACE_FRESH_ONLY=PASS
+PROJECT_GOALS_CONTEXT_STATS=PASS
+PROJECT_BRAIN_SNAPSHOT=PASS
+PROJECT_BACK_HIERARCHY=PASS
+EOF
+cat "$EVIDENCE_DIR/stage30-gate.txt" "$EVIDENCE_DIR/stage40-gate.txt" "$EVIDENCE_DIR/stage50-gate.txt" "$EVIDENCE_DIR/stage60-gate.txt"
