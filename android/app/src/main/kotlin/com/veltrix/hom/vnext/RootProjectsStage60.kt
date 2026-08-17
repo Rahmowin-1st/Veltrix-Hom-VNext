@@ -106,7 +106,7 @@ private fun ProjectOverview60(
 @Composable
 private fun ProjectsHeader60(onMenu: () -> Unit) {
     Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = onMenu, modifier = Modifier.testTag("projects-menu")) {
+        TextButton(onClick = onMenu, modifier = Modifier.heightIn(min = 48.dp).testTag("projects-menu")) {
             Text("≡", color = KineticColor.Ink, fontWeight = FontWeight.Black)
         }
         Column(Modifier.padding(start = 4.dp)) {
