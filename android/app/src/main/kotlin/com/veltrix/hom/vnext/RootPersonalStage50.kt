@@ -51,7 +51,7 @@ fun RootPersonalWorldStage50(model: PersonalFinalModel?, map: PersonalMapUiModel
         Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 106.dp).testTag("personal-stage50"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        RootWorldHeader("Personal", "WHO YOU'RE BECOMING", onMenu)
+        PersonalHeader50(onMenu)
         KineticGlass(Modifier.fillMaxWidth().testTag("personal-identity"), 30.dp, true) {
             Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 Box(Modifier.size(132.dp).testTag("personal-character")) {
@@ -88,6 +88,19 @@ fun RootPersonalWorldStage50(model: PersonalFinalModel?, map: PersonalMapUiModel
         Text("PERSONAL LEARNING WORLD", style = MaterialTheme.typography.labelMedium, color = KineticColor.Violet, fontWeight = FontWeight.Bold)
         Text("Only backend-qualified regions are revealed.", color = KineticColor.Muted, style = MaterialTheme.typography.bodySmall)
         PersonalMapWorld50(map)
+    }
+}
+
+@Composable
+private fun PersonalHeader50(onMenu: () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = onMenu, modifier = Modifier.testTag("personal-menu")) {
+            Text("≡", color = KineticColor.Ink, fontWeight = FontWeight.Black)
+        }
+        Column(Modifier.padding(start = 4.dp)) {
+            Text("Personal", color = KineticColor.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("WHO YOU'RE BECOMING", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
+        }
     }
 }
 
