@@ -40,7 +40,7 @@ grep -q '^Success$' "$OUT/install-target.txt"
 grep -q '^Success$' "$OUT/install-test.txt"
 
 adb shell pm list instrumentation | tr -d '\r' | tee "$OUT/instrumentations.txt"
-RUNNER="$(sed -n "s#^instrumentation:\(${TEST_APP_ID}/[^ ]*\) (target=${APP_ID})$#\1#p" "$OUT/instrumentations.txt" | head -n 1)"
+RUNNER="$(awk -v prefix="instrumentation:${TEST_APP_ID}/" -v target="(target=${APP_ID})" 'index($0,prefix)==1 && index($0,target)>0 { sub(/^instrumentation:/,"",$1); print $1; exit }' "$OUT/instrumentations.txt")"
 test -n "$RUNNER"
 printf 'runner=%s\n' "$RUNNER" | tee "$OUT/instrumentation-runner.txt"
 
