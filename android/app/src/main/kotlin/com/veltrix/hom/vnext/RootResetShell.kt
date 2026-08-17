@@ -98,6 +98,7 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
     val avatars by root.avatars.collectAsStateWithLifecycle()
     val map by root.map.collectAsStateWithLifecycle()
     val game by root.game.collectAsStateWithLifecycle()
+    val projectWorkspace by featureVm.workspace.collectAsStateWithLifecycle()
 
     var worldName by rememberSaveable { mutableStateOf(VeltrixWorld.HOME.name) }
     var secondaryName by rememberSaveable { mutableStateOf<String?>(null) }
@@ -110,6 +111,7 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
     val context = LocalContext.current
     val continuity = rememberWorldContinuityCoordinator()
     val activeProject = projects.sortedWith(compareByDescending<ProjectCardModel> { it.priority }.thenByDescending { it.lastActiveAt }).firstOrNull()
+    val projectWorkspaceOpen = world == VeltrixWorld.PROJECTS && (projectWorkspace.value != null || projectWorkspace.loading)
 
     LaunchedEffect(world) { continuity.enter(world) }
     LaunchedEffect(home?.avatarId, personal?.avatarId) { continuity.avatar(home?.avatarId ?: personal?.avatarId) }
@@ -119,10 +121,11 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
         pendingWorldName?.let { worldName = it; secondaryName = null; pendingWorldName = null }
     }
 
-    BackHandler(enabled = drawer.isOpen || secondaryName != null || world != VeltrixWorld.HOME) {
+    BackHandler(enabled = drawer.isOpen || secondaryName != null || projectWorkspaceOpen || world != VeltrixWorld.HOME) {
         when {
             drawer.isOpen -> scope.launch { drawer.close() }
             secondaryName != null -> secondaryName = null
+            projectWorkspaceOpen -> featureVm.clearWorkspace()
             else -> worldName = VeltrixWorld.HOME.name
         }
     }
@@ -160,7 +163,13 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
                             )
                             VeltrixWorld.PERSONAL -> RootPersonalWorldStage50(personal, map, game, onMenu = { scope.launch { drawer.open() } })
                             VeltrixWorld.STORE -> RootStoreWorld(store, inventory, avatars, game, onMenu = { scope.launch { drawer.open() } })
-                            VeltrixWorld.PROJECTS -> RootProjectsWorld(projects, onMenu = { scope.launch { drawer.open() } })
+                            VeltrixWorld.PROJECTS -> RootProjectsWorldStage60(
+                                projects = projects,
+                                workspace = projectWorkspace,
+                                onMenu = { scope.launch { drawer.open() } },
+                                onOpenProject = { id -> continuity.project(id); featureVm.openProject(id) },
+                                onCloseProject = featureVm::clearWorkspace,
+                            )
                         }
                     }
                     RootKineticBottomBar(selectedWorld = world, onSelected = { target -> worldName = target.name; secondaryName = null }, modifier = Modifier.align(Alignment.BottomCenter))
