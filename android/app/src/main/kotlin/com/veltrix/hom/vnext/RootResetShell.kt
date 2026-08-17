@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -270,7 +271,7 @@ private fun RootKineticBottomBar(
     val itemWidth = 76.dp
     val index = VeltrixWorld.entries.indexOf(selectedWorld).coerceAtLeast(0)
     val policy = rememberVeltrixEffectPolicy()
-    val lensX by animateDpAsState(
+    val lensX = animateDpAsState(
         targetValue = itemWidth * index,
         animationSpec = if (policy.reducedMotion) androidx.compose.animation.core.snap() else spring(dampingRatio = .78f, stiffness = 420f),
         label = "world-lens-position",
@@ -294,11 +295,12 @@ private fun RootKineticBottomBar(
         strong = false,
     ) {
         Box(Modifier.fillMaxSize()) {
-            // Exactly one moving optical lens. The tray itself stays calm; selection owns the
-            // thicker environment-responsive material and travels with spring continuity.
+            // Exactly one moving optical lens. The animated position is read in the graphics layer
+            // instead of layout, so spring frames no longer remeasure/reposition the bottom bar tree.
             KineticGlass(
                 modifier = Modifier
-                    .padding(start = lensX + 5.dp, top = 5.dp)
+                    .padding(start = 5.dp, top = 5.dp)
+                    .graphicsLayer { translationX = lensX.value.toPx() }
                     .size(itemWidth - 10.dp, 56.dp)
                     .testTag("world-lens"),
                 radius = 21.dp,
