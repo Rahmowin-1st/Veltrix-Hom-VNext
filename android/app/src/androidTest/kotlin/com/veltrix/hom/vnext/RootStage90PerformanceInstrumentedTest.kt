@@ -65,7 +65,12 @@ class RootStage90PerformanceInstrumentedTest {
 
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             phase("activity_launched")
-            val navBounds = waitForPrimaryWorldsBounds(instrumentation, 30_000L)
+            phase("nav_lookup_start")
+            val navBounds = waitForPrimaryWorldsBounds(
+                instrumentation = instrumentation,
+                timeoutMillis = 30_000L,
+                onProgress = ::phase,
+            )
             phase("primary_worlds_found_${navBounds.width()}x${navBounds.height()}")
             val navY = navBounds.centerY()
             val navX = IntArray(4) { index ->
@@ -107,7 +112,9 @@ class RootStage90PerformanceInstrumentedTest {
             SystemClock.sleep(1_500L)
             phase("warmup_start")
             navigationCycle(420L, "warmup")
-            instrumentation.waitForIdleSync()
+            // The root intentionally owns a low-frequency infinite ambient transition. Waiting for
+            // global instrumentation idleness here can therefore stall despite a healthy UI. A fixed
+            // post-input settle is the correct boundary for this real-Choreographer PF sample.
             SystemClock.sleep(350L)
             synchronized(samples) { samples.clear() }
             phase("warmup_complete")
@@ -158,10 +165,14 @@ class RootStage90PerformanceInstrumentedTest {
     private fun waitForPrimaryWorldsBounds(
         instrumentation: android.app.Instrumentation,
         timeoutMillis: Long,
+        onProgress: (String) -> Unit,
     ): Rect {
         val deadline = SystemClock.uptimeMillis() + timeoutMillis
+        var poll = 0
         while (SystemClock.uptimeMillis() < deadline) {
-            instrumentation.waitForIdleSync()
+            // Do not call waitForIdleSync(): the redesigned root intentionally contains an infinite
+            // ambient Compose transition, so global "idle" is not a valid readiness signal. Poll the
+            // accessibility tree directly and keep every retry bounded by the outer uptime deadline.
             val root = instrumentation.uiAutomation.rootInActiveWindow
             val node = root?.let { findByContentDescription(it, "Primary worlds") }
             if (node != null) {
@@ -169,8 +180,11 @@ class RootStage90PerformanceInstrumentedTest {
                 node.getBoundsInScreen(bounds)
                 if (bounds.width() > 0 && bounds.height() > 0) return bounds
             }
+            poll += 1
+            if (poll == 1 || poll % 10 == 0) onProgress("nav_lookup_poll_$poll")
             SystemClock.sleep(200L)
         }
+        onProgress("nav_lookup_timeout")
         error("Primary worlds accessibility surface did not become available within ${timeoutMillis}ms")
     }
 
