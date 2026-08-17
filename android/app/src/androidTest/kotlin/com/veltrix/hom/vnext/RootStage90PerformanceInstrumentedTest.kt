@@ -15,6 +15,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.ceil
 
@@ -25,10 +26,10 @@ import kotlin.math.ceil
  * contaminate JankStats. Navigation is driven by real shell input against the accessibility bounds
  * of the production primary-worlds control, so Choreographer owns timing exactly as it does at runtime.
  *
- * MainActivity is started directly rather than through ActivityScenario. ActivityScenario waits on
- * instrumentation-idle lifecycle synchronization; that synchronization is not a valid readiness
- * boundary for this PF test. We instead start the production Activity normally and resolve its
- * RESUMED instance from the Android lifecycle monitor with a bounded timeout.
+ * Input is paced by rendered-frame quiescence, not a fixed tap spam cadence. On a software-rendered
+ * emulator a world can legitimately take longer than a fixed 420 ms interval to finish its frame;
+ * issuing another navigation before that frame completes measures an artificial render backlog rather
+ * than one completed user interaction. The acceptance threshold and sample floor remain fail-closed.
  *
  * This remains debug/API36-emulator sanity only; it is not a release/profileable or physical-device claim.
  */
@@ -70,8 +71,9 @@ class RootStage90PerformanceInstrumentedTest {
         runBlocking { SessionStore(target).save(LocalSession(apiSession.accountId, apiSession.token)) }
         phase("session_saved")
 
-        val samples = Collections.synchronizedList(ArrayList<FrameSample>(256))
+        val samples = Collections.synchronizedList(ArrayList<FrameSample>(384))
         val currentLabel = AtomicReference("unclassified")
+        val lastFrameUptime = AtomicLong(0L)
         var tracker: JankStats? = null
 
         phase("direct_activity_start")
@@ -104,50 +106,73 @@ class RootStage90PerformanceInstrumentedTest {
                     overrunNanos = frame.frameOverrunNanos,
                     jank = frame.isJank,
                 )
-            }.also { it.isTrackingEnabled = false }
+                lastFrameUptime.set(SystemClock.uptimeMillis())
+            }.also { it.isTrackingEnabled = true }
         }
-        phase("tracker_created")
+        phase("tracker_created_tracking_enabled")
+
+        fun sampleCount(): Int = synchronized(samples) { samples.size }
 
         fun shellTap(x: Int, y: Int) {
-            // `input tap` is fire-and-settle input. Reading this shell pipe to EOF can block
-            // indefinitely on some emulator/adb combinations even after the tap was delivered.
-            // Close immediately; the bounded settle below owns timing, not transport EOF.
             instrumentation.uiAutomation.executeShellCommand("input tap $x $y").close()
         }
 
+        fun waitForRenderedFrameQuiescence(label: String, baselineCount: Int) {
+            val deadline = SystemClock.uptimeMillis() + 8_000L
+            var observedFrame = false
+            while (SystemClock.uptimeMillis() < deadline) {
+                val now = SystemClock.uptimeMillis()
+                val count = sampleCount()
+                if (count > baselineCount) observedFrame = true
+                val last = lastFrameUptime.get()
+                if (observedFrame && last > 0L && now - last >= 320L) {
+                    phase("${label}_quiescent_frames_${count - baselineCount}")
+                    return
+                }
+                SystemClock.sleep(40L)
+            }
+            phase("${label}_quiescence_timeout")
+            error("$label did not reach rendered-frame quiescence within 8000ms")
+        }
+
         val worldLabels = arrayOf("HOME", "PERSONAL", "STORE", "PROJECTS")
-        fun navigationCycle(settleMs: Long, cycleLabel: String) {
+        fun navigationCycle(cycleLabel: String) {
             // Personal -> Store -> Projects -> Home on the persistent production shell.
             for (index in intArrayOf(1, 2, 3, 0)) {
                 val label = "${cycleLabel}_${worldLabels[index]}"
+                val before = sampleCount()
                 currentLabel.set(label)
                 phase("${label}_tap")
                 shellTap(navX[index], navY)
-                SystemClock.sleep(settleMs)
+                waitForRenderedFrameQuiescence(label, before)
             }
         }
 
-        // Exclude cold composition, class loading and first network materialization from the
-        // steady-state interaction sample; every destination is exercised once before capture.
-        SystemClock.sleep(1_500L)
+        // Warm each destination once with the same real-render barrier used by measurement. The
+        // warmup frames are then excluded from acceptance accounting.
+        SystemClock.sleep(1_000L)
         phase("warmup_start")
-        navigationCycle(420L, "warmup")
-        SystemClock.sleep(350L)
+        navigationCycle("warmup")
         synchronized(samples) { samples.clear() }
         currentLabel.set("measurement_ready")
         phase("warmup_complete")
 
-        instrumentation.runOnMainSync { requireNotNull(tracker).isTrackingEnabled = true }
-        phase("tracking_enabled")
-        repeat(3) { cycle -> navigationCycle(420L, "measure_$cycle") }
+        // Collect enough real frames to satisfy the unchanged floor. At least three full cycles are
+        // exercised; additional cycles are allowed only to obtain a statistically usable >=24 sample
+        // set on slow renderers, never to dilute or selectively discard jank.
+        phase("measurement_start")
+        var cycles = 0
+        while ((cycles < 3 || sampleCount() < 24) && cycles < 6) {
+            navigationCycle("measure_$cycles")
+            cycles += 1
+        }
         currentLabel.set("post_measure_settle")
-        SystemClock.sleep(450L)
+        val finalBaseline = sampleCount()
+        SystemClock.sleep(360L)
+        phase("measurement_complete_cycles_${cycles}_samples_${sampleCount()}")
         instrumentation.runOnMainSync { requireNotNull(tracker).isTrackingEnabled = false }
         phase("tracking_disabled")
 
-        // Snapshot and persist acceptance evidence before process cleanup. The Stage90 shell already
-        // force-stops target/test packages between isolated invocations, so Activity teardown is not
-        // part of the PF measurement or a prerequisite for evidence durability.
         phase("measurement_snapshot_started")
         val snapshot = synchronized(samples) { samples.toList() }
         val jankCount = snapshot.count { it.jank }
@@ -173,6 +198,7 @@ class RootStage90PerformanceInstrumentedTest {
                 "ui_p95_ms=${"%.2f".format(uiP95)} cpu_p95_ms=${"%.2f".format(cpuP95)} " +
                     "total_p95_ms=${"%.2f".format(totalP95)} overrun_p95_ms=${"%.2f".format(overrunP95)}",
             )
+            appendLine("cycles=$cycles final_settle_new_frames=${sampleCount() - finalBaseline}")
             appendLine("WORLD_ATTRIBUTION_BEGIN")
             snapshot.groupBy { it.label }.toSortedMap().forEach { (label, frames) ->
                 val labelJank = frames.count { it.jank }
@@ -196,6 +222,7 @@ class RootStage90PerformanceInstrumentedTest {
             }
             appendLine("FRAME_SAMPLES_END")
             appendLine("measurement=RAW_SHELL_INPUT_REAL_CHOREOGRAPHER")
+            appendLine("input_pacing=RENDERED_FRAME_QUIESCENCE_BARRIER")
             appendLine("activity_launch=DIRECT_MAIN_ACTIVITY_START_NO_IDLE_SYNC")
             appendLine("classification=DEBUG_API36_EMULATOR_SANITY_ONLY")
             appendLine("RELEASE_PROFILEABLE_PF=NOT_VERIFIED")
@@ -245,8 +272,6 @@ class RootStage90PerformanceInstrumentedTest {
         val deadline = SystemClock.uptimeMillis() + timeoutMillis
         var poll = 0
         while (SystemClock.uptimeMillis() < deadline) {
-            // Do not call waitForIdleSync(): root readiness is proven from its accessibility tree,
-            // not from global instrumentation idleness.
             val root = instrumentation.uiAutomation.rootInActiveWindow
             val node = root?.let { findByContentDescription(it, "Primary worlds") }
             if (node != null) {
