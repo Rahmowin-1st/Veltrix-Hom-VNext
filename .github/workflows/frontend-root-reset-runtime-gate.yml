@@ -89,6 +89,19 @@ jobs:
           grep -q 'RootStoreWorldStage70' "$ROOT_SRC/RootResetShell.kt"
           echo 'STAGE70_NO_PLACEHOLDERS=PASS' | tee evidence/runtime/stage70-source-gate.txt
 
+      - name: Stage 80 online-only lifecycle source gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT_SRC=android/app/src/main/kotlin/com/veltrix/hom/vnext
+          grep -Fq 'if (!validateServerSession(local)) return@launch' "$ROOT_SRC/RootResetViewModel.kt"
+          grep -Fq '.imePadding()' "$ROOT_SRC/RootResetAuth.kt"
+          grep -Fq 'rememberSaveable' "$ROOT_SRC/RootResetShell.kt"
+          grep -Fq 'current70()' "$ROOT_SRC/RootSecondaryStage70.kt"
+          grep -Fq 'android:resizeableActivity="true"' android/app/src/main/AndroidManifest.xml
+          grep -Fq 'NetworkMonitor(app)' "$ROOT_SRC/RootResetViewModel.kt"
+          echo 'STAGE80_SOURCE_HARDENING=PASS' | tee evidence/runtime/stage80-source-gate.txt
+
       - uses: actions/setup-java@v5
         with: {distribution: temurin, java-version: '17'}
 
@@ -152,12 +165,13 @@ jobs:
           emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
           script: bash scripts/root_reset_runtime_gate.sh
 
-      - name: Fail-closed Stage 30 through complete Stage 70 verification
+      - name: Fail-closed Stage 30 through complete Stage 80 verification
         shell: bash
         run: |
           set -euo pipefail
           grep -qx 'BACKEND_RUNTIME=PASS' evidence/runtime/backend-runtime-gate.txt
           grep -qx 'STAGE70_NO_PLACEHOLDERS=PASS' evidence/runtime/stage70-source-gate.txt
+          grep -qx 'STAGE80_SOURCE_HARDENING=PASS' evidence/runtime/stage80-source-gate.txt
           for marker in ACCOUNT_FIRST=PASS NO_GUEST_MODE=PASS SERVER_VALIDATED_SESSION=PASS FOUR_PRIMARY_WORLDS=PASS BACK_TO_HOME=PASS SIGN_OUT_RETURNS_AUTH=PASS; do grep -qx "$marker" evidence/runtime/stage30-gate.txt; done
           for marker in HOME_ONE_SCREEN_CORE=PASS HOME_FRESH_PROJECT_CONTEXT=PASS HOME_BRAIN_PULSE=PASS HOME_NEXT_MOVE_REAL_ROUTE=PASS HOME_BACK_CONTINUITY=PASS; do grep -qx "$marker" evidence/runtime/stage40-gate.txt; done
           for marker in PERSONAL_IDENTITY_FIRST=PASS PERSISTENT_CHARACTER_IDENTITY=PASS PERSONAL_GROWTH_REAL_DATA=PASS MAP_BACKEND_GATING_PRESERVED=PASS MAP_PROGRESSION_WORLD_NOT_NODE_CHART=PASS PERSONAL_BACK_TO_HOME=PASS; do grep -qx "$marker" evidence/runtime/stage50-gate.txt; done
@@ -171,8 +185,13 @@ jobs:
             GLOBAL_SECONDARY_BACK=PASS; do
             grep -qx "$marker" evidence/runtime/stage70-gate.txt
           done
-          grep -qx 'ROOT_RESET_RUNTIME=PASS tests=7 failures=0 errors=0 skipped=0' evidence/runtime/root-reset-test-summary.txt
-          echo 'ROOT_RESET_STAGE70_RUNTIME=PASS' | tee evidence/runtime/final.txt
+          for marker in \
+            ONLINE_ONLY_ROOT_TRUTH=PASS MID_SESSION_EXPIRY_FAIL_CLOSED=PASS LIFECYCLE_ROUTE_RESTORATION=PASS \
+            IME_ACCOUNT_FORM_REACHABLE=PASS STALE_CACHE_NOT_CURRENT=PASS API36_BACK_PATHS=PASS; do
+            grep -qx "$marker" evidence/runtime/stage80-gate.txt
+          done
+          grep -qx 'ROOT_RESET_RUNTIME=PASS tests=10 failures=0 errors=0 skipped=0' evidence/runtime/root-reset-test-summary.txt
+          echo 'ROOT_RESET_STAGE80_RUNTIME=PASS' | tee evidence/runtime/final.txt
 
       - name: Upload root-reset runtime evidence
         if: always()
