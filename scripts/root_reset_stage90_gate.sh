@@ -2,7 +2,7 @@
 set -euo pipefail
 
 OUT="evidence/stage90"
-mkdir -p "$OUT/screens"
+mkdir -p "$OUT/screens" "$OUT/tests"
 cleanup(){ adb reverse --remove-all >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
@@ -44,21 +44,43 @@ RUNNER="$(awk -v prefix="instrumentation:${TEST_APP_ID}/" -v target="(target=${A
 test -n "$RUNNER"
 printf 'runner=%s\n' "$RUNNER" | tee "$OUT/instrumentation-runner.txt"
 
-STAGE90_CLASSES='com.veltrix.hom.vnext.RootStage90InstrumentedTest,com.veltrix.hom.vnext.RootStage90PerformanceInstrumentedTest'
-set +e
-adb shell am instrument -w -r -e class "$STAGE90_CLASSES" "$RUNNER" | tr -d '\r' | tee "$OUT/instrumentation.txt"
-INSTRUMENT_EXIT=${PIPESTATUS[0]}
-set -e
-test "$INSTRUMENT_EXIT" -eq 0
-PASS_COUNT="$(grep -c '^INSTRUMENTATION_STATUS_CODE: 0$' "$OUT/instrumentation.txt" || true)"
-NEGATIVE_COUNT="$(grep -cE '^INSTRUMENTATION_STATUS_CODE: -[0-9]+$' "$OUT/instrumentation.txt" || true)"
+# Never allow one silent Android instrumentation hang to consume the whole CI job. Every Stage 90
+# criterion runs in its own instrumentation process with a hard timeout and a durable per-test log.
+TESTS=(
+  'visual|com.veltrix.hom.vnext.RootStage90InstrumentedTest#realRootVisualMatrixAndCriticalTouchTargetsAreValid|240'
+  'font200|com.veltrix.hom.vnext.RootStage90InstrumentedTest#twoHundredPercentFontKeepsSignedInAndAccountFlowsReachable|180'
+  'reduced-motion|com.veltrix.hom.vnext.RootStage90InstrumentedTest#reducedMotionSystemPathKeepsNavigationFunctional|180'
+  'performance|com.veltrix.hom.vnext.RootStage90PerformanceInstrumentedTest#warmedCurrentRootPrimaryNavigationHasNonPathologicalFrameClassification|240'
+)
+: > "$OUT/instrumentation.txt"
+PASS_COUNT=0
+for spec in "${TESTS[@]}"; do
+  IFS='|' read -r name selector seconds <<< "$spec"
+  log="$OUT/tests/${name}.txt"
+  printf 'STAGE90_TEST_START name=%s selector=%s timeout=%ss\n' "$name" "$selector" "$seconds" | tee -a "$OUT/instrumentation.txt"
+  set +e
+  timeout --signal=TERM --kill-after=10s "${seconds}s" \
+    adb shell am instrument -w -r -e class "$selector" "$RUNNER" \
+    | tr -d '\r' | tee "$log"
+  command_exit=${PIPESTATUS[0]}
+  set -e
+  cat "$log" >> "$OUT/instrumentation.txt"
+  if [ "$command_exit" -eq 124 ] || [ "$command_exit" -eq 137 ]; then
+    printf 'STAGE90_TEST_TIMEOUT name=%s exit=%s\n' "$name" "$command_exit" | tee -a "$OUT/instrumentation.txt"
+    exit 1
+  fi
+  test "$command_exit" -eq 0
+  test "$(grep -c '^INSTRUMENTATION_STATUS_CODE: 0$' "$log" || true)" = '1'
+  test "$(grep -cE '^INSTRUMENTATION_STATUS_CODE: -[0-9]+$' "$log" || true)" = '0'
+  grep -q '^INSTRUMENTATION_CODE: -1$' "$log"
+  if grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|shortMsg=Process crashed' "$log"; then
+    cat "$log"
+    exit 1
+  fi
+  PASS_COUNT=$((PASS_COUNT + 1))
+  printf 'STAGE90_TEST_PASS name=%s\n' "$name" | tee -a "$OUT/instrumentation.txt"
+done
 test "$PASS_COUNT" = '4'
-test "$NEGATIVE_COUNT" = '0'
-grep -q '^INSTRUMENTATION_CODE: -1$' "$OUT/instrumentation.txt"
-if grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' "$OUT/instrumentation.txt"; then
-  cat "$OUT/instrumentation.txt"
-  exit 1
-fi
 printf 'ROOT_STAGE90_TESTS=PASS tests=4 failures=0 errors=0 skipped=0\n' | tee "$OUT/test-summary.txt"
 
 # Proof lives in the still-installed debuggable target app's internal files directory. Export only
