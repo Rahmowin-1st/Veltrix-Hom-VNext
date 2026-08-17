@@ -160,7 +160,7 @@ fun RootStoreWorldStage70(
 @Composable
 private fun StoreHeader70(onMenu: () -> Unit) {
     Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = onMenu, modifier = Modifier.heightIn(min = 48.dp).testTag("store-menu")) { Text("≡", color = KineticColor.Ink, fontWeight = FontWeight.Black) }
+        TextButton(onClick = onMenu, modifier = Modifier.size(48.dp).testTag("store-menu")) { Text("≡", color = KineticColor.Ink, fontWeight = FontWeight.Black) }
         Column(Modifier.padding(start = 4.dp)) {
             Text("Store", color = KineticColor.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text("PREVIEW · COLLECT · EQUIP", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
