@@ -1,6 +1,6 @@
 package com.veltrix.hom.vnext
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -10,14 +10,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.IconButton
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -25,7 +23,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -33,6 +37,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 enum class RootHomeRoute { PROJECTS, PERSONAL, MISTAKES, LIBRARY, CHAT }
 
@@ -44,11 +49,8 @@ private data class Stage40NextMove(
 )
 
 /**
- * Final Root Reset Stage 40 Home.
- *
- * This surface is intentionally a compact command center rather than a dashboard. Every adaptive
- * claim is derived from fresh backend-owned HomeFinalModel/ProjectCardModel data supplied by the
- * account-first RootResetViewModel. Presentation routing never mutates backend truth.
+ * Final Root Reset Home: one fixed living command world, never a dashboard. Backend truth stays in
+ * HomeFinalModel/ProjectCardModel; the scene only turns that truth into spatial hierarchy.
  */
 @Composable
 fun RootHomeWorldStage40(
@@ -72,186 +74,260 @@ fun RootHomeWorldStage40(
         Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .padding(horizontal = 20.dp)
+            .padding(horizontal = 18.dp)
             .padding(bottom = 92.dp)
             .testTag("home-stage40"),
     ) {
-        // Phone width is the decisive constraint: the command center must fit without scrolling.
-        val compact = maxWidth < 600.dp || maxHeight < 900.dp
-        val sectionGap = if (compact) 6.dp else 12.dp
-        val avatarSize = if (compact) 58.dp else 78.dp
+        val compact = maxWidth < 600.dp || maxHeight < 860.dp
+        val heroRadius = if (compact) 32.dp else 40.dp
 
         Column(
             Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(sectionGap),
+            verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp),
         ) {
-            Row(
-                Modifier.fillMaxWidth().height(52.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(
-                    onClick = onMenu,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = .70f))
-                        .testTag("home-menu"),
-                ) {
-                    Text("≡", color = KineticColor.Ink, fontWeight = FontWeight.Black)
-                }
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    Text("Home", color = KineticColor.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    if (!compact) {
-                        Text("YOUR WORLD · NOW", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-            }
+            HomeWorldHeader40(
+                name = model?.displayName?.takeIf { it.isNotBlank() } ?: "Veltrix learner",
+                level = level,
+                coins = coins,
+                onMenu = onMenu,
+                compact = compact,
+            )
 
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        model?.displayName?.takeIf { it.isNotBlank() } ?: "Veltrix learner",
-                        modifier = Modifier.semantics { heading() }.testTag("home-identity"),
-                        style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
-                        color = KineticColor.Ink,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text("Level $level", color = KineticColor.Violet, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                    if (!compact && (model?.qualifiedActiveDays ?: 0) > 0) {
-                        Text("${model?.qualifiedActiveDays} qualified active days", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-                KineticAvatar(avatar, Modifier.size(avatarSize), "Current Veltrix avatar")
-            }
-
-            Row(
-                Modifier.fillMaxWidth().testTag("home-progression"),
-                horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(Modifier.fillMaxWidth()) {
-                        Text("NEXT LEVEL", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            when {
-                                model == null -> "Syncing"
-                                model.remainingXp > 0 -> "${model.remainingXp} XP"
-                                else -> "Ready"
-                            },
-                            color = KineticColor.Ink,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .clip(RoundedCornerShape(heroRadius))
+                    .drawWithCache {
+                        val world = Brush.linearGradient(
+                            listOf(Color(0xFFE7EEFF), Color(0xFFF8FAFF), Color(0xFFE4F8F1), Color(0xFFFFF4E9)),
+                            start = Offset.Zero,
+                            end = Offset(size.width, size.height),
                         )
-                    }
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
-                        color = KineticColor.Sky,
-                        trackColor = Color.White.copy(alpha = .68f),
-                    )
-                }
-                KineticGlass(radius = if (compact) 17.dp else 20.dp, strong = true) {
-                    Column(
-                        Modifier.padding(horizontal = if (compact) 10.dp else 14.dp, vertical = if (compact) 6.dp else 8.dp),
-                        horizontalAlignment = Alignment.End,
-                    ) {
-                        if (!compact) Text("COINS", style = MaterialTheme.typography.labelSmall, color = KineticColor.Muted)
-                        Text(coins.toString(), style = MaterialTheme.typography.titleMedium, color = KineticColor.Ink, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
+                        val sky = Brush.radialGradient(
+                            listOf(KineticColor.Sky.copy(.42f), KineticColor.Violet.copy(.12f), Color.Transparent),
+                            center = Offset(size.width * .78f, size.height * .20f),
+                            radius = size.minDimension * .78f,
+                        )
+                        val ground = Brush.radialGradient(
+                            listOf(KineticColor.Mint.copy(.28f), Color.Transparent),
+                            center = Offset(size.width * .18f, size.height * .92f),
+                            radius = size.minDimension * .72f,
+                        )
+                        onDrawBehind {
+                            drawRect(world)
+                            drawRect(sky)
+                            drawRect(ground)
 
-            Column(verticalArrangement = Arrangement.spacedBy(if (compact) 3.dp else 6.dp)) {
-                Text("WHAT MATTERS NOW", style = MaterialTheme.typography.labelMedium, color = KineticColor.Sky, fontWeight = FontWeight.Bold)
-                Text(
-                    focus ?: if (model == null) "Loading your verified focus…" else "Choose a meaningful next focus",
-                    style = if (compact) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.headlineMedium,
-                    color = KineticColor.Ink,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = if (compact) 1 else 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag("home-focus"),
-                )
-                activeProject?.let { project ->
-                    Text(
-                        "ACTIVE PROJECT · ${project.title}",
-                        color = KineticColor.Mint,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.testTag("home-active-project"),
-                    )
-                    if (!compact) {
-                        project.purpose?.takeIf { it.isNotBlank() }?.let { purpose ->
+                            // A spatial learning path rather than a dashboard grid.
+                            val path = Path().apply {
+                                moveTo(-size.width * .08f, size.height * .77f)
+                                cubicTo(
+                                    size.width * .17f, size.height * .60f,
+                                    size.width * .46f, size.height * .86f,
+                                    size.width * .73f, size.height * .62f,
+                                )
+                                cubicTo(
+                                    size.width * .87f, size.height * .50f,
+                                    size.width * .98f, size.height * .57f,
+                                    size.width * 1.10f, size.height * .45f,
+                                )
+                            }
+                            drawPath(path, Color.White.copy(.58f), style = Stroke(18.dp.toPx()))
+                            drawPath(path, KineticColor.Sky.copy(.16f), style = Stroke(7.dp.toPx()))
+
+                            val beacon = Offset(size.width * .82f, size.height * .23f)
+                            drawCircle(Color.White.copy(.42f), size.minDimension * .20f, beacon)
+                            drawCircle(KineticColor.Sky.copy(.15f), size.minDimension * .145f, beacon, style = Stroke(1.4.dp.toPx()))
+                            drawCircle(Color.White.copy(.90f), 5.dp.toPx(), Offset(size.width * .90f, size.height * .12f))
+                            drawCircle(KineticColor.Mint.copy(.82f), 4.dp.toPx(), Offset(size.width * .68f, size.height * .34f))
+                        }
+                    }
+                    .testTag("home-command-world"),
+            ) {
+                Column(
+                    Modifier.fillMaxSize().padding(if (compact) 16.dp else 22.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                        Column(
+                            Modifier.weight(1f).padding(end = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                                Box(Modifier.size(7.dp).clip(CircleShape)) {
+                                    Canvas(Modifier.fillMaxSize()) { drawCircle(KineticColor.Sky) }
+                                }
+                                Text(
+                                    "WHAT MATTERS NOW",
+                                    color = Color(0xFF3159B8),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.3.sp,
+                                )
+                            }
                             Text(
-                                purpose,
-                                color = KineticColor.Muted,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
+                                focus ?: if (model == null) "Finding your verified focus…" else "Build a meaningful next focus",
+                                modifier = Modifier.testTag("home-focus").semantics { heading() },
+                                color = KineticColor.Ink,
+                                style = if (compact) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 3,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                            activeProject?.let { project ->
+                                Text(
+                                    "ACTIVE WORLD · ${project.title}",
+                                    modifier = Modifier.testTag("home-active-project"),
+                                    color = Color(0xFF237E68),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        KineticAvatar(
+                            avatar,
+                            Modifier.size(if (compact) 112.dp else 148.dp),
+                            "Current Veltrix avatar",
+                        )
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp)) {
+                        KineticGlass(
+                            Modifier.fillMaxWidth().testTag("home-brain-pulse"),
+                            radius = if (compact) 22.dp else 26.dp,
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 14.dp, vertical = if (compact) 10.dp else 13.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Box(Modifier.size(34.dp).clip(CircleShape), contentAlignment = Alignment.Center) {
+                                    Canvas(Modifier.fillMaxSize()) {
+                                        drawCircle(KineticColor.Violet.copy(.19f))
+                                        drawCircle(KineticColor.Violet.copy(.72f), radius = size.minDimension * .16f)
+                                    }
+                                    Text("V", color = KineticColor.Violet, fontWeight = FontWeight.Black)
+                                }
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("VELTRIX BRAIN", color = KineticColor.Violet, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        brain,
+                                        color = KineticColor.Ink,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = if (compact) 2 else 3,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+
+                        HomeProgress40(progress, model, compact)
+
+                        PressableGlass(
+                            onClick = { nextMove.route?.let(onNextMove) },
+                            enabled = nextMove.enabled && nextMove.route != null,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(if (compact) 54.dp else 60.dp)
+                                .testTag("home-next-move")
+                                .semantics { contentDescription = "Next move: ${nextMove.label}. ${nextMove.reason}" },
+                            radius = if (compact) 27.dp else 30.dp,
+                            strong = true,
+                        ) {
+                            Row(
+                                Modifier.fillMaxSize().padding(horizontal = 17.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        nextMove.label,
+                                        color = KineticColor.Ink,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (!compact) {
+                                        Text(
+                                            nextMove.reason,
+                                            modifier = Modifier.testTag("home-next-move-reason"),
+                                            color = KineticColor.Muted,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                                Text("→", color = KineticColor.Sky, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+}
 
-            KineticGlass(Modifier.fillMaxWidth().testTag("home-brain-pulse"), radius = if (compact) 20.dp else 24.dp) {
-                Row(
-                    Modifier.padding(horizontal = if (compact) 12.dp else 16.dp, vertical = if (compact) 9.dp else 15.dp),
-                    horizontalArrangement = Arrangement.spacedBy(if (compact) 9.dp else 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        Modifier
-                            .size(if (compact) 32.dp else 38.dp)
-                            .clip(CircleShape)
-                            .background(KineticColor.Violet.copy(alpha = .14f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("V", color = KineticColor.Violet, fontWeight = FontWeight.Black)
-                    }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("VELTRIX BRAIN PULSE", style = MaterialTheme.typography.labelSmall, color = KineticColor.Violet, fontWeight = FontWeight.Bold)
-                        Text(
-                            brain,
-                            color = KineticColor.Ink,
-                            style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = if (compact) 2 else 3,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.weight(1f))
-            Button(
-                onClick = { nextMove.route?.let(onNextMove) },
-                enabled = nextMove.enabled && nextMove.route != null,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = if (compact) 48.dp else 54.dp)
-                    .testTag("home-next-move")
-                    .semantics { contentDescription = "Next move: ${nextMove.label}. ${nextMove.reason}" },
-            ) {
-                Text(nextMove.label, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            if (!compact) {
-                Text(
-                    nextMove.reason,
-                    color = KineticColor.Muted,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag("home-next-move-reason"),
-                )
+@Composable
+private fun HomeWorldHeader40(name: String, level: Int, coins: Long, onMenu: () -> Unit, compact: Boolean) {
+    Row(
+        Modifier.fillMaxWidth().height(56.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        PressableGlass(
+            onClick = onMenu,
+            modifier = Modifier.size(48.dp).testTag("home-menu"),
+            radius = 24.dp,
+            strong = true,
+        ) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("≡", color = KineticColor.Ink, fontWeight = FontWeight.Black) } }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(
+                name,
+                modifier = Modifier.testTag("home-identity"),
+                color = KineticColor.Ink,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!compact) Text("YOUR WORLD · NOW", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
+        }
+        KineticGlass(radius = 18.dp, strong = true) {
+            Row(Modifier.padding(horizontal = 11.dp, vertical = 7.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("L$level", color = KineticColor.Violet, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                Box(Modifier.width(1.dp).height(14.dp)) { Canvas(Modifier.fillMaxSize()) { drawRect(KineticColor.Line) } }
+                Text("$coins ◈", color = KineticColor.Ink, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
             }
         }
+    }
+}
+
+@Composable
+private fun HomeProgress40(progress: Float, model: HomeFinalModel?, compact: Boolean) {
+    Column(Modifier.fillMaxWidth().testTag("home-progression"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("NEXT LEVEL", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.weight(1f))
+            Text(
+                when {
+                    model == null -> "Syncing"
+                    model.remainingXp > 0 -> "${model.remainingXp} XP"
+                    else -> "Ready"
+                },
+                color = KineticColor.Ink,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.fillMaxWidth().height(if (compact) 7.dp else 8.dp).clip(CircleShape),
+            color = KineticColor.Sky,
+            trackColor = Color.White.copy(alpha = .55f),
+        )
     }
 }
 
