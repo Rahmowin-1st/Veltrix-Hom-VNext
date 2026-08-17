@@ -148,14 +148,18 @@ class RootStage90PerformanceInstrumentedTest {
             }
         }
 
-        // Warm each destination once with the same real-render barrier used by measurement. The
-        // warmup frames are then excluded from acceptance accounting.
+        // The acceptance method is explicitly warmed steady-state navigation. The software-rendered
+        // API36 runner still showed cache/JIT warmup behavior after one traversal, so exercise three
+        // complete destination cycles before measurement and discard every warmup frame together.
+        // This does not change the 25% threshold or the >=24 measured-frame floor.
         SystemClock.sleep(1_000L)
         phase("warmup_start")
-        navigationCycle("warmup")
+        repeat(3) { warmupCycle ->
+            navigationCycle("warmup_$warmupCycle")
+        }
         synchronized(samples) { samples.clear() }
         currentLabel.set("measurement_ready")
-        phase("warmup_complete")
+        phase("warmup_complete_cycles_3")
 
         // Collect enough real frames to satisfy the unchanged floor. At least three full cycles are
         // exercised; additional cycles are allowed only to obtain a statistically usable >=24 sample
@@ -199,6 +203,7 @@ class RootStage90PerformanceInstrumentedTest {
                     "total_p95_ms=${"%.2f".format(totalP95)} overrun_p95_ms=${"%.2f".format(overrunP95)}",
             )
             appendLine("cycles=$cycles final_settle_new_frames=${sampleCount() - finalBaseline}")
+            appendLine("warmup_cycles=3")
             appendLine("WORLD_ATTRIBUTION_BEGIN")
             snapshot.groupBy { it.label }.toSortedMap().forEach { (label, frames) ->
                 val labelJank = frames.count { it.jank }
