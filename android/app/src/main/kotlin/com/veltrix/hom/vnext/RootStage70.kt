@@ -1,5 +1,6 @@
 package com.veltrix.hom.vnext
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -263,10 +265,14 @@ private fun RootStage70Frame(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            KineticGlass(radius = 20.dp, strong = true) {
+            KineticGlass(
+                Modifier.clickable(onClick = onMenu).testTag("root-menu-stage70"),
+                radius = 20.dp,
+                strong = true,
+            ) {
                 Text(
                     "≡",
-                    modifier = Modifier.padding(horizontal = 17.dp, vertical = 11.dp).testTag("root-menu-stage70"),
+                    modifier = Modifier.padding(horizontal = 17.dp, vertical = 11.dp),
                     color = KineticColor.Ink,
                     fontWeight = FontWeight.Black,
                 )
@@ -281,9 +287,8 @@ private fun RootStage70Frame(
                 }
             }
         }
-        Box(Modifier.fillMaxSize().navigationBarsPadding()) { content() }
+        Box(Modifier.weight(1f).fillMaxWidth().navigationBarsPadding()) { content() }
     }
-    LaunchedEffect(onMenu) { /* keeps callback stable for semantics owner */ }
 }
 
 private fun stage70Title(name: String): String = when (name) {
