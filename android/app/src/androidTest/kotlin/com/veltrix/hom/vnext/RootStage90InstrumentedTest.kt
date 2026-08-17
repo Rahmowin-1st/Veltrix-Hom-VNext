@@ -3,7 +3,6 @@ package com.veltrix.hom.vnext
 import android.graphics.Bitmap
 import android.os.SystemClock
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.fetchSemanticsNode
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
