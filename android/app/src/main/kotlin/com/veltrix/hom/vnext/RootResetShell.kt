@@ -99,6 +99,11 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
     val map by root.map.collectAsStateWithLifecycle()
     val game by root.game.collectAsStateWithLifecycle()
     val projectWorkspace by featureVm.workspace.collectAsStateWithLifecycle()
+    val featureStore by featureVm.store.collectAsStateWithLifecycle()
+    val featureInventory by featureVm.inventory.collectAsStateWithLifecycle()
+    val featureAvatars by featureVm.avatars.collectAsStateWithLifecycle()
+    val featureGame by featureVm.gameProfile.collectAsStateWithLifecycle()
+    val storeFeedback by featureVm.mutationFeedback.collectAsStateWithLifecycle()
 
     var worldName by rememberSaveable { mutableStateOf(VeltrixWorld.HOME.name) }
     var secondaryName by rememberSaveable { mutableStateOf<String?>(null) }
@@ -112,6 +117,10 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
     val continuity = rememberWorldContinuityCoordinator()
     val activeProject = projects.sortedWith(compareByDescending<ProjectCardModel> { it.priority }.thenByDescending { it.lastActiveAt }).firstOrNull()
     val projectWorkspaceOpen = world == VeltrixWorld.PROJECTS && (projectWorkspace.value != null || projectWorkspace.loading)
+    val storeUi = featureStore.value?.takeIf { featureStore.freshness == DataFreshness.FRESH } ?: store
+    val inventoryUi = featureInventory.value?.takeIf { featureInventory.freshness == DataFreshness.FRESH } ?: inventory
+    val avatarsUi = featureAvatars.value?.takeIf { featureAvatars.freshness == DataFreshness.FRESH } ?: avatars
+    val gameUi = featureGame.value?.takeIf { featureGame.freshness == DataFreshness.FRESH } ?: game
 
     LaunchedEffect(world) { continuity.enter(world) }
     LaunchedEffect(home?.avatarId, personal?.avatarId) { continuity.avatar(home?.avatarId ?: personal?.avatarId) }
@@ -162,7 +171,16 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
                                 },
                             )
                             VeltrixWorld.PERSONAL -> RootPersonalWorldStage50(personal, map, game, onMenu = { scope.launch { drawer.open() } })
-                            VeltrixWorld.STORE -> RootStoreWorld(store, inventory, avatars, game, onMenu = { scope.launch { drawer.open() } })
+                            VeltrixWorld.STORE -> RootStoreWorldStage70(
+                                store = storeUi,
+                                inventory = inventoryUi,
+                                avatars = avatarsUi,
+                                game = gameUi,
+                                feedback = storeFeedback,
+                                onMenu = { scope.launch { drawer.open() } },
+                                onPurchase = featureVm::purchase,
+                                onEquipAvatar = featureVm::equipAvatar,
+                            )
                             VeltrixWorld.PROJECTS -> RootProjectsWorldStage60(
                                 projects = projects,
                                 workspace = projectWorkspace,
