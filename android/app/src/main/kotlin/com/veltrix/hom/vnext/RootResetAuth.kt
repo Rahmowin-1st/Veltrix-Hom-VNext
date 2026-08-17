@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -146,7 +147,7 @@ fun RootResetAuthGateway(
 
     RootResetWorldScene(destination = "AUTH") {
         Column(
-            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp, vertical = 20.dp),
+            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -206,13 +207,25 @@ fun RootResetAuthGateway(
                     AnimatedContent(targetState = state.mode, label = "auth-mode") { mode ->
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             if (mode == AuthMode.CREATE_ACCOUNT) {
-                                OutlinedTextField(displayName, { displayName = it }, Modifier.fillMaxWidth(), label = { Text("Display name") }, singleLine = true)
+                                OutlinedTextField(
+                                    displayName,
+                                    { displayName = it },
+                                    Modifier.fillMaxWidth().testTag("auth-display-name"),
+                                    label = { Text("Display name") },
+                                    singleLine = true,
+                                )
                             }
-                            OutlinedTextField(login, { login = it }, Modifier.fillMaxWidth(), label = { Text("Email or username") }, singleLine = true)
+                            OutlinedTextField(
+                                login,
+                                { login = it },
+                                Modifier.fillMaxWidth().testTag("auth-login"),
+                                label = { Text("Email or username") },
+                                singleLine = true,
+                            )
                             OutlinedTextField(
                                 password,
                                 { password = it },
-                                Modifier.fillMaxWidth(),
+                                Modifier.fillMaxWidth().testTag("auth-password"),
                                 label = { Text("Password") },
                                 singleLine = true,
                                 visualTransformation = PasswordVisualTransformation(),
@@ -223,7 +236,7 @@ fun RootResetAuthGateway(
                                     if (mode == AuthMode.SIGN_IN) onEmailSignIn(login, password)
                                     else onCreateAccount(login, password, displayName)
                                 },
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("auth-submit"),
                             ) {
                                 if (state.processing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                                 else Text(if (mode == AuthMode.SIGN_IN) "Sign in" else "Create account")
