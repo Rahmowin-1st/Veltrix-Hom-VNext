@@ -34,19 +34,13 @@ internal enum class RootSecondary(val label: String) {
     SETTINGS("Settings / Account"),
 }
 
-/**
- * Root Reset Stage 70 secondary capability host.
- *
- * There are deliberately no "coming soon" bridges here. Every route is backed by an accepted
- * repository/control contract. Cached values are stripped whenever they are not FRESH so the
- * online-only root reset never presents stale product data as current truth.
- */
 @Composable
 internal fun RootSecondaryStage70Host(
     item: RootSecondary,
     featureVm: AppViewModel,
     onNavigate: (RootSecondary) -> Unit,
     onSignOut: () -> Unit,
+    onAccountTruthMayHaveChanged: () -> Unit,
 ) {
     val chats by featureVm.chats.collectAsStateWithLifecycle()
     val messages by featureVm.messages.collectAsStateWithLifecycle()
@@ -57,21 +51,17 @@ internal fun RootSecondaryStage70Host(
     val selectedSources by featureVm.selectedSources.collectAsStateWithLifecycle()
     val citations by featureVm.citations.collectAsStateWithLifecycle()
     val createdConversationId by featureVm.createdConversationId.collectAsStateWithLifecycle()
-
     val search by featureVm.search.collectAsStateWithLifecycle()
     val assessment by featureVm.assessment.collectAsStateWithLifecycle()
     val attempt by featureVm.attempt.collectAsStateWithLifecycle()
     val assessmentResult by featureVm.assessmentResult.collectAsStateWithLifecycle()
-
     val practice by featureVm.practice.collectAsStateWithLifecycle()
     val practiceHint by featureVm.practiceHint.collectAsStateWithLifecycle()
     val practiceCheck by featureVm.practiceCheck.collectAsStateWithLifecycle()
     val practiceComplete by featureVm.practiceComplete.collectAsStateWithLifecycle()
     val openedPracticeId by featureVm.openedPracticeId.collectAsStateWithLifecycle()
-
     val flashcards by featureVm.flashcards.collectAsStateWithLifecycle()
     val mistakes by featureVm.mistakes.collectAsStateWithLifecycle()
-
     val calculator by featureVm.calculator.collectAsStateWithLifecycle()
     val calculatorHistory by featureVm.calculatorHistory.collectAsStateWithLifecycle()
     val translation by featureVm.translation.collectAsStateWithLifecycle()
@@ -94,11 +84,7 @@ internal fun RootSecondaryStage70Host(
                 featureVm.refreshSources()
             }
             RootSecondary.LIBRARY -> featureVm.refreshSources()
-            RootSecondary.TESTING, RootSecondary.QUIZZES -> {
-                // Assessment search is user-driven. Clear old detail so each world opens at its
-                // honest discovery state rather than leaking another route's detail surface.
-                featureVm.clearAssessment()
-            }
+            RootSecondary.TESTING, RootSecondary.QUIZZES -> featureVm.clearAssessment()
             RootSecondary.PRACTICE -> Unit
             RootSecondary.FLASHCARDS -> featureVm.refreshFlashcards()
             RootSecondary.MISTAKES -> featureVm.refreshMistakes()
@@ -106,9 +92,7 @@ internal fun RootSecondaryStage70Host(
             RootSecondary.NOTIFICATIONS -> featureVm.refreshNotifications()
             RootSecondary.SETTINGS -> featureVm.refreshSettings()
         }
-        if (item != RootSecondary.PRACTICE && item != RootSecondary.MISTAKES) {
-            practiceReturnName = null
-        }
+        if (item != RootSecondary.PRACTICE && item != RootSecondary.MISTAKES) practiceReturnName = null
     }
 
     LaunchedEffect(createdConversationId) {
@@ -126,12 +110,12 @@ internal fun RootSecondaryStage70Host(
         }
     }
 
-    // AppViewModel owns the destructive account deletion contract. When that contract clears its
-    // validated session, synchronize the account-first root gate instead of leaving a zombie UI.
+    LaunchedEffect(feedback) {
+        if (feedback?.success == true) onAccountTruthMayHaveChanged()
+    }
+
     LaunchedEffect(item, sessionResolved, featureSession) {
-        if (item == RootSecondary.SETTINGS && sessionResolved && featureSession == null) {
-            onSignOut()
-        }
+        if (item == RootSecondary.SETTINGS && sessionResolved && featureSession == null) onSignOut()
     }
 
     BackHandler(enabled = item == RootSecondary.CHAT && conversationId != null) {
@@ -165,7 +149,7 @@ internal fun RootSecondaryStage70Host(
                     selectedSources = selectedSources,
                     citations = citations,
                     onRefresh = {
-                        featureVm.refreshChats(projectId)
+                        featureVm.refreshChats(null)
                         featureVm.refreshSources()
                     },
                     onNew = { featureVm.createChat(null) },
@@ -180,14 +164,12 @@ internal fun RootSecondaryStage70Host(
                     onLoadCitations = { messageId -> conversationId?.let { featureVm.loadCitations(it, messageId) } },
                 )
             }
-
             RootSecondary.LIBRARY -> LibraryWorldScreen(
                 state = sources.current70(),
                 onRetry = featureVm::refreshSources,
                 onCreateText = featureVm::createTextSource,
                 onRetrySource = featureVm::retrySource,
             )
-
             RootSecondary.TESTING, RootSecondary.QUIZZES -> AssessmentWorldScreen(
                 quizMode = item == RootSecondary.QUIZZES,
                 searchState = search.current70(),
@@ -200,7 +182,6 @@ internal fun RootSecondaryStage70Host(
                 onAnswer = featureVm::answerAssessment,
                 onSubmit = featureVm::submitAssessment,
             )
-
             RootSecondary.PRACTICE -> PracticeWorldScreen(
                 state = practice.current70(),
                 hint = practiceHint,
@@ -213,13 +194,11 @@ internal fun RootSecondaryStage70Host(
                 onSkip = featureVm::practiceSkip,
                 onComplete = featureVm::completePractice,
             )
-
             RootSecondary.FLASHCARDS -> FlashcardsWorldScreen(
                 state = flashcards.current70(),
                 onRetry = featureVm::refreshFlashcards,
                 onRate = featureVm::reviewFlashcard,
             )
-
             RootSecondary.MISTAKES -> MistakesWorldScreen(
                 state = mistakes.current70(),
                 onRetry = featureVm::refreshMistakes,
@@ -227,26 +206,14 @@ internal fun RootSecondaryStage70Host(
                 onPractice = featureVm::practiceFromMistake,
                 onFlashcard = featureVm::flashcardFromMistake,
             )
-
-            RootSecondary.CALCULATOR -> CalculatorWorldScreen(
-                state = calculator,
-                history = calculatorHistory,
-                onCalculate = featureVm::calculate,
-            )
-
-            RootSecondary.TRANSLATE -> TranslateWorldScreen(
-                state = translation,
-                projectId = null,
-                onTranslate = featureVm::translate,
-            )
-
+            RootSecondary.CALCULATOR -> CalculatorWorldScreen(calculator, calculatorHistory, featureVm::calculate)
+            RootSecondary.TRANSLATE -> TranslateWorldScreen(translation, null, featureVm::translate)
             RootSecondary.NOTIFICATIONS -> NotificationsWorldScreen(
-                intents = notificationIntents.current70(),
-                preferences = notificationPreferences.current70(),
-                onRefresh = featureVm::refreshNotifications,
-                onToggle = featureVm::updateNotificationPreference,
+                notificationIntents.current70(),
+                notificationPreferences.current70(),
+                featureVm::refreshNotifications,
+                featureVm::updateNotificationPreference,
             )
-
             RootSecondary.SETTINGS -> Column(Modifier.fillMaxSize().testTag("settings-stage70")) {
                 Box(Modifier.weight(1f)) {
                     SettingsWorldScreen(
@@ -264,24 +231,12 @@ internal fun RootSecondaryStage70Host(
                 }
                 OutlinedButton(
                     onClick = onSignOut,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 18.dp, vertical = 10.dp)
-                        .heightIn(min = 50.dp)
-                        .testTag("settings-sign-out"),
-                ) {
-                    Text("Sign out")
-                }
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp).heightIn(min = 50.dp).testTag("settings-sign-out"),
+                ) { Text("Sign out") }
             }
         }
     }
 }
 
-private fun <T> RepositoryState<T>.current70(): RepositoryState<T> {
-    if (freshness == DataFreshness.FRESH) return this
-    return copy(
-        value = null,
-        loading = loading && value == null,
-        errorCode = errorCode ?: if (loading) null else "SERVICE_UNAVAILABLE",
-    )
-}
+private fun <T> RepositoryState<T>.current70(): RepositoryState<T> =
+    if (freshness == DataFreshness.FRESH) this else copy(value = null)
