@@ -30,7 +30,7 @@ class RootStage90InstrumentedTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val targetContext get() = instrumentation.targetContext
     private val stage90Dir: File
-        get() = File(requireNotNull(targetContext.getExternalFilesDir(null)), "stage90").apply { mkdirs() }
+        get() = File(targetContext.filesDir, "stage90").apply { mkdirs() }
 
     @Before
     fun before() {
