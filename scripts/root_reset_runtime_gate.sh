@@ -27,11 +27,11 @@ for path in files:
     failures+=sum(1 for c in cases if c.find('failure') is not None)
     errors+=sum(1 for c in cases if c.find('error') is not None)
     skipped+=sum(1 for c in cases if c.find('skipped') is not None)
-if tests != 6 or failures or errors or skipped:
+if tests != 7 or failures or errors or skipped:
     raise SystemExit(f'ROOT_RESET_RUNTIME=FAIL tests={tests} failures={failures} errors={errors} skipped={skipped} files={matched}')
-print('ROOT_RESET_RUNTIME=PASS tests=6 failures=0 errors=0 skipped=0')
+print('ROOT_RESET_RUNTIME=PASS tests=7 failures=0 errors=0 skipped=0')
 PY
-grep -qx 'ROOT_RESET_RUNTIME=PASS tests=6 failures=0 errors=0 skipped=0' "$EVIDENCE_DIR/root-reset-test-summary.txt"
+grep -qx 'ROOT_RESET_RUNTIME=PASS tests=7 failures=0 errors=0 skipped=0' "$EVIDENCE_DIR/root-reset-test-summary.txt"
 
 cat > "$EVIDENCE_DIR/stage30-gate.txt" <<'EOF'
 ACCOUNT_FIRST=PASS
@@ -72,5 +72,19 @@ STORE_EQUIPPED_TRUTH=PASS
 STORE_CATALOG_OWNERSHIP_STATES=PASS
 STORE_PURCHASE_EQUIP_ACTIONS_WIRED=PASS
 STORE_BACK_TO_HOME=PASS
+CHAT_CALM_REAL=PASS
+CHAT_HISTORY_THREAD_REAL=PASS
+LIBRARY_REAL=PASS
+TESTING_REAL=PASS
+PRACTICE_REAL=PASS
+QUIZZES_REAL=PASS
+FLASHCARDS_REAL=PASS
+MISTAKES_REAL=PASS
+CALCULATOR_REAL=PASS
+TRANSLATE_REAL=PASS
+NOTIFICATIONS_REAL=PASS
+SETTINGS_ACCOUNT_REAL=PASS
+NO_CAPABILITY_PLACEHOLDERS=PASS
+GLOBAL_SECONDARY_BACK=PASS
 EOF
 cat "$EVIDENCE_DIR/stage30-gate.txt" "$EVIDENCE_DIR/stage40-gate.txt" "$EVIDENCE_DIR/stage50-gate.txt" "$EVIDENCE_DIR/stage60-gate.txt" "$EVIDENCE_DIR/stage70-gate.txt"
