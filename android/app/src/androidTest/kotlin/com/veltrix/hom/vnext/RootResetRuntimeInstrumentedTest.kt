@@ -111,11 +111,38 @@ class RootResetRuntimeInstrumentedTest {
             compose.onNodeWithTag("project-card-${created.id}").assertIsDisplayed().performClick()
             awaitTag("project-workspace", 30_000L); awaitText(title, 30_000L, true); awaitTag("project-workspace-stats", 30_000L); awaitTag("project-brain", 30_000L)
             compose.onNodeWithTag("project-workspace").assertIsDisplayed(); compose.onNodeWithTag("project-workspace-title").assertIsDisplayed()
-
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
-            compose.waitForIdle(); awaitTag("projects-stage60", 10_000L); compose.onNodeWithTag("world-PROJECTS").assertIsSelected()
-            compose.onAllNodesWithTag("project-workspace").assertCountEquals(0)
+            compose.waitForIdle(); awaitTag("projects-stage60", 10_000L); compose.onNodeWithTag("world-PROJECTS").assertIsSelected(); compose.onAllNodesWithTag("project-workspace").assertCountEquals(0)
+            scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            compose.waitForIdle(); awaitTag("home-stage40", 10_000L); compose.onNodeWithTag("world-HOME").assertIsSelected()
+        }
+    }
 
+    @Test
+    fun storeStage70RendersFreshServerBalanceCatalogAndEquippedCharacterTruth() {
+        val stamp = System.currentTimeMillis()
+        val apiSession = VeltrixApiClient().register("store70-runtime-$stamp", "Veltrix!Runtime2026", "Store Runtime")
+        val snapshot = runBlocking {
+            val repo = Part2FeatureRepository(targetContext)
+            val store = repo.store(apiSession, true).value ?: error("Fresh store required")
+            val avatars = repo.avatars(apiSession, true).value ?: error("Fresh avatars required")
+            val game = repo.gameProfile(apiSession, true).value ?: error("Fresh game profile required")
+            SessionStore(targetContext).save(LocalSession(apiSession.accountId, apiSession.token))
+            Triple(store, avatars, game)
+        }
+        val store = snapshot.first
+        val avatars = snapshot.second
+        val game = snapshot.third
+        val equipped = avatars.firstOrNull { it.equipped }?.avatarId ?: game.avatarId
+
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            awaitTag("home-stage40", 30_000L)
+            compose.onNodeWithTag("world-STORE").performClick(); compose.waitForIdle()
+            awaitTag("store-stage70", 30_000L); awaitTag("store-balance", 30_000L); awaitTag("store-preview", 30_000L); awaitTag("store-avatar-equipped", 30_000L)
+            compose.onNodeWithTag("store-stage70").assertIsDisplayed(); compose.onNodeWithTag("store-balance").assertIsDisplayed(); compose.onNodeWithTag("store-preview").assertIsDisplayed(); compose.onNodeWithTag("store-avatar-equipped").assertIsDisplayed()
+            awaitTag("store-avatar-$equipped", 30_000L)
+            store.items.firstOrNull()?.let { awaitTag("store-item-${it.itemId}", 30_000L) }
+            compose.onNodeWithTag("store-inventory-count").assertExists()
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
             compose.waitForIdle(); awaitTag("home-stage40", 10_000L); compose.onNodeWithTag("world-HOME").assertIsSelected()
         }
