@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
@@ -175,6 +176,59 @@ class RootResetRuntimeInstrumentedTest {
             compose.onAllNodesWithText("is retained and is being moved into the new Veltrix shell.", substring = true).assertCountEquals(0)
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
             compose.waitForIdle(); awaitTag("home-stage40", 10_000L); compose.onNodeWithTag("world-HOME").assertIsSelected()
+        }
+    }
+
+    @Test
+    fun revokedSessionDuringProductRefreshFailsClosedToSessionExpiredAuth() {
+        val api = VeltrixApiClient()
+        val apiSession = api.register("expiry80-runtime-${System.currentTimeMillis()}", "Veltrix!Runtime2026", "Expiry Runtime")
+        runBlocking { SessionStore(targetContext).save(LocalSession(apiSession.accountId, apiSession.token)) }
+        ActivityScenario.launch(MainActivity::class.java).use {
+            awaitTag("home-stage40", 30_000L)
+            runBlocking { api.logout(apiSession) }
+
+            compose.onNodeWithTag("home-menu").performClick()
+            compose.mainClock.advanceTimeBy(1_000L)
+            compose.waitForIdle()
+            awaitTag("root-sidebar", 10_000L)
+            compose.onNodeWithTag("drawer-world-PERSONAL").performClick()
+
+            awaitTag("continue-google", 30_000L)
+            awaitText("Your session ended", 30_000L, true)
+            compose.onAllNodesWithTag("primary-worlds").assertCountEquals(0)
+        }
+    }
+
+    @Test
+    fun selectedWorldSurvivesActivityRecreationAfterServerRevalidation() {
+        val apiSession = VeltrixApiClient().register("recreate80-runtime-${System.currentTimeMillis()}", "Veltrix!Runtime2026", "Recreate Runtime")
+        runBlocking { SessionStore(targetContext).save(LocalSession(apiSession.accountId, apiSession.token)) }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            awaitTag("home-stage40", 30_000L)
+            compose.onNodeWithTag("world-PERSONAL").performClick()
+            awaitTag("personal-stage50", 20_000L)
+            compose.onNodeWithTag("world-PERSONAL").assertIsSelected()
+
+            scenario.recreate()
+
+            awaitTag("primary-worlds", 30_000L)
+            awaitTag("personal-stage50", 30_000L)
+            compose.onNodeWithTag("world-PERSONAL").assertIsSelected()
+            compose.onAllNodesWithTag("continue-google").assertCountEquals(0)
+        }
+    }
+
+    @Test
+    fun accountFormRemainsReachableWhileTypingWithImeAwareInsets() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            awaitTag("continue-google", 20_000L)
+            awaitTag("auth-login", 20_000L)
+            compose.onNodeWithTag("auth-login").performClick().performTextInput("ime-user")
+            compose.onNodeWithTag("auth-password").performClick().performTextInput("Veltrix!2026")
+            compose.waitForIdle()
+            compose.onNodeWithTag("auth-password").assertIsDisplayed()
+            compose.onNodeWithTag("auth-submit").assertIsDisplayed()
         }
     }
 
