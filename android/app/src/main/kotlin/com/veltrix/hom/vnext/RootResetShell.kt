@@ -168,42 +168,43 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
         VeltrixKineticWorld(world = world, reducedMotion = true) {
             Box(Modifier.fillMaxSize()) {
                 if (secondary == null) {
-                    AnimatedContent(targetState = world, label = "primary-world") { target ->
-                        when (target) {
-                            VeltrixWorld.HOME -> RootHomeWorldStage40(
-                                model = home,
-                                game = game,
-                                activeProject = activeProject,
-                                onMenu = { scope.launch { drawer.open() } },
-                                onNextMove = { route ->
-                                    when (route) {
-                                        RootHomeRoute.PROJECTS -> { continuity.project(activeProject?.id); worldName = VeltrixWorld.PROJECTS.name; secondaryName = null }
-                                        RootHomeRoute.PERSONAL -> { worldName = VeltrixWorld.PERSONAL.name; secondaryName = null }
-                                        RootHomeRoute.MISTAKES -> secondaryName = RootSecondary.MISTAKES.name
-                                        RootHomeRoute.LIBRARY -> secondaryName = RootSecondary.LIBRARY.name
-                                        RootHomeRoute.CHAT -> secondaryName = RootSecondary.CHAT.name
-                                    }
-                                },
-                            )
-                            VeltrixWorld.PERSONAL -> RootPersonalWorldStage50(personal, map, game, onMenu = { scope.launch { drawer.open() } })
-                            VeltrixWorld.STORE -> RootStoreWorldStage70(
-                                store = storeUi,
-                                inventory = inventoryUi,
-                                avatars = avatarsUi,
-                                game = gameUi,
-                                feedback = storeFeedback,
-                                onMenu = { scope.launch { drawer.open() } },
-                                onPurchase = featureVm::purchase,
-                                onEquipAvatar = featureVm::equipAvatar,
-                            )
-                            VeltrixWorld.PROJECTS -> RootProjectsWorldStage60(
-                                projects = projects,
-                                workspace = projectWorkspace,
-                                onMenu = { scope.launch { drawer.open() } },
-                                onOpenProject = { id -> continuity.project(id); featureVm.openProject(id) },
-                                onCloseProject = featureVm::clearWorkspace,
-                            )
-                        }
+                    // Primary-world identity switches directly: keeping outgoing and incoming full-screen
+                    // world trees alive together is pathological on software-rendered/low-end paths.
+                    // Spatial feedback still lives in the single spring-driven bottom lens below.
+                    when (world) {
+                        VeltrixWorld.HOME -> RootHomeWorldStage40(
+                            model = home,
+                            game = game,
+                            activeProject = activeProject,
+                            onMenu = { scope.launch { drawer.open() } },
+                            onNextMove = { route ->
+                                when (route) {
+                                    RootHomeRoute.PROJECTS -> { continuity.project(activeProject?.id); worldName = VeltrixWorld.PROJECTS.name; secondaryName = null }
+                                    RootHomeRoute.PERSONAL -> { worldName = VeltrixWorld.PERSONAL.name; secondaryName = null }
+                                    RootHomeRoute.MISTAKES -> secondaryName = RootSecondary.MISTAKES.name
+                                    RootHomeRoute.LIBRARY -> secondaryName = RootSecondary.LIBRARY.name
+                                    RootHomeRoute.CHAT -> secondaryName = RootSecondary.CHAT.name
+                                }
+                            },
+                        )
+                        VeltrixWorld.PERSONAL -> RootPersonalWorldStage50(personal, map, game, onMenu = { scope.launch { drawer.open() } })
+                        VeltrixWorld.STORE -> RootStoreWorldStage70(
+                            store = storeUi,
+                            inventory = inventoryUi,
+                            avatars = avatarsUi,
+                            game = gameUi,
+                            feedback = storeFeedback,
+                            onMenu = { scope.launch { drawer.open() } },
+                            onPurchase = featureVm::purchase,
+                            onEquipAvatar = featureVm::equipAvatar,
+                        )
+                        VeltrixWorld.PROJECTS -> RootProjectsWorldStage60(
+                            projects = projects,
+                            workspace = projectWorkspace,
+                            onMenu = { scope.launch { drawer.open() } },
+                            onOpenProject = { id -> continuity.project(id); featureVm.openProject(id) },
+                            onCloseProject = featureVm::clearWorkspace,
+                        )
                     }
                     RootKineticBottomBar(
                         selectedWorld = world,
