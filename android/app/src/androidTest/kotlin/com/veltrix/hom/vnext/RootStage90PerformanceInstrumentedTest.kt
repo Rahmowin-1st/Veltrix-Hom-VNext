@@ -15,6 +15,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.ceil
 
 /**
@@ -25,15 +26,15 @@ import kotlin.math.ceil
  * of the production primary-worlds control, so Choreographer owns timing exactly as it does at runtime.
  *
  * MainActivity is started directly rather than through ActivityScenario. ActivityScenario waits on
- * instrumentation-idle lifecycle synchronization; the real root intentionally owns an infinite ambient
- * transition, so that synchronization is not a valid readiness boundary for this PF test. We instead
- * start the production Activity normally and resolve its RESUMED instance from the Android lifecycle
- * monitor with a bounded timeout. This preserves real runtime timing without a Compose test clock.
+ * instrumentation-idle lifecycle synchronization; that synchronization is not a valid readiness
+ * boundary for this PF test. We instead start the production Activity normally and resolve its
+ * RESUMED instance from the Android lifecycle monitor with a bounded timeout.
  *
  * This remains debug/API36-emulator sanity only; it is not a release/profileable or physical-device claim.
  */
 class RootStage90PerformanceInstrumentedTest {
     private data class FrameSample(
+        val label: String,
         val uiNanos: Long,
         val cpuNanos: Long,
         val totalNanos: Long,
@@ -70,6 +71,7 @@ class RootStage90PerformanceInstrumentedTest {
         phase("session_saved")
 
         val samples = Collections.synchronizedList(ArrayList<FrameSample>(256))
+        val currentLabel = AtomicReference("unclassified")
         var tracker: JankStats? = null
 
         phase("direct_activity_start")
@@ -95,6 +97,7 @@ class RootStage90PerformanceInstrumentedTest {
             tracker = JankStats.createAndTrack(activity.window) { volatile ->
                 val frame = volatile as? FrameDataApi31 ?: return@createAndTrack
                 samples += FrameSample(
+                    label = currentLabel.get(),
                     uiNanos = frame.frameDurationUiNanos,
                     cpuNanos = frame.frameDurationCpuNanos,
                     totalNanos = frame.frameDurationTotalNanos,
@@ -112,10 +115,13 @@ class RootStage90PerformanceInstrumentedTest {
             instrumentation.uiAutomation.executeShellCommand("input tap $x $y").close()
         }
 
-        fun navigationCycle(settleMs: Long, label: String) {
+        val worldLabels = arrayOf("HOME", "PERSONAL", "STORE", "PROJECTS")
+        fun navigationCycle(settleMs: Long, cycleLabel: String) {
             // Personal -> Store -> Projects -> Home on the persistent production shell.
             for (index in intArrayOf(1, 2, 3, 0)) {
-                phase("${label}_tap_$index")
+                val label = "${cycleLabel}_${worldLabels[index]}"
+                currentLabel.set(label)
+                phase("${label}_tap")
                 shellTap(navX[index], navY)
                 SystemClock.sleep(settleMs)
             }
@@ -126,16 +132,15 @@ class RootStage90PerformanceInstrumentedTest {
         SystemClock.sleep(1_500L)
         phase("warmup_start")
         navigationCycle(420L, "warmup")
-        // The root intentionally owns a low-frequency infinite ambient transition. Waiting for
-        // global instrumentation idleness here can therefore stall despite a healthy UI. A fixed
-        // post-input settle is the correct boundary for this real-Choreographer PF sample.
         SystemClock.sleep(350L)
         synchronized(samples) { samples.clear() }
+        currentLabel.set("measurement_ready")
         phase("warmup_complete")
 
         instrumentation.runOnMainSync { requireNotNull(tracker).isTrackingEnabled = true }
         phase("tracking_enabled")
         repeat(3) { cycle -> navigationCycle(420L, "measure_$cycle") }
+        currentLabel.set("post_measure_settle")
         SystemClock.sleep(450L)
         instrumentation.runOnMainSync { requireNotNull(tracker).isTrackingEnabled = false }
         phase("tracking_disabled")
@@ -168,6 +173,28 @@ class RootStage90PerformanceInstrumentedTest {
                 "ui_p95_ms=${"%.2f".format(uiP95)} cpu_p95_ms=${"%.2f".format(cpuP95)} " +
                     "total_p95_ms=${"%.2f".format(totalP95)} overrun_p95_ms=${"%.2f".format(overrunP95)}",
             )
+            appendLine("WORLD_ATTRIBUTION_BEGIN")
+            snapshot.groupBy { it.label }.toSortedMap().forEach { (label, frames) ->
+                val labelJank = frames.count { it.jank }
+                val labelPct = if (frames.isEmpty()) 0.0 else labelJank * 100.0 / frames.size
+                appendLine(
+                    "label=$label samples=${frames.size} jank=$labelJank jank_pct=${"%.2f".format(labelPct)} " +
+                        "cpu_p95_ms=${"%.2f".format(percentile(frames.map { it.cpuNanos / 1_000_000.0 }, 95))} " +
+                        "total_p95_ms=${"%.2f".format(percentile(frames.map { it.totalNanos / 1_000_000.0 }, 95))}",
+                )
+            }
+            appendLine("WORLD_ATTRIBUTION_END")
+            appendLine("FRAME_SAMPLES_BEGIN")
+            snapshot.forEachIndexed { index, frame ->
+                appendLine(
+                    "frame=$index label=${frame.label} jank=${frame.jank} " +
+                        "ui_ms=${"%.2f".format(frame.uiNanos / 1_000_000.0)} " +
+                        "cpu_ms=${"%.2f".format(frame.cpuNanos / 1_000_000.0)} " +
+                        "total_ms=${"%.2f".format(frame.totalNanos / 1_000_000.0)} " +
+                        "overrun_ms=${"%.2f".format(frame.overrunNanos / 1_000_000.0)}",
+                )
+            }
+            appendLine("FRAME_SAMPLES_END")
             appendLine("measurement=RAW_SHELL_INPUT_REAL_CHOREOGRAPHER")
             appendLine("activity_launch=DIRECT_MAIN_ACTIVITY_START_NO_IDLE_SYNC")
             appendLine("classification=DEBUG_API36_EMULATOR_SANITY_ONLY")
@@ -218,9 +245,8 @@ class RootStage90PerformanceInstrumentedTest {
         val deadline = SystemClock.uptimeMillis() + timeoutMillis
         var poll = 0
         while (SystemClock.uptimeMillis() < deadline) {
-            // Do not call waitForIdleSync(): the redesigned root intentionally contains an infinite
-            // ambient Compose transition, so global "idle" is not a valid readiness signal. Poll the
-            // accessibility tree directly and keep every retry bounded by the outer uptime deadline.
+            // Do not call waitForIdleSync(): root readiness is proven from its accessibility tree,
+            // not from global instrumentation idleness.
             val root = instrumentation.uiAutomation.rootInActiveWindow
             val node = root?.let { findByContentDescription(it, "Primary worlds") }
             if (node != null) {
