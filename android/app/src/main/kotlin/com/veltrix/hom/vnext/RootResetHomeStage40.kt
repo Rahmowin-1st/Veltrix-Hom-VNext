@@ -86,13 +86,13 @@ fun RootHomeWorldStage40(
             verticalArrangement = Arrangement.spacedBy(sectionGap),
         ) {
             Row(
-                Modifier.fillMaxWidth().height(if (compact) 44.dp else 52.dp),
+                Modifier.fillMaxWidth().height(52.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
                     onClick = onMenu,
                     modifier = Modifier
-                        .size(if (compact) 40.dp else 44.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = .70f))
                         .testTag("home-menu"),
