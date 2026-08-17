@@ -162,7 +162,10 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
         },
         scrimColor = Color(0x330F172A),
     ) {
-        VeltrixKineticWorld(world = world, reducedMotion = rememberVeltrixEffectPolicy().reducedMotion) {
+        // Resting scene stays optically rich but static. Interaction motion remains in the moving
+        // primary-world lens and direct-manipulation surfaces. This avoids a permanent full-screen
+        // redraw loop on software-rendered/low-end paths while preserving the same visual frame.
+        VeltrixKineticWorld(world = world, reducedMotion = true) {
             Box(Modifier.fillMaxSize()) {
                 if (secondary == null) {
                     AnimatedContent(targetState = world, label = "primary-world") { target ->
