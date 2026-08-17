@@ -122,7 +122,7 @@ class RootStage90PerformanceInstrumentedTest {
             appendLine("RELEASE_PROFILEABLE_PF=NOT_VERIFIED")
             appendLine("PHYSICAL_DEVICE_PF=NOT_VERIFIED")
         }
-        val out = File(requireNotNull(target.getExternalFilesDir(null)), "stage90").apply { mkdirs() }
+        val out = File(target.filesDir, "stage90").apply { mkdirs() }
         File(out, "jankstats-root.txt").writeText(report)
         assertTrue(report, pass)
     }
