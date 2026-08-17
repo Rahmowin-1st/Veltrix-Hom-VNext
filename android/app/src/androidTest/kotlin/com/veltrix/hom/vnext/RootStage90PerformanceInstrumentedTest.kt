@@ -1,6 +1,7 @@
 package com.veltrix.hom.vnext
 
 import android.graphics.Rect
+import android.os.Bundle
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.metrics.performance.FrameDataApi31
@@ -38,7 +39,15 @@ class RootStage90PerformanceInstrumentedTest {
         val out = File(target.filesDir, "stage90").apply { mkdirs() }
         val phaseFile = File(out, "performance-phases.txt").apply { writeText("") }
         fun phase(value: String) {
-            phaseFile.appendText("${SystemClock.uptimeMillis()} $value\n")
+            val now = SystemClock.uptimeMillis()
+            phaseFile.appendText("$now $value\n")
+            instrumentation.sendStatus(
+                2,
+                Bundle().apply {
+                    putString("stage90_pf_phase", value)
+                    putLong("stage90_pf_uptime_ms", now)
+                },
+            )
         }
 
         phase("start")
@@ -78,10 +87,9 @@ class RootStage90PerformanceInstrumentedTest {
             phase("tracker_created")
 
             fun shellTap(x: Int, y: Int) {
-                // `input tap` is a fire-and-settle input source. Reading this shell pipe to EOF can
-                // block indefinitely on some emulator/adb combinations even though the tap was
-                // already delivered. Closing the descriptor immediately avoids contaminating the PF
-                // measurement with an unbounded transport wait; the bounded settle below owns timing.
+                // `input tap` is fire-and-settle input. Reading this shell pipe to EOF can block
+                // indefinitely on some emulator/adb combinations even after the tap was delivered.
+                // Close immediately; the bounded settle below owns timing, not transport EOF.
                 instrumentation.uiAutomation.executeShellCommand("input tap $x $y").close()
             }
 
