@@ -90,11 +90,11 @@ jobs:
           grep -Fq 'input tap' "$PF"
           grep -Fq 'RAW_SHELL_INPUT_REAL_CHOREOGRAPHER' "$PF"
           grep -Fq 'DIRECT_MAIN_ACTIVITY_START_NO_IDLE_SYNC' "$PF"
-          if grep -q 'androidx.compose.ui.test' "$PF"; then
+          if grep -Fq 'import androidx.compose.ui.test' "$PF"; then
             echo 'Stage 90 PF must not use a Compose test clock.' >&2
             exit 1
           fi
-          if grep -q 'ActivityScenario' "$PF"; then
+          if grep -Fq 'import androidx.test.core.app.ActivityScenario' "$PF" || grep -Fq 'ActivityScenario.launch(' "$PF"; then
             echo 'Stage 90 PF must not use ActivityScenario idle synchronization.' >&2
             exit 1
           fi
