@@ -63,71 +63,78 @@ class RootStage90PerformanceInstrumentedTest {
         val samples = Collections.synchronizedList(ArrayList<FrameSample>(256))
         var tracker: JankStats? = null
 
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            phase("activity_launched")
-            phase("nav_lookup_start")
-            val navBounds = waitForPrimaryWorldsBounds(
-                instrumentation = instrumentation,
-                timeoutMillis = 30_000L,
-                onProgress = ::phase,
-            )
-            phase("primary_worlds_found_${navBounds.width()}x${navBounds.height()}")
-            val navY = navBounds.centerY()
-            val navX = IntArray(4) { index ->
-                navBounds.left + ((index * 2 + 1) * navBounds.width()) / 8
-            }
-
-            scenario.onActivity { activity ->
-                tracker = JankStats.createAndTrack(activity.window) { volatile ->
-                    val frame = volatile as? FrameDataApi31 ?: return@createAndTrack
-                    samples += FrameSample(
-                        uiNanos = frame.frameDurationUiNanos,
-                        cpuNanos = frame.frameDurationCpuNanos,
-                        totalNanos = frame.frameDurationTotalNanos,
-                        overrunNanos = frame.frameOverrunNanos,
-                        jank = frame.isJank,
-                    )
-                }.also { it.isTrackingEnabled = false }
-            }
-            phase("tracker_created")
-
-            fun shellTap(x: Int, y: Int) {
-                // `input tap` is fire-and-settle input. Reading this shell pipe to EOF can block
-                // indefinitely on some emulator/adb combinations even after the tap was delivered.
-                // Close immediately; the bounded settle below owns timing, not transport EOF.
-                instrumentation.uiAutomation.executeShellCommand("input tap $x $y").close()
-            }
-
-            fun navigationCycle(settleMs: Long, label: String) {
-                // Personal -> Store -> Projects -> Home on the persistent production shell.
-                for (index in intArrayOf(1, 2, 3, 0)) {
-                    phase("${label}_tap_$index")
-                    shellTap(navX[index], navY)
-                    SystemClock.sleep(settleMs)
-                }
-            }
-
-            // Exclude cold composition, class loading and first network materialization from the
-            // steady-state interaction sample; every destination is exercised once before capture.
-            SystemClock.sleep(1_500L)
-            phase("warmup_start")
-            navigationCycle(420L, "warmup")
-            // The root intentionally owns a low-frequency infinite ambient transition. Waiting for
-            // global instrumentation idleness here can therefore stall despite a healthy UI. A fixed
-            // post-input settle is the correct boundary for this real-Choreographer PF sample.
-            SystemClock.sleep(350L)
-            synchronized(samples) { samples.clear() }
-            phase("warmup_complete")
-
-            scenario.onActivity { requireNotNull(tracker).isTrackingEnabled = true }
-            phase("tracking_enabled")
-            repeat(3) { cycle -> navigationCycle(420L, "measure_$cycle") }
-            SystemClock.sleep(450L)
-            scenario.onActivity { requireNotNull(tracker).isTrackingEnabled = false }
-            phase("tracking_disabled")
+        // Do not wrap this ActivityScenario in `use {}`. On this API36 emulator the scenario's
+        // lifecycle teardown can block long after measurement has completed. The Stage90 harness
+        // already isolates every test in a dedicated instrumentation process and force-stops both
+        // target/test packages before the next invocation, so teardown is safely delegated to that
+        // process boundary. Most importantly, PF evidence is recorded before any cleanup path.
+        val scenario = ActivityScenario.launch(MainActivity::class.java)
+        phase("activity_launched")
+        phase("nav_lookup_start")
+        val navBounds = waitForPrimaryWorldsBounds(
+            instrumentation = instrumentation,
+            timeoutMillis = 30_000L,
+            onProgress = ::phase,
+        )
+        phase("primary_worlds_found_${navBounds.width()}x${navBounds.height()}")
+        val navY = navBounds.centerY()
+        val navX = IntArray(4) { index ->
+            navBounds.left + ((index * 2 + 1) * navBounds.width()) / 8
         }
-        phase("activity_closed")
 
+        scenario.onActivity { activity ->
+            tracker = JankStats.createAndTrack(activity.window) { volatile ->
+                val frame = volatile as? FrameDataApi31 ?: return@createAndTrack
+                samples += FrameSample(
+                    uiNanos = frame.frameDurationUiNanos,
+                    cpuNanos = frame.frameDurationCpuNanos,
+                    totalNanos = frame.frameDurationTotalNanos,
+                    overrunNanos = frame.frameOverrunNanos,
+                    jank = frame.isJank,
+                )
+            }.also { it.isTrackingEnabled = false }
+        }
+        phase("tracker_created")
+
+        fun shellTap(x: Int, y: Int) {
+            // `input tap` is fire-and-settle input. Reading this shell pipe to EOF can block
+            // indefinitely on some emulator/adb combinations even after the tap was delivered.
+            // Close immediately; the bounded settle below owns timing, not transport EOF.
+            instrumentation.uiAutomation.executeShellCommand("input tap $x $y").close()
+        }
+
+        fun navigationCycle(settleMs: Long, label: String) {
+            // Personal -> Store -> Projects -> Home on the persistent production shell.
+            for (index in intArrayOf(1, 2, 3, 0)) {
+                phase("${label}_tap_$index")
+                shellTap(navX[index], navY)
+                SystemClock.sleep(settleMs)
+            }
+        }
+
+        // Exclude cold composition, class loading and first network materialization from the
+        // steady-state interaction sample; every destination is exercised once before capture.
+        SystemClock.sleep(1_500L)
+        phase("warmup_start")
+        navigationCycle(420L, "warmup")
+        // The root intentionally owns a low-frequency infinite ambient transition. Waiting for
+        // global instrumentation idleness here can therefore stall despite a healthy UI. A fixed
+        // post-input settle is the correct boundary for this real-Choreographer PF sample.
+        SystemClock.sleep(350L)
+        synchronized(samples) { samples.clear() }
+        phase("warmup_complete")
+
+        scenario.onActivity { requireNotNull(tracker).isTrackingEnabled = true }
+        phase("tracking_enabled")
+        repeat(3) { cycle -> navigationCycle(420L, "measure_$cycle") }
+        SystemClock.sleep(450L)
+        scenario.onActivity { requireNotNull(tracker).isTrackingEnabled = false }
+        phase("tracking_disabled")
+
+        // Snapshot and persist acceptance evidence before any ActivityScenario cleanup. This turns
+        // the previously blocking teardown into a non-critical concern and makes a real threshold
+        // failure distinguishable from lifecycle-harness cleanup latency.
+        phase("measurement_snapshot_started")
         val snapshot = synchronized(samples) { samples.toList() }
         val jankCount = snapshot.count { it.jank }
         val jankPct = if (snapshot.isEmpty()) 100.0 else jankCount * 100.0 / snapshot.size
@@ -159,6 +166,7 @@ class RootStage90PerformanceInstrumentedTest {
         }
         File(out, "jankstats-root.txt").writeText(report)
         phase("report_written")
+        phase("scenario_cleanup_deferred_to_isolated_process_exit")
         assertTrue(report, pass)
     }
 
