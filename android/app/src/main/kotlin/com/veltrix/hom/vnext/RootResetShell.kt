@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -259,26 +258,107 @@ private fun RootSidebar(selected: String?, onSecondary: (String) -> Unit, onWorl
 }
 
 @Composable
-private fun RootKineticBottomBar(selectedWorld: VeltrixWorld, onSelected: (VeltrixWorld) -> Unit, modifier: Modifier = Modifier) {
+private fun RootKineticBottomBar(
+    selectedWorld: VeltrixWorld,
+    onSelected: (VeltrixWorld) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val itemWidth = 76.dp
     val index = VeltrixWorld.entries.indexOf(selectedWorld).coerceAtLeast(0)
-    val lensX by animateDpAsState(targetValue = itemWidth * index, animationSpec = spring(dampingRatio = .78f, stiffness = 420f), label = "world-lens")
+    val policy = rememberVeltrixEffectPolicy()
+    val lensX by animateDpAsState(
+        targetValue = itemWidth * index,
+        animationSpec = if (policy.reducedMotion) androidx.compose.animation.core.snap() else spring(dampingRatio = .78f, stiffness = 420f),
+        label = "world-lens-position",
+    )
+    val accent = when (selectedWorld) {
+        VeltrixWorld.HOME -> KineticColor.Sky
+        VeltrixWorld.PERSONAL -> KineticColor.Violet
+        VeltrixWorld.STORE -> KineticColor.Ember
+        VeltrixWorld.PROJECTS -> KineticColor.Mint
+    }
+
     KineticGlass(
-        modifier.navigationBarsPadding().padding(bottom = 10.dp).height(66.dp).width(itemWidth * 4f).testTag("primary-worlds").semantics { contentDescription = "Primary worlds" },
+        modifier
+            .navigationBarsPadding()
+            .padding(bottom = 10.dp)
+            .height(66.dp)
+            .width(itemWidth * 4f)
+            .testTag("primary-worlds")
+            .semantics { contentDescription = "Primary worlds" },
         radius = 26.dp,
-        strong = true,
+        strong = false,
     ) {
         Box(Modifier.fillMaxSize()) {
-            Box(Modifier.padding(start = lensX + 5.dp, top = 5.dp).size(itemWidth - 10.dp, 56.dp).clip(RoundedCornerShape(21.dp)).background(Color.White.copy(alpha = .82f)).testTag("world-lens"))
+            // Exactly one moving optical lens. The tray itself stays calm; selection owns the
+            // thicker environment-responsive material and travels with spring continuity.
+            KineticGlass(
+                modifier = Modifier
+                    .padding(start = lensX + 5.dp, top = 5.dp)
+                    .size(itemWidth - 10.dp, 56.dp)
+                    .testTag("world-lens"),
+                radius = 21.dp,
+                strong = true,
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                    Box(
+                        Modifier
+                            .padding(bottom = 7.dp)
+                            .size(18.dp, 2.dp)
+                            .clip(RoundedCornerShape(1.dp))
+                    ) {
+                        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) { drawRoundRect(accent.copy(alpha = .76f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f)) }
+                    }
+                }
+            }
             Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
                 VeltrixWorld.entries.forEach { item ->
+                    val selected = item == selectedWorld
+                    val itemAccent = when (item) {
+                        VeltrixWorld.HOME -> KineticColor.Sky
+                        VeltrixWorld.PERSONAL -> KineticColor.Violet
+                        VeltrixWorld.STORE -> KineticColor.Ember
+                        VeltrixWorld.PROJECTS -> KineticColor.Mint
+                    }
                     Column(
-                        Modifier.width(itemWidth).fillMaxSize().clickable { onSelected(item) }.testTag("world-${item.name}").semantics { this.selected = item == selectedWorld; role = Role.Tab },
+                        Modifier
+                            .width(itemWidth)
+                            .fillMaxSize()
+                            .clickable { onSelected(item) }
+                            .testTag("world-${item.name}")
+                            .semantics { this.selected = selected; role = Role.Tab },
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text(item.name.take(1), color = if (item == selectedWorld) KineticColor.Ink else KineticColor.Muted, fontWeight = FontWeight.Black)
-                        Text(item.name.lowercase().replaceFirstChar { it.uppercase() }, color = KineticColor.Muted, style = androidx.compose.material3.MaterialTheme.typography.labelSmall)
+                        Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+                            androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                                val c = if (selected) itemAccent else KineticColor.Muted.copy(alpha = .64f)
+                                when (item) {
+                                    VeltrixWorld.HOME -> {
+                                        drawCircle(c.copy(alpha = if (selected) .18f else .08f), radius = size.minDimension * .47f)
+                                        drawCircle(c, radius = size.minDimension * .18f)
+                                    }
+                                    VeltrixWorld.PERSONAL -> {
+                                        drawCircle(c, radius = size.minDimension * .24f, center = androidx.compose.ui.geometry.Offset(size.width * .50f, size.height * .38f))
+                                        drawArc(c, 205f, 130f, false, style = androidx.compose.ui.graphics.drawscope.Stroke(size.minDimension * .13f, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                                    }
+                                    VeltrixWorld.STORE -> {
+                                        drawCircle(c, radius = size.minDimension * .26f)
+                                        drawCircle(Color.White.copy(alpha = if (selected) .78f else .42f), radius = size.minDimension * .10f)
+                                    }
+                                    VeltrixWorld.PROJECTS -> {
+                                        drawRoundRect(c, topLeft = androidx.compose.ui.geometry.Offset(size.width * .13f, size.height * .27f), size = androidx.compose.ui.geometry.Size(size.width * .74f, size.height * .57f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.minDimension * .16f))
+                                        drawRoundRect(c.copy(alpha = .62f), topLeft = androidx.compose.ui.geometry.Offset(size.width * .26f, size.height * .14f), size = androidx.compose.ui.geometry.Size(size.width * .46f, size.height * .18f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.minDimension * .09f))
+                                    }
+                                }
+                            }
+                        }
+                        Text(
+                            item.name.lowercase().replaceFirstChar { it.uppercase() },
+                            color = if (selected) KineticColor.Ink else KineticColor.Muted,
+                            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        )
                     }
                 }
             }
