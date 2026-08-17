@@ -94,7 +94,7 @@ fun RootPersonalWorldStage50(model: PersonalFinalModel?, map: PersonalMapUiModel
 @Composable
 private fun PersonalHeader50(onMenu: () -> Unit) {
     Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = onMenu, modifier = Modifier.heightIn(min = 48.dp).testTag("personal-menu")) {
+        TextButton(onClick = onMenu, modifier = Modifier.size(48.dp).testTag("personal-menu")) {
             Text("≡", color = KineticColor.Ink, fontWeight = FontWeight.Black)
         }
         Column(Modifier.padding(start = 4.dp)) {
