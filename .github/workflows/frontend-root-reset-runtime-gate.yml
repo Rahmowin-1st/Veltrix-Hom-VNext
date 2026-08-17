@@ -109,7 +109,7 @@ jobs:
           disable-animations: false
           emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
           script: bash scripts/root_reset_runtime_gate.sh
-      - name: Fail-closed Stage 30 through Stage 60 verification
+      - name: Fail-closed Stage 30 through Stage 70 verification
         shell: bash
         run: |
           set -euo pipefail
@@ -118,8 +118,9 @@ jobs:
           for marker in HOME_ONE_SCREEN_CORE=PASS HOME_FRESH_PROJECT_CONTEXT=PASS HOME_BRAIN_PULSE=PASS HOME_NEXT_MOVE_REAL_ROUTE=PASS HOME_BACK_CONTINUITY=PASS; do grep -qx "$marker" evidence/runtime/stage40-gate.txt; done
           for marker in PERSONAL_IDENTITY_FIRST=PASS PERSISTENT_CHARACTER_IDENTITY=PASS PERSONAL_GROWTH_REAL_DATA=PASS MAP_BACKEND_GATING_PRESERVED=PASS MAP_PROGRESSION_WORLD_NOT_NODE_CHART=PASS PERSONAL_BACK_TO_HOME=PASS; do grep -qx "$marker" evidence/runtime/stage50-gate.txt; done
           for marker in PROJECTS_OPERATING_WORLDS=PASS PROJECT_CARD_OPENS_REAL_WORKSPACE=PASS PROJECT_WORKSPACE_FRESH_ONLY=PASS PROJECT_GOALS_CONTEXT_STATS=PASS PROJECT_BRAIN_SNAPSHOT=PASS PROJECT_BACK_HIERARCHY=PASS; do grep -qx "$marker" evidence/runtime/stage60-gate.txt; done
-          grep -qx 'ROOT_RESET_RUNTIME=PASS tests=5 failures=0 errors=0 skipped=0' evidence/runtime/root-reset-test-summary.txt
-          echo 'ROOT_RESET_STAGE60_RUNTIME=PASS' | tee evidence/runtime/final.txt
+          for marker in STORE_FRESH_SERVER_SEMANTICS=PASS STORE_AUTHORITATIVE_BALANCE=PASS STORE_CHARACTER_PREVIEW=PASS STORE_EQUIPPED_TRUTH=PASS STORE_CATALOG_OWNERSHIP_STATES=PASS STORE_PURCHASE_EQUIP_ACTIONS_WIRED=PASS STORE_BACK_TO_HOME=PASS; do grep -qx "$marker" evidence/runtime/stage70-gate.txt; done
+          grep -qx 'ROOT_RESET_RUNTIME=PASS tests=6 failures=0 errors=0 skipped=0' evidence/runtime/root-reset-test-summary.txt
+          echo 'ROOT_RESET_STAGE70_RUNTIME=PASS' | tee evidence/runtime/final.txt
       - name: Upload root-reset runtime evidence
         if: always()
         uses: actions/upload-artifact@v4
