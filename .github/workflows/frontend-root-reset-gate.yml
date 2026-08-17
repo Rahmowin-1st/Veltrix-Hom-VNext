@@ -121,6 +121,20 @@ jobs:
           sha256sum android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk | tee evidence/androidtest-apk-sha256.txt
           echo 'ROOT_RESET_FOUNDATION_BUILD=PASS' | tee evidence/foundation-gate.txt
 
+      - name: Stage 100 durable source and APK package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp android/app/build/outputs/apk/debug/app-debug.apk evidence/Veltrix-Hom-VNext-debug.apk
+          cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk evidence/Veltrix-Hom-VNext-androidTest.apk
+          git archive --format=zip --output=evidence/Veltrix-Hom-VNext-exact-source.zip HEAD
+          sha256sum evidence/Veltrix-Hom-VNext-debug.apk | tee evidence/final-debug-apk-sha256.txt
+          sha256sum evidence/Veltrix-Hom-VNext-androidTest.apk | tee evidence/final-androidtest-apk-sha256.txt
+          sha256sum evidence/Veltrix-Hom-VNext-exact-source.zip | tee evidence/exact-source-sha256.txt
+          test "$(cut -d' ' -f1 evidence/apk-sha256.txt)" = "$(cut -d' ' -f1 evidence/final-debug-apk-sha256.txt)"
+          test "$(cut -d' ' -f1 evidence/androidtest-apk-sha256.txt)" = "$(cut -d' ' -f1 evidence/final-androidtest-apk-sha256.txt)"
+          printf 'STAGE100_ARTIFACT_PACKAGE=PASS\ncommit=%s\n' "$GITHUB_SHA" | tee evidence/stage100-artifact-gate.txt
+
       - name: Upload root-reset evidence
         if: always()
         uses: actions/upload-artifact@v4
