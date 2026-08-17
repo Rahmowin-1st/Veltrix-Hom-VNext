@@ -8,8 +8,6 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.metrics.performance.FrameDataApi31
-import androidx.metrics.performance.JankStats
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
@@ -20,13 +18,11 @@ import org.junit.Rule
 import org.junit.Test
 import java.io.File
 import java.io.FileOutputStream
-import java.util.Collections
-import kotlin.math.ceil
 
 /**
- * Current-root Stage 90 proof. This intentionally launches MainActivity, never the legacy evidence
- * activity, so screenshots, semantics and frame diagnostics describe the actual root-reset UI.
- * JankStats numbers are emulator sanity evidence only; they are not physical-device PF claims.
+ * Current-root Stage 90 visual and accessibility proof. This intentionally launches MainActivity,
+ * never the legacy evidence activity. Frame timing lives in RootStage90PerformanceInstrumentedTest,
+ * which intentionally has no Compose test clock.
  */
 class RootStage90InstrumentedTest {
     @get:Rule val compose = createEmptyComposeRule()
@@ -140,65 +136,6 @@ class RootStage90InstrumentedTest {
         File(stage90Dir, "reduced-motion-report.txt").writeText("REDUCED_MOTION_PATH=PASS\nDIRECT_NAVIGATION=PASS\nBACK_CONTINUITY=PASS\n")
     }
 
-    @Test
-    fun currentRootPrimaryNavigationHasNonPathologicalEmulatorFrameClassification() {
-        val apiSession = VeltrixApiClient().register("stage90-pf-${System.currentTimeMillis()}", "Veltrix!Runtime2026", "Stage 90 PF")
-        runBlocking { SessionStore(targetContext).save(LocalSession(apiSession.accountId, apiSession.token)) }
-        val samples = Collections.synchronizedList(ArrayList<FrameSample>(256))
-        var tracker: JankStats? = null
-
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            awaitTag("home-stage40", 30_000L)
-            scenario.onActivity { activity ->
-                tracker = JankStats.createAndTrack(activity.window) { volatile ->
-                    val frame = volatile as? FrameDataApi31 ?: return@createAndTrack
-                    samples += FrameSample(
-                        uiNanos = frame.frameDurationUiNanos,
-                        cpuNanos = frame.frameDurationCpuNanos,
-                        totalNanos = frame.frameDurationTotalNanos,
-                        overrunNanos = frame.frameOverrunNanos,
-                        jank = frame.isJank,
-                    )
-                }.also { it.isTrackingEnabled = false }
-            }
-
-            fun cycle(settleMs: Long) {
-                for (world in listOf("PERSONAL", "STORE", "PROJECTS", "HOME")) {
-                    compose.onNodeWithTag("world-$world").performClick()
-                    compose.waitForIdle()
-                    SystemClock.sleep(settleMs)
-                }
-            }
-
-            cycle(300)
-            synchronized(samples) { samples.clear() }
-            scenario.onActivity { requireNotNull(tracker).isTrackingEnabled = true }
-            repeat(3) { cycle(280) }
-            SystemClock.sleep(350)
-            scenario.onActivity { requireNotNull(tracker).isTrackingEnabled = false }
-        }
-
-        val snapshot = synchronized(samples) { samples.toList() }
-        val jankCount = snapshot.count { it.jank }
-        val jankPct = if (snapshot.isEmpty()) 100.0 else jankCount * 100.0 / snapshot.size
-        val invalid = snapshot.count { it.uiNanos < 0L || it.cpuNanos < 0L || it.totalNanos < 0L || it.cpuNanos < it.uiNanos }
-        val uiP95 = percentile(snapshot.map { it.uiNanos / 1_000_000.0 }, 95)
-        val cpuP95 = percentile(snapshot.map { it.cpuNanos / 1_000_000.0 }, 95)
-        val totalP95 = percentile(snapshot.map { it.totalNanos / 1_000_000.0 }, 95)
-        val overrunP95 = percentile(snapshot.map { it.overrunNanos / 1_000_000.0 }, 95)
-        val pass = snapshot.size >= 20 && invalid == 0 && jankPct <= 25.0
-        val report = buildString {
-            appendLine("ROOT_STAGE90_JANKSTATS=${if (pass) "PASS" else "FAIL"}")
-            appendLine("samples=${snapshot.size} jank=$jankCount jank_pct=${"%.2f".format(jankPct)} invalid=$invalid")
-            appendLine("ui_p95_ms=${"%.2f".format(uiP95)} cpu_p95_ms=${"%.2f".format(cpuP95)} total_p95_ms=${"%.2f".format(totalP95)} overrun_p95_ms=${"%.2f".format(overrunP95)}")
-            appendLine("classification=DEBUG_API36_EMULATOR_SANITY_ONLY")
-            appendLine("RELEASE_PROFILEABLE_PF=NOT_VERIFIED")
-            appendLine("PHYSICAL_DEVICE_PF=NOT_VERIFIED")
-        }
-        File(stage90Dir, "jankstats-root.txt").writeText(report)
-        assertTrue(report, pass)
-    }
-
     private fun assertMinTouchTarget(tag: String, minDp: Float = 48f) {
         val node = compose.onNodeWithTag(tag).fetchSemanticsNode()
         val density = targetContext.resources.displayMetrics.density
@@ -237,19 +174,4 @@ class RootStage90InstrumentedTest {
     private fun awaitTag(tag: String, timeoutMillis: Long = 15_000L) {
         compose.waitUntil(timeoutMillis) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
     }
-
-    private fun percentile(values: List<Double>, percentile: Int): Double {
-        if (values.isEmpty()) return Double.POSITIVE_INFINITY
-        val sorted = values.sorted()
-        val index = (ceil(percentile / 100.0 * sorted.size).toInt() - 1).coerceIn(0, sorted.lastIndex)
-        return sorted[index]
-    }
-
-    private data class FrameSample(
-        val uiNanos: Long,
-        val cpuNanos: Long,
-        val totalNanos: Long,
-        val overrunNanos: Long,
-        val jank: Boolean,
-    )
 }
