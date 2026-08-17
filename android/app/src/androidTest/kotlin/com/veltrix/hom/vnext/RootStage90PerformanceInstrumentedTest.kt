@@ -1,13 +1,15 @@
 package com.veltrix.hom.vnext
 
+import android.content.Intent
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.metrics.performance.FrameDataApi31
 import androidx.metrics.performance.JankStats
-import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -21,6 +23,13 @@ import kotlin.math.ceil
  * Deliberately has no Compose test rule: Compose test clocks can virtualize animation time and
  * contaminate JankStats. Navigation is driven by real shell input against the accessibility bounds
  * of the production primary-worlds control, so Choreographer owns timing exactly as it does at runtime.
+ *
+ * MainActivity is started directly rather than through ActivityScenario. ActivityScenario waits on
+ * instrumentation-idle lifecycle synchronization; the real root intentionally owns an infinite ambient
+ * transition, so that synchronization is not a valid readiness boundary for this PF test. We instead
+ * start the production Activity normally and resolve its RESUMED instance from the Android lifecycle
+ * monitor with a bounded timeout. This preserves real runtime timing without a Compose test clock.
+ *
  * This remains debug/API36-emulator sanity only; it is not a release/profileable or physical-device claim.
  */
 class RootStage90PerformanceInstrumentedTest {
@@ -63,12 +72,12 @@ class RootStage90PerformanceInstrumentedTest {
         val samples = Collections.synchronizedList(ArrayList<FrameSample>(256))
         var tracker: JankStats? = null
 
-        // Do not wrap this ActivityScenario in `use {}`. On this API36 emulator the scenario's
-        // lifecycle teardown can block long after measurement has completed. The Stage90 harness
-        // already isolates every test in a dedicated instrumentation process and force-stops both
-        // target/test packages before the next invocation, so teardown is safely delegated to that
-        // process boundary. Most importantly, PF evidence is recorded before any cleanup path.
-        val scenario = ActivityScenario.launch(MainActivity::class.java)
+        phase("direct_activity_start")
+        val activity = launchMainActivityWithoutIdleSync(
+            instrumentation = instrumentation,
+            timeoutMillis = 30_000L,
+            onProgress = ::phase,
+        )
         phase("activity_launched")
         phase("nav_lookup_start")
         val navBounds = waitForPrimaryWorldsBounds(
@@ -82,7 +91,7 @@ class RootStage90PerformanceInstrumentedTest {
             navBounds.left + ((index * 2 + 1) * navBounds.width()) / 8
         }
 
-        scenario.onActivity { activity ->
+        instrumentation.runOnMainSync {
             tracker = JankStats.createAndTrack(activity.window) { volatile ->
                 val frame = volatile as? FrameDataApi31 ?: return@createAndTrack
                 samples += FrameSample(
@@ -124,16 +133,16 @@ class RootStage90PerformanceInstrumentedTest {
         synchronized(samples) { samples.clear() }
         phase("warmup_complete")
 
-        scenario.onActivity { requireNotNull(tracker).isTrackingEnabled = true }
+        instrumentation.runOnMainSync { requireNotNull(tracker).isTrackingEnabled = true }
         phase("tracking_enabled")
         repeat(3) { cycle -> navigationCycle(420L, "measure_$cycle") }
         SystemClock.sleep(450L)
-        scenario.onActivity { requireNotNull(tracker).isTrackingEnabled = false }
+        instrumentation.runOnMainSync { requireNotNull(tracker).isTrackingEnabled = false }
         phase("tracking_disabled")
 
-        // Snapshot and persist acceptance evidence before any ActivityScenario cleanup. This turns
-        // the previously blocking teardown into a non-critical concern and makes a real threshold
-        // failure distinguishable from lifecycle-harness cleanup latency.
+        // Snapshot and persist acceptance evidence before process cleanup. The Stage90 shell already
+        // force-stops target/test packages between isolated invocations, so Activity teardown is not
+        // part of the PF measurement or a prerequisite for evidence durability.
         phase("measurement_snapshot_started")
         val snapshot = synchronized(samples) { samples.toList() }
         val jankCount = snapshot.count { it.jank }
@@ -160,14 +169,45 @@ class RootStage90PerformanceInstrumentedTest {
                     "total_p95_ms=${"%.2f".format(totalP95)} overrun_p95_ms=${"%.2f".format(overrunP95)}",
             )
             appendLine("measurement=RAW_SHELL_INPUT_REAL_CHOREOGRAPHER")
+            appendLine("activity_launch=DIRECT_MAIN_ACTIVITY_START_NO_IDLE_SYNC")
             appendLine("classification=DEBUG_API36_EMULATOR_SANITY_ONLY")
             appendLine("RELEASE_PROFILEABLE_PF=NOT_VERIFIED")
             appendLine("PHYSICAL_DEVICE_PF=NOT_VERIFIED")
         }
         File(out, "jankstats-root.txt").writeText(report)
         phase("report_written")
-        phase("scenario_cleanup_deferred_to_isolated_process_exit")
+        phase("activity_cleanup_deferred_to_isolated_process_exit")
         assertTrue(report, pass)
+    }
+
+    private fun launchMainActivityWithoutIdleSync(
+        instrumentation: android.app.Instrumentation,
+        timeoutMillis: Long,
+        onProgress: (String) -> Unit,
+    ): MainActivity {
+        val target = instrumentation.targetContext
+        val intent = Intent(target, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        }
+        target.startActivity(intent)
+
+        val deadline = SystemClock.uptimeMillis() + timeoutMillis
+        var poll = 0
+        while (SystemClock.uptimeMillis() < deadline) {
+            var resumed: MainActivity? = null
+            instrumentation.runOnMainSync {
+                resumed = ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED)
+                    .filterIsInstance<MainActivity>()
+                    .firstOrNull()
+            }
+            if (resumed != null) return requireNotNull(resumed)
+            poll += 1
+            if (poll == 1 || poll % 10 == 0) onProgress("activity_resume_poll_$poll")
+            SystemClock.sleep(200L)
+        }
+        onProgress("activity_resume_timeout")
+        error("MainActivity did not reach RESUMED within ${timeoutMillis}ms")
     }
 
     private fun waitForPrimaryWorldsBounds(
