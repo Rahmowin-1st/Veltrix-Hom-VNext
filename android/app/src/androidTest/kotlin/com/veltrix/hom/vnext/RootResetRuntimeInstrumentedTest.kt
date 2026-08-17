@@ -1,7 +1,6 @@
 package com.veltrix.hom.vnext
 
 import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -39,8 +38,7 @@ class RootResetRuntimeInstrumentedTest {
 
     @Test
     fun serverValidatedSessionEntersFourWorldsBackReturnsHomeAndSignOutClosesWorld() {
-        val login = "root-runtime-${System.currentTimeMillis()}"
-        val apiSession = VeltrixApiClient().register(login, "Veltrix!Runtime2026", "Root Runtime")
+        val apiSession = VeltrixApiClient().register("root-runtime-${System.currentTimeMillis()}", "Veltrix!Runtime2026", "Root Runtime")
         runBlocking { SessionStore(targetContext).save(LocalSession(apiSession.accountId, apiSession.token)) }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             awaitTag("primary-worlds", 30_000L)
@@ -48,10 +46,10 @@ class RootResetRuntimeInstrumentedTest {
             compose.onNodeWithTag("world-HOME").assertIsSelected()
             compose.onNodeWithTag("world-PERSONAL").performClick(); compose.waitForIdle(); compose.onNodeWithTag("world-PERSONAL").assertIsSelected()
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }; compose.waitForIdle(); compose.onNodeWithTag("world-HOME").assertIsSelected()
-            compose.onNodeWithText("≡").performClick(); compose.mainClock.advanceTimeBy(1_000L); compose.waitForIdle(); awaitTag("root-sidebar")
+            compose.onNodeWithTag("home-menu").performClick(); compose.mainClock.advanceTimeBy(1_000L); compose.waitForIdle(); awaitTag("root-sidebar")
             compose.onNodeWithTag("root-sidebar-list").performScrollToIndex(18); compose.waitForIdle(); awaitTag("drawer-secondary-SETTINGS")
-            compose.onNodeWithTag("drawer-secondary-SETTINGS").performClick(); compose.mainClock.advanceTimeBy(1_000L); compose.waitForIdle(); awaitTag("root-account-surface")
-            compose.onNodeWithTag("sign-out").performClick(); awaitTag("continue-google")
+            compose.onNodeWithTag("drawer-secondary-SETTINGS").performClick(); compose.mainClock.advanceTimeBy(1_000L); compose.waitForIdle(); awaitTag("settings-stage70")
+            awaitTag("settings-sign-out"); compose.onNodeWithTag("settings-sign-out").performClick(); awaitTag("continue-google")
             compose.onAllNodesWithTag("primary-worlds").assertCountEquals(0)
         }
     }
@@ -143,10 +141,56 @@ class RootResetRuntimeInstrumentedTest {
             compose.onNodeWithTag("store-stage70").assertIsDisplayed(); compose.onNodeWithTag("store-balance").assertIsDisplayed(); compose.onNodeWithTag("store-preview").assertIsDisplayed(); compose.onNodeWithTag("store-avatar-equipped").assertIsDisplayed()
             awaitTag("store-avatar-$equipped", 30_000L)
             store.items.firstOrNull()?.let { awaitTag("store-item-${it.itemId}", 30_000L) }
-            compose.onNodeWithTag("store-inventory-count").assertExists()
+            awaitTag("store-inventory-count", 30_000L)
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
             compose.waitForIdle(); awaitTag("home-stage40", 10_000L); compose.onNodeWithTag("world-HOME").assertIsSelected()
         }
+    }
+
+    @Test
+    fun stage70GlobalSecondaryRoutesAreRealCapabilitiesWithNoPlaceholderBridge() {
+        val apiSession = VeltrixApiClient().register("global70-runtime-${System.currentTimeMillis()}", "Veltrix!Runtime2026", "Global Runtime")
+        runBlocking { SessionStore(targetContext).save(LocalSession(apiSession.accountId, apiSession.token)) }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            awaitTag("home-stage40", 30_000L)
+            val routes = listOf(
+                Triple("CHAT", 8, "chat-screen"),
+                Triple("LIBRARY", 9, null),
+                Triple("TESTING", 10, "testing-screen"),
+                Triple("PRACTICE", 11, "practice-screen"),
+                Triple("QUIZZES", 12, "quiz-screen"),
+                Triple("FLASHCARDS", 13, null),
+                Triple("MISTAKES", 14, null),
+                Triple("CALCULATOR", 15, "calculator-screen"),
+                Triple("TRANSLATE", 16, "translate-screen"),
+                Triple("NOTIFICATIONS", 17, "notifications-screen"),
+                Triple("SETTINGS", 18, "settings-stage70"),
+            )
+            routes.forEach { (name, index, innerTag) ->
+                openSecondary(name, index)
+                awaitTag("root-capability-$name", 20_000L)
+                innerTag?.let { awaitTag(it, 20_000L) }
+            }
+            awaitTag("settings-sign-out", 20_000L)
+            compose.onAllNodesWithText("is retained and is being moved into the new Veltrix shell.", substring = true).assertCountEquals(0)
+            scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            compose.waitForIdle(); awaitTag("home-stage40", 10_000L); compose.onNodeWithTag("world-HOME").assertIsSelected()
+        }
+    }
+
+    private fun openSecondary(name: String, drawerIndex: Int) {
+        val rootMenuVisible = compose.onAllNodesWithTag("root-menu").fetchSemanticsNodes().isNotEmpty()
+        if (rootMenuVisible) compose.onNodeWithTag("root-menu").performClick()
+        else compose.onNodeWithTag("home-menu").performClick()
+        compose.mainClock.advanceTimeBy(1_000L)
+        compose.waitForIdle()
+        awaitTag("root-sidebar", 10_000L)
+        compose.onNodeWithTag("root-sidebar-list").performScrollToIndex(drawerIndex)
+        compose.waitForIdle()
+        awaitTag("drawer-secondary-$name", 10_000L)
+        compose.onNodeWithTag("drawer-secondary-$name").performClick()
+        compose.mainClock.advanceTimeBy(1_000L)
+        compose.waitForIdle()
     }
 
     private fun awaitTag(tag:String, timeoutMillis:Long=15_000L) { compose.waitUntil(timeoutMillis) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() } }
