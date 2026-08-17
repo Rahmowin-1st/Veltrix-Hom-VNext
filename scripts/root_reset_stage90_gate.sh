@@ -57,6 +57,21 @@ PASS_COUNT=0
 for spec in "${TESTS[@]}"; do
   IFS='|' read -r name selector seconds <<< "$spec"
   log="$OUT/tests/${name}.txt"
+
+  # Each invocation must start from a clean process/task boundary. Previous Stage 90 tests launch the
+  # real MainActivity and deliberately change global display/animation settings; leaving their target
+  # or instrumentation process alive can make a subsequent ActivityScenario attach to stale task
+  # state and block before launch returns. Force-stop preserves app files/data but removes that process
+  # boundary ambiguity. Every test then establishes any non-default adaptation it specifically needs.
+  adb shell am force-stop "$APP_ID" >/dev/null 2>&1 || true
+  adb shell am force-stop "$TEST_APP_ID" >/dev/null 2>&1 || true
+  adb shell settings put system font_scale 1.0 >/dev/null 2>&1 || true
+  adb shell settings put global animator_duration_scale 1.0 >/dev/null 2>&1 || true
+  adb shell settings put global transition_animation_scale 1.0 >/dev/null 2>&1 || true
+  adb shell settings put global window_animation_scale 1.0 >/dev/null 2>&1 || true
+  sleep 1
+
+  printf 'STAGE90_TEST_ISOLATED name=%s target_force_stopped=1 test_force_stopped=1 system_scales_reset=1\n' "$name" | tee -a "$OUT/instrumentation.txt"
   printf 'STAGE90_TEST_START name=%s selector=%s timeout=%ss\n' "$name" "$selector" "$seconds" | tee -a "$OUT/instrumentation.txt"
   set +e
   timeout --signal=TERM --kill-after=10s "${seconds}s" \
