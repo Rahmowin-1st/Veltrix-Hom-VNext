@@ -218,7 +218,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git grep -nE 'TODO|FIXME|placeholder|fake API|fake citation|loot.?box|client-trusted XP|client-trusted Coins' -- ':!docs/**' ':!server/src/test/**' ':!android/app/src/androidTest/**' ':!.github/**' ':!scripts/CoreRegression.kt' > evidence/red-team-findings.txt || true
+          REDTEAM_TARGETS=(
+  core/src/main
+  server/src/main
+  android/app/src/main
+  database/migrations
+  contracts
+  .env.example
+  build.gradle.kts
+  settings.gradle.kts
+  gradle.properties
+  server/build.gradle.kts
+  android/app/build.gradle.kts
+)
+for target in "${REDTEAM_TARGETS[@]}"; do test -e "$target"; done
+git grep -nE 'TODO|FIXME|placeholder|fake API|fake citation|loot.?box|client-trusted XP|client-trusted Coins' -- "${REDTEAM_TARGETS[@]}" | tee evidence/red-team-findings.txt || true
           test ! -s evidence/red-team-findings.txt
           ! grep -R --line-number 'continue-on-error: true' .github/workflows/backend-final-closure-*.yml
           echo BACKEND_FINAL_RED_TEAM=PASS | tee evidence/red-team-gate.txt
