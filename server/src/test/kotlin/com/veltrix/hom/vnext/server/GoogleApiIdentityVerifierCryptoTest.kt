@@ -73,7 +73,7 @@ class GoogleApiIdentityVerifierCryptoTest {
             this.subject = subject
             this.email = "fixture@example.test"
             this.emailVerified = true
-            this.nonce = nonce
+            this.nonce = this@GoogleApiIdentityVerifierCryptoTest.nonce
             this["name"] = "Fixture User"
             this["picture"] = "https://example.test/fixture.png"
         }
