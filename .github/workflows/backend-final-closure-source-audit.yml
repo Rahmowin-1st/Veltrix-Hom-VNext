@@ -1,0 +1,128 @@
+name: Veltrix Backend Final Closure Source Audit
+
+on:
+  push:
+    branches: [veltrix-hom-backend-final-closure]
+  workflow_dispatch:
+
+concurrency:
+  group: veltrix-backend-final-source-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  ACCEPTED_BACKEND_SHA: 4ed13cfcf7d4bb1fe6215b231426e0b4f208343a
+  INTEGRATED_FRONTEND_SHA: e7a63faf96bccaa1856f4d4b34d52b81e42ea20a
+  VELTRIX_ENV: test
+  VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_DATABASE_USER: postgres
+  VELTRIX_DATABASE_PASSWORD: postgres
+  VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_TEST_DATABASE_USER: postgres
+  VELTRIX_TEST_DATABASE_PASSWORD: postgres
+  VELTRIX_AI_PROVIDER: disabled
+  VELTRIX_TEST_AI_MOCK: 'true'
+  VELTRIX_EMBEDDING_PROVIDER: disabled
+  VELTRIX_TEST_EMBEDDING_MOCK: 'true'
+  VELTRIX_EMBEDDING_DIMENSIONS: '64'
+  VELTRIX_TEST_OCR_MOCK: 'true'
+  VELTRIX_TEST_TRANSLATE_MOCK: 'true'
+  VELTRIX_STORAGE_PROVIDER: local
+  VELTRIX_WORKERS_ENABLED: 'false'
+
+jobs:
+  source-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Exact source provenance and ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA"
+          git merge-base --is-ancestor "$INTEGRATED_FRONTEND_SHA" "$GITHUB_SHA"
+          git diff --name-only "$INTEGRATED_FRONTEND_SHA" "$GITHUB_SHA" | sort | tee evidence/final-closure-delta.txt
+          test -s evidence/final-closure-delta.txt
+          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\nintegrated_frontend=%s\nrun=%s\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" "$INTEGRATED_FRONTEND_SHA" "$GITHUB_RUN_ID" | tee evidence/provenance.txt
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+
+      - name: OpenAPI exact route contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp contracts/openapi.yaml /tmp/openapi.before
+          python3 scripts/generate_openapi_contract.py | tee evidence/openapi-generate.txt
+          cmp /tmp/openapi.before contracts/openapi.yaml
+          python3 scripts/verify_openapi_drift.py | tee evidence/openapi-drift.txt
+          grep -q 'OPENAPI_DRIFT=PASS' evidence/openapi-drift.txt
+          grep -q '^  /auth/google:' contracts/openapi.yaml
+          grep -q 'GoogleIdentityExchangeRequest' contracts/openapi.yaml
+          grep -q 'StoreAvailabilityResponse' contracts/openapi.yaml
+          echo BACKEND_FINAL_OPENAPI=PASS | tee evidence/openapi-gate.txt
+
+      - name: Real PostgreSQL migrations and full server regressions
+        shell: bash
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          gradle --no-daemon :core:test :server:test | tee evidence/backend-tests.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/backend-tests.txt
+          bash scripts/run_local_regressions.sh | tee evidence/frozen-regressions.txt
+          grep -q 'LOCAL_REGRESSION_GATE=PASS total=105' evidence/frozen-regressions.txt
+          psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -Atc "SELECT script||':'||success FROM flyway_schema_history WHERE script='V009__backend_final_identity.sql'" | tee evidence/v009.txt
+          grep -q 'V009__backend_final_identity.sql:t' evidence/v009.txt
+          test "$(psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -Atc "SELECT count(*) FROM information_schema.table_constraints WHERE table_name='account_external_identity' AND constraint_type='UNIQUE'")" -ge 1
+          echo BACKEND_FINAL_REAL_POSTGRES=PASS | tee evidence/postgres-gate.txt
+
+      - name: Security and contract source invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'post("/auth/google")' server/src/main/kotlin/com/veltrix/hom/vnext/server/Main.kt
+          grep -q 'GoogleIdTokenVerifier' server/src/main/kotlin/com/veltrix/hom/vnext/server/GoogleIdentity.kt
+          grep -q 'AUTH_GOOGLE_REPLAY' server/src/main/kotlin/com/veltrix/hom/vnext/server/FederatedAuthRepository.kt
+          grep -q 'external_identity_deletion_tombstone' database/migrations/V009__backend_final_identity.sql
+          grep -q 'account_external_identity' server/src/main/kotlin/com/veltrix/hom/vnext/server/Part3CompletionRepository.kt
+          ! grep -R --line-number -E 'INSERT INTO .*id.?token|id.?token.*INSERT INTO|nonce.*INSERT INTO.*account_external_identity' server/src/main/kotlin database/migrations
+          ! grep -R --line-number -E 'println\(.*idToken|logger.*idToken|log.*idToken' server/src/main/kotlin
+          echo BACKEND_FINAL_SECURITY_SOURCE=PASS | tee evidence/security-source-gate.txt
+
+      - name: Upload source-audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-backend-final-source-audit-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30

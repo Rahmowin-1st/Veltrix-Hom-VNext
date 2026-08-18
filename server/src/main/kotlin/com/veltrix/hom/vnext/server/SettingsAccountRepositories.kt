@@ -91,10 +91,17 @@ class AccountDataRepository(private val db: Database) {
 
     fun requestDeletion(accountId:String, req:AccountDeletionRequest) {
         if(req.confirmation != "DELETE") throw DomainException(DomainError("VALIDATION",ErrorCategory.VALIDATION,"Explicit DELETE confirmation is required"))
-        require(req.password.length in 12..1024) { "Password required" }
         db.tx { c ->
-            val hash=c.prepareStatement("SELECT password_hash FROM account_credential WHERE account_id=?::uuid").use { ps -> ps.setString(1,accountId);ps.executeQuery().use { rs -> if(rs.next()) rs.getString(1) else null } } ?: throw DomainException(DomainError("AUTH_INVALID",ErrorCategory.AUTH,"Re-authentication failed"))
-            if(!PasswordHasher.verify(req.password.toCharArray(),hash)) throw DomainException(DomainError("AUTH_INVALID",ErrorCategory.AUTH,"Re-authentication failed"))
+            val hash=c.prepareStatement("SELECT password_hash FROM account_credential WHERE account_id=?::uuid").use { ps -> ps.setString(1,accountId);ps.executeQuery().use { rs -> if(rs.next()) rs.getString(1) else null } }
+            if(hash != null) {
+                val password=req.password ?: throw DomainException(DomainError("AUTH_INVALID",ErrorCategory.AUTH,"Re-authentication failed"))
+                require(password.length in 12..1024) { "Password required" }
+                if(!PasswordHasher.verify(password.toCharArray(),hash)) throw DomainException(DomainError("AUTH_INVALID",ErrorCategory.AUTH,"Re-authentication failed"))
+            } else {
+                val federated=c.prepareStatement("SELECT 1 FROM account_external_identity WHERE account_id=?::uuid LIMIT 1").use { ps -> ps.setString(1,accountId);ps.executeQuery().use { it.next() } }
+                if(!federated) throw DomainException(DomainError("AUTH_INVALID",ErrorCategory.AUTH,"Re-authentication failed"))
+            }
+            c.prepareStatement("""INSERT INTO external_identity_deletion_tombstone(provider,provider_subject_hash,account_ref_hash) SELECT provider,encode(digest(provider||':'||provider_subject,'sha256'),'hex'),? FROM account_external_identity WHERE account_id=?::uuid ON CONFLICT(provider,provider_subject_hash) DO NOTHING""").use { ps -> ps.setString(1,sha256(accountId));ps.setString(2,accountId);ps.executeUpdate() }
             c.prepareStatement("UPDATE account SET deleted_at=now(),updated_at=now(),revision=revision+1 WHERE id=?::uuid AND deleted_at IS NULL").use { ps -> ps.setString(1,accountId); if(ps.executeUpdate()!=1) throw DomainException(DomainError("CONFLICT",ErrorCategory.CONFLICT,"Account is already deleted")) }
             c.prepareStatement("UPDATE device_session SET revoked_at=COALESCE(revoked_at,now()) WHERE account_id=?::uuid").use { ps -> ps.setString(1,accountId);ps.executeUpdate() }
             c.prepareStatement("INSERT INTO account_deletion_lifecycle(account_id,account_ref_hash,state,purge_after) VALUES (?::uuid,?,'PURGE_PENDING',now())").use { ps -> ps.setString(1,accountId);ps.setString(2,sha256(accountId));ps.executeUpdate() }

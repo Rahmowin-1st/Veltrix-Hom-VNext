@@ -35,6 +35,7 @@ data class ServerConfig(
     val s3PathStyle: Boolean = true,
     val storageSignedUrlTtlSeconds: Long = 300,
     val workerEnabled: Boolean = true,
+    val googleServerClientIds: Set<String> = emptySet(),
 ) {
     companion object {
         fun fromEnv(env: Map<String, String> = System.getenv()): ServerConfig {
@@ -44,6 +45,14 @@ data class ServerConfig(
             val aiKey = env["OPENAI_API_KEY"]?.takeIf { it.isNotBlank() }
                 ?: env["VELTRIX_AI_API_KEY"]?.takeIf { it.isNotBlank() }
             val embeddingKey = env["VELTRIX_EMBEDDING_API_KEY"]?.takeIf { it.isNotBlank() } ?: aiKey
+            val googleClientIds = buildSet {
+                env["VELTRIX_GOOGLE_SERVER_CLIENT_ID"]?.trim()?.takeIf { it.isNotBlank() }?.let(::add)
+                env["VELTRIX_GOOGLE_ALLOWED_CLIENT_IDS"]
+                    ?.split(',')
+                    ?.map(String::trim)
+                    ?.filter(String::isNotBlank)
+                    ?.forEach(::add)
+            }
             return ServerConfig(
                 environment = environment,
                 databaseUrl = url,
@@ -79,6 +88,7 @@ data class ServerConfig(
                 s3PathStyle = env["VELTRIX_S3_PATH_STYLE"]?.let { !it.equals("false", true) } ?: true,
                 storageSignedUrlTtlSeconds = env["VELTRIX_STORAGE_SIGNED_URL_TTL"]?.toLongOrNull()?.coerceIn(30, 3600) ?: 300,
                 workerEnabled = env["VELTRIX_WORKERS_ENABLED"]?.let { !it.equals("false", true) } ?: true,
+                googleServerClientIds = googleClientIds,
             )
         }
     }

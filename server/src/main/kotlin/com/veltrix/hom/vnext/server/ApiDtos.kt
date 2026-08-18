@@ -11,6 +11,7 @@ data class ErrorBody(val code: String, val category: String, val message: String
 @Serializable data class RegisterRequest(val login: String, val password: String, val displayName: String, val preferredLanguage: String = "en", val timezone: String = "UTC")
 @Serializable data class LoginRequest(val login: String, val password: String, val deviceLabel: String? = null)
 @Serializable data class SessionResponse(val sessionToken: String, val accountId: String, val expiresAt: String)
+@Serializable data class GoogleIdentityExchangeRequest(val idToken:String,val nonce:String)
 @Serializable data class ProfileResponse(val accountId: String, val displayName: String, val username: String?, val preferredLanguage: String, val timezone: String, val onboardingComplete: Boolean, val memoryEnabled: Boolean, val revision: Long)
 @Serializable data class UpdateProfileRequest(val displayName: String? = null, val preferredLanguage: String? = null, val timezone: String? = null, val onboardingComplete: Boolean? = null, val memoryEnabled: Boolean? = null, val expectedRevision: Long)
 
@@ -83,7 +84,7 @@ data class ErrorBody(val code: String, val category: String, val message: String
 @Serializable data class LearningModeResponse(val id:String,val answerDepth:String,val guidingQuestions:Boolean,val revealAnswersImmediately:Boolean,val citationPreference:String,val correctionStyle:String)
 @Serializable data class AccountExportProfile(val displayName:String,val preferredLanguage:String,val timezone:String,val onboardingComplete:Boolean,val memoryEnabled:Boolean)
 @Serializable data class AccountExportResponse(val accountId:String,val generatedAt:String,val profile:AccountExportProfile,val entityCounts:Map<String,Long>)
-@Serializable data class AccountDeletionRequest(val password:String,val confirmation:String)
+@Serializable data class AccountDeletionRequest(val password:String?=null,val confirmation:String)
 @Serializable data class UpdateConversationRequest(val title:String?=null,val pinned:Boolean?=null,val archived:Boolean?=null,val learningMode:String?=null,val memoryEnabled:Boolean?=null,val projectMemoryEnabled:Boolean?=null,val expectedRevision:Long)
 @Serializable data class EditMessageRequest(val text:String,val idempotencyKey:String)
 @Serializable data class UpdateSourceRequest(val title:String?=null,val favorite:Boolean?=null,val pinned:Boolean?=null,val archived:Boolean?=null,val expectedRevision:Long)

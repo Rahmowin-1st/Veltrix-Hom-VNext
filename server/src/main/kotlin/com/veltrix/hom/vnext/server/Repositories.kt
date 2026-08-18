@@ -59,7 +59,7 @@ class AuthRepository(private val db: Database) {
         if (token.length !in 32..256) return null
         val hash = SessionTokens.hash(token)
         return db.tx { c ->
-            c.prepareStatement("SELECT id,account_id,expires_at FROM device_session WHERE refresh_token_hash=? AND revoked_at IS NULL AND expires_at>now()").use { ps ->
+            c.prepareStatement("SELECT s.id,s.account_id,s.expires_at FROM device_session s JOIN account a ON a.id=s.account_id AND a.deleted_at IS NULL WHERE s.refresh_token_hash=? AND s.revoked_at IS NULL AND s.expires_at>now()").use { ps ->
                 ps.setString(1, hash)
                 ps.executeQuery().use { rs -> if (!rs.next()) null else SessionPrincipal(rs.getObject("account_id", UUID::class.java).toString(), rs.getObject("id", UUID::class.java).toString(), rs.getObject("expires_at", java.time.OffsetDateTime::class.java).toInstant()) }
             }
@@ -67,16 +67,26 @@ class AuthRepository(private val db: Database) {
     }
 
     fun rotate(token: String): SessionResponse {
-        val principal = resolve(token) ?: throw DomainException(DomainError("AUTH_EXPIRED", ErrorCategory.AUTH, "Session is invalid or expired"))
+        if (token.length !in 32..256) throw DomainException(DomainError("AUTH_EXPIRED", ErrorCategory.AUTH, "Session is invalid or expired"))
+        val currentHash = SessionTokens.hash(token)
         val next = SessionTokens.generate()
         val expires = Instant.now().plus(Duration.ofDays(30))
-        db.tx { c ->
-            c.prepareStatement("UPDATE device_session SET refresh_token_hash=?,last_seen_at=now(),expires_at=? WHERE id=?::uuid AND account_id=?::uuid").use { ps ->
-                ps.setString(1, next.storedHashHex); ps.setObject(2, java.time.OffsetDateTime.ofInstant(expires, java.time.ZoneOffset.UTC)); ps.setString(3, principal.sessionId); ps.setString(4, principal.accountId)
+        val accountId = db.tx { c ->
+            val principal = c.prepareStatement("SELECT s.id,s.account_id FROM device_session s JOIN account a ON a.id=s.account_id AND a.deleted_at IS NULL WHERE s.refresh_token_hash=? AND s.revoked_at IS NULL AND s.expires_at>now() FOR UPDATE OF s").use { ps ->
+                ps.setString(1, currentHash)
+                ps.executeQuery().use { rs -> if (!rs.next()) null else rs.getObject(1, UUID::class.java).toString() to rs.getObject(2, UUID::class.java).toString() }
+            } ?: throw DomainException(DomainError("AUTH_EXPIRED", ErrorCategory.AUTH, "Session is invalid or expired"))
+            c.prepareStatement("UPDATE device_session SET refresh_token_hash=?,last_seen_at=now(),expires_at=? WHERE id=?::uuid AND account_id=?::uuid AND refresh_token_hash=? AND revoked_at IS NULL").use { ps ->
+                ps.setString(1, next.storedHashHex)
+                ps.setObject(2, java.time.OffsetDateTime.ofInstant(expires, java.time.ZoneOffset.UTC))
+                ps.setString(3, principal.first)
+                ps.setString(4, principal.second)
+                ps.setString(5, currentHash)
                 if (ps.executeUpdate()!=1) throw DomainException(DomainError("AUTH_EXPIRED", ErrorCategory.AUTH, "Session rotation failed"))
             }
+            principal.second
         }
-        return SessionResponse(next.clientToken, principal.accountId, expires.toString())
+        return SessionResponse(next.clientToken, accountId, expires.toString())
     }
 
     fun signOut(token: String) {

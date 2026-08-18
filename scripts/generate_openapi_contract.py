@@ -95,6 +95,7 @@ def request_schema(method: str, path: str) -> str | None:
     explicit = {
         ("POST", "/auth/register"): "RegisterRequest",
         ("POST", "/auth/login"): "LoginRequest",
+        ("POST", "/auth/google"): "GoogleIdentityExchangeRequest",
     }
     return explicit.get((method, path))
 
@@ -103,6 +104,7 @@ def response_schema(method: str, path: str) -> str | None:
     explicit = {
         ("POST", "/auth/register"): "SessionResponse",
         ("POST", "/auth/login"): "SessionResponse",
+        ("POST", "/auth/google"): "SessionResponse",
         ("POST", "/auth/refresh"): "SessionResponse",
     }
     return explicit.get((method, path))
@@ -143,6 +145,27 @@ def build() -> dict:
         "required": ["sessionToken", "accountId", "expiresAt"],
         "properties": {"sessionToken": {"type": "string"}, "accountId": {"type": "string", "format": "uuid"}, "expiresAt": {"type": "string", "format": "date-time"}},
     })
+    schemas["GoogleIdentityExchangeRequest"] = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["idToken", "nonce"],
+        "properties": {
+            "idToken": {"type": "string", "minLength": 32, "maxLength": 16384, "writeOnly": True},
+            "nonce": {"type": "string", "minLength": 16, "maxLength": 512, "writeOnly": True},
+        },
+        "description": "Android Google ID token and client-generated nonce. The server validates Google signature/claims and never persists or logs the raw credential.",
+    }
+    schemas["StoreAvailabilityResponse"] = {
+        "type": "object",
+        "required": ["state", "reasonCode"],
+        "properties": {
+            "state": {"type": "string", "enum": ["OWNED", "AVAILABLE", "LOCKED"]},
+            "reasonCode": {"type": "string"},
+            "requiredLevel": {"type": ["integer", "null"], "minimum": 1, "maximum": 50},
+            "requiredSeasonId": {"type": ["string", "null"]},
+            "requiredAchievementId": {"type": ["string", "null"]},
+        },
+    }
     schemas.setdefault("ErrorEnvelope", {
         "type": "object",
         "required": ["error"],
@@ -165,9 +188,9 @@ def build() -> dict:
     document: dict = {
         "openapi": "3.1.0",
         "info": {
-            "title": "Veltrix Hom vNext Part 2 API",
-            "version": "0.2.0-part2",
-            "description": "Authoritative Android-first Part 2 contract generated from the exact public Ktor /v1 route inventory, including progression, economy, Store, avatars, Personal Map, seasons, game events, account export and deletion routes.",
+            "title": "Veltrix Hom vNext Backend Final API",
+            "version": "0.4.0-backend-final-closure",
+            "description": "Authoritative account-first online Veltrix Hom vNext backend contract. Server owns sessions, Google identity exchange, authorization, progression/economy, Store, Map, persistence and deletion truth.",
         },
         "servers": [{"url": "/v1"}],
         "security": [{"bearerSession": []}],
@@ -180,7 +203,7 @@ def build() -> dict:
             "operationId": derived_operation_id(method, path) if path == "/store" else existing_ids.get((method, path), derived_operation_id(method, path)),
             "summary": f"{method.title()} {path}",
         }
-        if path in {"/auth/register", "/auth/login"}:
+        if path in {"/auth/register", "/auth/login", "/auth/google"}:
             operation["security"] = []
 
         parameters: list[dict] = []
@@ -201,7 +224,7 @@ def build() -> dict:
         if parameters:
             operation["parameters"] = parameters
 
-        has_body = "call.receive" in source_line or path in {"/sources/upload", "/ai/stream"}
+        has_body = "call.receive" in source_line or path in {"/sources/upload", "/ai/stream", "/auth/google"}
         if path == "/sources/upload":
             operation["requestBody"] = {
                 "required": True,
@@ -224,6 +247,15 @@ def build() -> dict:
             }
         else:
             success = "200"
+            if path == "/auth/google":
+                operation["description"] = "Trusted Google identity exchange. Returns 201 for a newly created Veltrix account and 200 for an existing linked account. In both cases the body is the normal server-minted SessionResponse."
+                operation["responses"] = {
+                    "200": {"description": "Existing linked account signed in", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SessionResponse"}}}},
+                    "201": {"description": "New Veltrix account created and signed in", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SessionResponse"}}}},
+                    **error_responses(),
+                }
+                document["paths"].setdefault(path, {})[method.lower()] = operation
+                continue
             if "HttpStatusCode.Created" in source_line:
                 success = "201"
             elif "HttpStatusCode.Accepted" in source_line:

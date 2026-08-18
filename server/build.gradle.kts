@@ -26,8 +26,11 @@ dependencies {
     implementation("org.flywaydb:flyway-database-postgresql:11.13.0")
     implementation("org.apache.tika:tika-core:3.3.2")
     implementation("org.apache.tika:tika-parsers-standard-package:3.3.2")
+    implementation("com.google.api-client:google-api-client:2.9.0")
+    implementation("com.google.http-client:google-http-client-gson:2.1.0")
     testImplementation(kotlin("test"))
     testImplementation("io.ktor:ktor-server-test-host:3.5.1")
+    testImplementation("com.google.http-client:google-http-client-test:2.1.0")
 }
 
 tasks.test { useJUnitPlatform() }

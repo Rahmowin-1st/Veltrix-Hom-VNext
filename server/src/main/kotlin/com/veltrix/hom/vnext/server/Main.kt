@@ -29,17 +29,18 @@ import java.io.File
 import java.util.UUID
 
 private const val API_VERSION = "v1"
-private const val SERVICE_VERSION = "0.3.0-backend-part3"
+private const val SERVICE_VERSION = "0.4.0-backend-final-closure"
 
 fun main() {
     val config = ServerConfig.fromEnv()
     embeddedServer(Netty, port = config.port, host = "0.0.0.0") { veltrixModule(config) }.start(wait = true)
 }
 
-fun Application.veltrixModule(config: ServerConfig) {
+fun Application.veltrixModule(config: ServerConfig, googleIdentityVerifier: GoogleIdentityVerifier = GoogleIdentityVerifierFactory.production(config)) {
     val db = Database(config)
     environment.monitor.subscribe(ApplicationStopped) { db.close() }
     val auth = AuthRepository(db)
+    val federatedAuth = FederatedAuthRepository(db, googleIdentityVerifier)
     val profile = ProfileRepository(db)
     val projects = ProjectRepository(db)
     val memory = MemoryRepository(db)
@@ -79,6 +80,7 @@ fun Application.veltrixModule(config: ServerConfig) {
     val translation = TranslationService(config,db)
     val sync = SyncRepository(db)
     val limiter = RequestRateLimiter()
+    val publicAuthLimiter = RequestRateLimiter(maxRequests = 30, windowSeconds = 60)
 
     install(CallId) {
         retrieveFromHeader(HttpHeaders.XRequestId)
@@ -101,8 +103,13 @@ fun Application.veltrixModule(config: ServerConfig) {
         get("/ready") { val dbReady=db.ping(); val storageReady=sourceProcessing.storageConfigured; val embeddingReady=sourceProcessing.embeddingConfigured; val ready=dbReady&&storageReady&&embeddingReady; call.respond(ReadinessResponse(ready,if(dbReady)"ok" else "unavailable",ai.liveProviderConfigured,ai.testProviderConfigured,storageReady,embeddingReady)) }
 
         route("/$API_VERSION") {
-            post("/auth/register") { limited(call,limiter,"public:register"); call.respond(HttpStatusCode.Created, blocking { auth.register(call.receive()) }) }
-            post("/auth/login") { limited(call,limiter,"public:login"); call.respond(blocking { auth.login(call.receive()) }) }
+            post("/auth/register") { limited(call,publicAuthLimiter,"register:${publicRateKey(call)}"); call.respond(HttpStatusCode.Created, blocking { auth.register(call.receive()) }) }
+            post("/auth/login") { limited(call,publicAuthLimiter,"login:${publicRateKey(call)}"); call.respond(blocking { auth.login(call.receive()) }) }
+            post("/auth/google") {
+                limited(call,publicAuthLimiter,"google:${publicRateKey(call)}")
+                val result=blocking { federatedAuth.exchangeGoogle(call.receive()) }
+                call.respond(if(result.created) HttpStatusCode.Created else HttpStatusCode.OK,result.session)
+            }
             post("/auth/refresh") { val token=call.bearerToken(); limited(call,limiter,"session:${hashKey(token)}"); call.respond(blocking { auth.rotate(token) }) }
             post("/auth/logout") { val token=call.bearerToken(); blocking { auth.signOut(token) }; call.respond(ApiAck()) }
 
@@ -372,6 +379,7 @@ private fun validatedUuid(value:String):String=runCatching{UUID.fromString(value
 private fun ApplicationCall.intQuery(name:String,default:Int,min:Int,max:Int):Int=request.queryParameters[name]?.toIntOrNull()?.coerceIn(min,max)?:default
 private suspend fun <T> blocking(block:suspend ()->T):T=withContext(Dispatchers.IO){block()}
 private fun hashKey(value:String)=sha256(value).take(24)
+private fun publicRateKey(call:ApplicationCall)=hashKey(call.request.origin.remoteHost)
 private fun limited(call:ApplicationCall,limiter:RequestRateLimiter,key:String){if(!limiter.allow(key))throw DomainException(DomainError("RATE_LIMIT",ErrorCategory.RATE_LIMIT,"Too many requests",true,call.callId))}
 private suspend fun ApplicationCall.respondDomainError(error:DomainError){
     val e=error.copy(requestId=error.requestId?:callId)
