@@ -1,8 +1,8 @@
 name: Backend Final Red-Team Scope Patch
 
 on:
-  push:
-    branches: [veltrix-hom-backend-final-closure-verify]
+  pull_request:
+    branches: [veltrix-hom-backend-final-closure]
 
 permissions:
   contents: write
