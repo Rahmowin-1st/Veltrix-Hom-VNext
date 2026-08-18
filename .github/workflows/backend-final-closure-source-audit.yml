@@ -100,7 +100,15 @@ jobs:
         run: |
           set -euo pipefail
           psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          set +e
           gradle --no-daemon :core:test :server:test | tee evidence/backend-tests.txt
+          test_rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$test_rc" -ne 0 ]; then
+            echo '=== TEST XML DIAGNOSTIC ==='
+            find server/build/test-results/test -type f -name '*.xml' -maxdepth 2 -print -exec cat {} \; 2>/dev/null || true
+            exit "$test_rc"
+          fi
           grep -q 'BUILD SUCCESSFUL' evidence/backend-tests.txt
           bash scripts/run_local_regressions.sh | tee evidence/frozen-regressions.txt
           grep -q 'LOCAL_REGRESSION_GATE=PASS total=105' evidence/frozen-regressions.txt
@@ -128,6 +136,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: veltrix-backend-final-source-audit-${{ github.run_id }}
-          path: evidence/
+          path: |
+            evidence/
+            server/build/test-results/test/
           if-no-files-found: error
           retention-days: 30
