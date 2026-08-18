@@ -23,7 +23,11 @@ class GoogleApiIdentityVerifierCryptoTest {
     fun realGoogleVerifierAcceptsValidSignedFixtureAndRejectsSecurityMatrix() {
         val verifier = verifier()
         val valid = signedToken()
-        val identity = verifier.verify(valid, nonce)
+        val identity = try {
+            verifier.verify(valid, nonce)
+        } catch (e: DomainException) {
+            fail("valid Google-shaped signed fixture rejected: ${e.error.code}/${e.error.category}/${e.error.message}")
+        }
         assertEquals("google-fixture-subject", identity.subject)
         assertEquals("fixture@example.test", identity.email)
         assertTrue(identity.emailVerified)
