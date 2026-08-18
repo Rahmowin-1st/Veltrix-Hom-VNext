@@ -1,0 +1,88 @@
+name: Backend Final Semantic Red-Team Patch
+
+on:
+  pull_request:
+    branches: [veltrix-hom-backend-final-closure]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-backend-final-closure-verify
+          fetch-depth: 0
+      - name: Patch and preflight semantic red-team classifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          paths = [
+              Path('.github/workflows/backend-final-closure-final-gate.yml'),
+              Path('.github/workflows/backend-final-closure-runtime-package.yml'),
+          ]
+          old = '\n'.join([
+              "          git grep -nE 'TODO|FIXME|placeholder|fake API|fake citation|loot.?box|client-trusted XP|client-trusted Coins' -- \"${REDTEAM_TARGETS[@]}\" | tee evidence/red-team-findings.txt || true",
+              '          test ! -s evidence/red-team-findings.txt',
+          ])
+          new = '\n'.join([
+              "          git grep -niE 'TODO|FIXME|(^|[^[:alnum:]_])stub([^[:alnum:]_]|$)|fake API|fake AI|fake citation|hardcoded reward|client-trusted XP|client-trusted Coins' -- \"${REDTEAM_TARGETS[@]}\" | tee evidence/red-team-findings.txt || true",
+              '          test ! -s evidence/red-team-findings.txt',
+              "          git grep -niE 'placeholder' -- \"${REDTEAM_TARGETS[@]}\" | tee evidence/placeholder-references.txt || true",
+              "          grep -vE '^android/app/src/main/.*:[0-9]+:.*placeholder[[:space:]]*=[[:space:]]*\\{[[:space:]]*Text\\(' evidence/placeholder-references.txt > evidence/placeholder-unfinished.txt || true",
+              '          test ! -s evidence/placeholder-unfinished.txt',
+              "          git grep -niE 'loot.?box' -- \"${REDTEAM_TARGETS[@]}\" | tee evidence/lootbox-references.txt || true",
+              '          if [ -s evidence/lootbox-references.txt ]; then',
+              '            test "$(wc -l < evidence/lootbox-references.txt)" -eq 1',
+              "            grep -Eq '^core/src/main/kotlin/com/veltrix/hom/vnext/core/Part3FinalSystems\\.kt:[0-9]+:.*randomPurchaseTokens.*loot_box.*lootbox' evidence/lootbox-references.txt",
+              "            grep -q 'require(keys.intersect(randomPurchaseTokens).isEmpty())' core/src/main/kotlin/com/veltrix/hom/vnext/core/Part3FinalSystems.kt",
+              '          fi',
+          ])
+          for path in paths:
+              text = path.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f'{path}: expected one old scanner block, found {text.count(old)}')
+              path.write_text(text.replace(old, new))
+          PY
+          git diff --check
+          test "$(git diff --name-only | wc -l)" -eq 2
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0], aliases: true)" .github/workflows/backend-final-closure-final-gate.yml
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0], aliases: true)" .github/workflows/backend-final-closure-runtime-package.yml
+          mkdir -p evidence
+          REDTEAM_TARGETS=(
+            core/src/main
+            server/src/main
+            android/app/src/main
+            database/migrations
+            contracts
+            .env.example
+            build.gradle.kts
+            settings.gradle.kts
+            gradle.properties
+            server/build.gradle.kts
+            android/app/build.gradle.kts
+          )
+          for target in "${REDTEAM_TARGETS[@]}"; do test -e "$target"; done
+          git grep -niE 'TODO|FIXME|(^|[^[:alnum:]_])stub([^[:alnum:]_]|$)|fake API|fake AI|fake citation|hardcoded reward|client-trusted XP|client-trusted Coins' -- "${REDTEAM_TARGETS[@]}" | tee evidence/red-team-findings.txt || true
+          test ! -s evidence/red-team-findings.txt
+          git grep -niE 'placeholder' -- "${REDTEAM_TARGETS[@]}" | tee evidence/placeholder-references.txt || true
+          grep -vE '^android/app/src/main/.*:[0-9]+:.*placeholder[[:space:]]*=[[:space:]]*\{[[:space:]]*Text\(' evidence/placeholder-references.txt > evidence/placeholder-unfinished.txt || true
+          test ! -s evidence/placeholder-unfinished.txt
+          git grep -niE 'loot.?box' -- "${REDTEAM_TARGETS[@]}" | tee evidence/lootbox-references.txt || true
+          if [ -s evidence/lootbox-references.txt ]; then
+            test "$(wc -l < evidence/lootbox-references.txt)" -eq 1
+            grep -Eq '^core/src/main/kotlin/com/veltrix/hom/vnext/core/Part3FinalSystems\.kt:[0-9]+:.*randomPurchaseTokens.*loot_box.*lootbox' evidence/lootbox-references.txt
+            grep -q 'require(keys.intersect(randomPurchaseTokens).isEmpty())' core/src/main/kotlin/com/veltrix/hom/vnext/core/Part3FinalSystems.kt
+          fi
+          ! grep -R --line-number 'continue-on-error: true' .github/workflows/backend-final-closure-*.yml
+          echo SEMANTIC_REDTEAM_PREFLIGHT=PASS
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/backend-final-closure-final-gate.yml .github/workflows/backend-final-closure-runtime-package.yml
+          git commit -m 'ci(final): make red-team classifier semantic'
+          git push origin HEAD:veltrix-hom-backend-final-closure-verify
