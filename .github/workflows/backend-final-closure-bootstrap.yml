@@ -1,0 +1,38 @@
+name: Veltrix Backend Final Closure Bootstrap
+
+on:
+  push:
+    branches: [veltrix-hom-backend-final-closure]
+    paths:
+      - .github/workflows/backend-final-closure-bootstrap.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  INTEGRATED_FRONTEND_SHA: e7a63faf96bccaa1856f4d4b34d52b81e42ea20a
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: veltrix-hom-backend-final-closure
+          fetch-depth: 0
+      - name: Apply exact backend final closure payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$INTEGRATED_FRONTEND_SHA" HEAD
+          python3 scripts/apply_backend_final_closure_bootstrap.py
+          git diff --check
+          git config user.name "veltrix-backend-master"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git diff --cached --exit-code --quiet && { echo BACKEND_FINAL_CLOSURE_ALREADY_APPLIED=PASS; exit 0; }
+          git commit -m "feat(backend): close final auth account security contracts"
+          git push origin HEAD:veltrix-hom-backend-final-closure
+          echo BACKEND_FINAL_CLOSURE_APPLY_PUSH=PASS
