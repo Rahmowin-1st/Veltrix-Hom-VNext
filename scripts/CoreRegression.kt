@@ -144,7 +144,7 @@ fun main() {
     test("project workspace is more than folder") { ws.activeGoals.size==1 && ws.completedGoalCount==1 && ws.recentConversations.size==1 && ws.noteCount==1 }
 
     test("Part2 XP not implemented in core tool registry") { tools.definitions().none { it.id.contains("xp", true) || it.id.contains("coin", true) } }
-    test("Store state honest Part2 placeholder") { home.mapState=="LOCKED_PART_2" }
+    test("Store state preserves frozen Part2 map contract") { home.mapState=="LOCKED_PART_2" }
 
     println("SUMMARY | PASS=$pass FAIL=$fail TOTAL=${pass+fail}")
     if (fail != 0) error("Regression failures: $fail")
