@@ -140,7 +140,7 @@ jobs:
             -e 's/ -feature -Vulkan//g' \
             -e "s/'OK (6 tests)'/'OK ('/" \
             -e 's#echo "$state" | grep -q "$PKG"#grep -q "$PKG" "evidence/runtime/activity-${label}-${attempt}.txt" "evidence/runtime/window-${label}-${attempt}.txt"#' \
-            -e "s#run_test shell 'OK (1 test)' 'com.veltrix.hom.vnext.ShellInstrumentedTest' 150#adb reverse --remove tcp:8080 >/dev/null 2>\&1 || true; adb reverse tcp:8080 tcp:8080; run_test shell 'OK (1 test)' 'com.veltrix.hom.vnext.RootResetRuntimeInstrumentedTest#serverValidatedSessionEntersFourWorldsBackReturnsHomeAndSignOutClosesWorld' 240#" \
+            -e "s@run_test shell 'OK (1 test)' 'com.veltrix.hom.vnext.ShellInstrumentedTest' 150@adb reverse --remove tcp:8080 >/dev/null 2>\&1 || true; adb reverse tcp:8080 tcp:8080; run_test shell 'OK (1 test)' 'com.veltrix.hom.vnext.RootResetRuntimeInstrumentedTest#serverValidatedSessionEntersFourWorldsBackReturnsHomeAndSignOutClosesWorld' 240@" \
             -e "s#run_test connected 'OK (' '' 360#run_test connected 'OK (' 'com.veltrix.hom.vnext.ServerIntegrationInstrumentedTest,com.veltrix.hom.vnext.Part2ServerIntegrationInstrumentedTest,com.veltrix.hom.vnext.Part3FinalStateInstrumentedTest,com.veltrix.hom.vnext.Part3ControlIntegrationInstrumentedTest' 420#" \
             evidence/runtime/helper.sh
           chmod +x evidence/runtime/helper.sh
