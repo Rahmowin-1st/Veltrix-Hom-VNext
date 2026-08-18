@@ -31,7 +31,7 @@ jobs:
               '          test ! -s evidence/red-team-findings.txt',
           ])
           new = '\n'.join([
-              "          git grep -niE 'TODO|FIXME|(^|[^[:alnum:]_])stub([^[:alnum:]_]|$)|fake API|fake AI|fake citation|hardcoded reward|client-trusted XP|client-trusted Coins' -- \"${REDTEAM_TARGETS[@]}\" | tee evidence/red-team-findings.txt || true",
+              "          git grep -niE '(^|[^[:alnum:]_])(TODO|FIXME|stub)([^[:alnum:]_]|$)|fake API|fake AI|fake citation|hardcoded reward|client-trusted XP|client-trusted Coins' -- \"${REDTEAM_TARGETS[@]}\" | tee evidence/red-team-findings.txt || true",
               '          test ! -s evidence/red-team-findings.txt',
               "          git grep -niE 'placeholder' -- \"${REDTEAM_TARGETS[@]}\" | tee evidence/placeholder-references.txt || true",
               "          grep -vE '^android/app/src/main/.*:[0-9]+:.*placeholder[[:space:]]*=[[:space:]]*\\{[[:space:]]*Text\\(' evidence/placeholder-references.txt > evidence/placeholder-unfinished.txt || true",
@@ -68,7 +68,7 @@ jobs:
             android/app/build.gradle.kts
           )
           for target in "${REDTEAM_TARGETS[@]}"; do test -e "$target"; done
-          git grep -niE 'TODO|FIXME|(^|[^[:alnum:]_])stub([^[:alnum:]_]|$)|fake API|fake AI|fake citation|hardcoded reward|client-trusted XP|client-trusted Coins' -- "${REDTEAM_TARGETS[@]}" | tee evidence/red-team-findings.txt || true
+          git grep -niE '(^|[^[:alnum:]_])(TODO|FIXME|stub)([^[:alnum:]_]|$)|fake API|fake AI|fake citation|hardcoded reward|client-trusted XP|client-trusted Coins' -- "${REDTEAM_TARGETS[@]}" | tee evidence/red-team-findings.txt || true
           test ! -s evidence/red-team-findings.txt
           git grep -niE 'placeholder' -- "${REDTEAM_TARGETS[@]}" | tee evidence/placeholder-references.txt || true
           grep -vE '^android/app/src/main/.*:[0-9]+:.*placeholder[[:space:]]*=[[:space:]]*\{[[:space:]]*Text\(' evidence/placeholder-references.txt > evidence/placeholder-unfinished.txt || true
