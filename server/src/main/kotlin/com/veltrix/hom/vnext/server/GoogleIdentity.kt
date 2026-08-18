@@ -90,7 +90,7 @@ class GoogleApiIdentityVerifier private constructor(private val verifier: Google
 
         val payload = token.payload
         val subject = payload.subject?.trim()?.takeIf { it.length in 1..255 } ?: throw invalidGoogleToken()
-        val actualNonce = (payload["nonce"] as? String)?.trim() ?: throw nonceMismatch()
+        val actualNonce = payload.nonce?.trim()?.takeIf { it.isNotEmpty() } ?: throw nonceMismatch()
         if (!constantTimeEquals(actualNonce, expectedNonce)) throw nonceMismatch()
         val expiresSeconds = payload.expirationTimeSeconds ?: throw invalidGoogleToken()
         val expiresAt = runCatching { Instant.ofEpochSecond(expiresSeconds) }.getOrElse { throw invalidGoogleToken() }
