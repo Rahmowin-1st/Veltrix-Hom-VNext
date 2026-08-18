@@ -1,10 +1,10 @@
-# Known Limitations — Part 2
+# Known Limitations — Backend Final Closure
 
-> **Part 2 current-state document.** The exact acceptance SHA/run/job are bound in the canonical package `PROVENANCE.txt`. Preserved Android runtime evidence is from product SHA `2e70908f65bb25d23e87a9ddc690b8ea09f3040e`, run `31787591097`, job `94726891516`; Manager-acceptance deltas are reverified on the final handoff SHA.
+- Live production AI/OCR/translation providers remain external deployment boundaries; CI uses deterministic test adapters where configured. AI is never permissions/economy authority.
+- CI performance measurements are smoke/regression proof, not production-scale SLO certification.
+- Final Android functional proof uses Android 16/API36 Google APIs x86_64 while compile/target SDK are 37; physical-device/OEM behavior is not claimed.
+- Final frontend visual polish remains outside backend scope.
+- Live Google-account sign-in requires real Google OAuth/Android credentials, configured public server client ID, a real Google-issued ID token and a reachable deployed backend. Backend-owned cryptographic verification, nonce, replay, account-link, session, deletion and isolation logic are independently executable in CI, but live Google-account E2E is not claimed without that external token.
+- No claim is made that data can never be lost; durability depends on deployment backup/restore and provider availability policies.
 
-- Live production AI/OCR/translation providers are external deployment boundaries; CI uses deterministic test adapters where configured. AI is not economic authority.
-- Performance numbers are CI smoke measurements, not production load/SLO certification.
-- Final Android functional proof is Android 16/API36 Google APIs x86_64 while the APK targets/compiles SDK 37. Physical-device camera/OS-vendor behavior is not claimed.
-- Room compiler warned in the preserved Android build that `room.schemaLocation` is not configured. Room schema JSON export is therefore not a committed artifact. Android database/migration behavior itself was runtime-tested; this correction deliberately preserves unchanged Android inputs instead of changing release bytes only to silence a tooling warning.
-- Account deletion is implemented as authenticated soft deletion plus session revocation. Account-owned Part 2 tables remain linked for the product's deletion-retention lifecycle; the public API cannot log into a deleted account. A separate destructive purge scheduler is not claimed.
-- Part 3 final visual/UI composition is not backend scope.
+These limitations do not turn implemented backend functionality into placeholders and do not permit bypassing security or authority invariants.
