@@ -1,15 +1,13 @@
-# VERIFIED / IMPLEMENTED / NOT VERIFIED Classification
+# VERIFIED / IMPLEMENTED / NOT VERIFIED — Backend Final Closure
 
-> **Part 2 current-state document.** The exact acceptance SHA/run/job are bound in the canonical package `PROVENANCE.txt`. Preserved Android runtime evidence is from product SHA `2e70908f65bb25d23e87a9ddc690b8ea09f3040e`, run `31787591097`, job `94726891516`; Manager-acceptance deltas are reverified on the final handoff SHA.
+## VERIFIED when canonical final gate is GREEN on the exact final SHA
+Real PostgreSQL V001–V009 migration path; full core/server tests; frozen 105 regressions; Google signed-token cryptographic matrix; nonce/replay/account-link/session/delete/export/isolation rules; OpenAPI route drift; real Ktor HTTP compatibility; performance smoke; Android build/API36 runtime/process-death; exact source/APK/test-APK/evidence package hashes and provenance.
 
-## VERIFIED when final CI is green
-Deterministic progression/reward/anti-farming; PostgreSQL Part 2 schema V005/V006; XP/Coin ledgers and reconciliation; Store purchase/refund; concurrency no-overspend; consistency; achievements; inventory/avatars; avatar restart/relogin persistence; Personal Map gate/content fallback/unit rules; season rollover lifetime preservation; statistics/events; Part 2 account export keys and delete/relogin revocation; generated OpenAPI drift; current Ktor HTTP smoke; package/provenance/hash integrity.
+## Preserved and rechecked
+Part 1/2/3 learning/intelligence/game-account systems and integrated frontend Android source are preserved by ancestry/diff proof. The final closure changes backend/auth/security/contracts/docs only; canonical final CI still builds and runtime-checks the Android artifacts from the final source tree.
 
-## VERIFIED by preserved unchanged Android evidence
-Android install/cold launch; full 15 connected instrumentation tests; Part2 client↔real Ktor Store/Map smoke; revision-aware cache reopen; offline/process-death boundaries. Preservation is valid only if final CI proves no diff in Android/core/build inputs from runtime SHA `2e70908...` and verifies copied APK/test APK hashes.
+## IMPLEMENTED BUT NOT EXTERNALLY VERIFIED
+Live Google-account exchange against a deployed backend when no real Google-issued token/production OAuth configuration is available in CI. Production external AI/OCR/translation provider behavior and production-scale load/SLOs likewise remain external boundaries.
 
-## IMPLEMENTED BUT NOT PRODUCTION-VERIFIED
-Live production external AI/OCR/translation provider credentials/services and production-scale observability/load behavior.
-
-## NOT VERIFIED / NOT CLAIMED
-Physical-device-only behavior, production SLO certification, destructive post-retention account purge scheduler, deterministic checked-in Room schema JSON export, and Part 3 final visual design.
+## NOT CLAIMED
+Manager acceptance before independent review; physical-device/OEM-only behavior; final visual design work by the backend agent; guarantees that deployment data can never be lost.

@@ -1,4 +1,4 @@
-name: Veltrix Backend Final Closure Gate
+name: Veltrix Backend Final Closure Runtime Package
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: veltrix-backend-final-closure-${{ github.event.pull_request.head.sha || github.sha }}
+  group: veltrix-backend-final-runtime-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -14,11 +14,13 @@ permissions:
   actions: read
 
 env:
+  TESTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  PRODUCT_GREEN_SHA: 8df2f04cd1f97beffccc28ccc140ee7467bc89c3
   ACCEPTED_BACKEND_SHA: 4ed13cfcf7d4bb1fe6215b231426e0b4f208343a
   INTEGRATED_FRONTEND_SHA: e7a63faf96bccaa1856f4d4b34d52b81e42ea20a
-  TESTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
   IMAGE_PACKAGE: system-images;android-36;google_apis;x86_64
   GPU_MODE: swiftshader_indirect
+  ANDROID_AVD_HOME: ${{ github.workspace }}/.android-avd
   VELTRIX_ENV: test
   VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
   VELTRIX_DATABASE_USER: postgres
@@ -35,12 +37,11 @@ env:
   VELTRIX_TEST_TRANSLATE_MOCK: 'true'
   VELTRIX_STORAGE_PROVIDER: local
   VELTRIX_WORKERS_ENABLED: 'true'
-  ANDROID_AVD_HOME: ${{ github.workspace }}/.android-avd
 
 jobs:
-  final:
+  runtime-package:
     runs-on: ubuntu-24.04
-    timeout-minutes: 65
+    timeout-minutes: 55
     services:
       postgres:
         image: pgvector/pgvector:0.8.2-pg17-bookworm
@@ -54,26 +55,23 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 30
 
     steps:
-      - name: Checkout exact candidate
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: ${{ env.TESTED_SHA }}
           fetch-depth: 0
 
-      - name: Exact provenance and delta
+      - name: Prove workflow-only delta from product-green source
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p evidence package artifact
           test "$(git rev-parse HEAD)" = "$TESTED_SHA"
-          test -z "$(git status --porcelain)"
           git merge-base --is-ancestor "$ACCEPTED_BACKEND_SHA" "$TESTED_SHA"
           git merge-base --is-ancestor "$INTEGRATED_FRONTEND_SHA" "$TESTED_SHA"
-          git diff --name-only "$INTEGRATED_FRONTEND_SHA" "$TESTED_SHA" | sort | tee evidence/final-closure-delta.txt
-          test -s evidence/final-closure-delta.txt
-          ! grep -E '^android/|^core/|^build.gradle.kts$|^settings.gradle.kts$|^gradle.properties$' evidence/final-closure-delta.txt
-          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\nintegrated_frontend=%s\nrun=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_HEAD_REF" "$TESTED_SHA" "$ACCEPTED_BACKEND_SHA" "$INTEGRATED_FRONTEND_SHA" "$GITHUB_RUN_ID" | tee evidence/provenance.txt
-          echo BACKEND_FINAL_PROVENANCE=PASS | tee evidence/provenance-gate.txt
+          git diff --name-only "$PRODUCT_GREEN_SHA" "$TESTED_SHA" | sort | tee evidence/post-product-green-delta.txt
+          test -s evidence/post-product-green-delta.txt
+          ! grep -E '^(android/|core/|server/src/main/|server/build.gradle.kts$|database/|contracts/|scripts/|build.gradle.kts$|settings.gradle.kts$|gradle.properties$)' evidence/post-product-green-delta.txt
+          echo BACKEND_FINAL_PRODUCT_SOURCE_UNCHANGED=PASS | tee evidence/source-delta-gate.txt
 
       - uses: actions/setup-java@v5
         with:
@@ -83,47 +81,14 @@ jobs:
         with:
           gradle-version: '9.5.1'
 
-      - name: Authoritative OpenAPI and stale-truth gate
-        shell: bash
-        run: |
-          set -euo pipefail
-          cp contracts/openapi.yaml /tmp/openapi.before
-          python3 scripts/generate_openapi_contract.py | tee evidence/openapi-generate.txt
-          cmp /tmp/openapi.before contracts/openapi.yaml
-          python3 scripts/verify_openapi_drift.py | tee evidence/openapi-drift.txt
-          grep -q 'OPENAPI_DRIFT=PASS' evidence/openapi-drift.txt
-          grep -q '^  /auth/google:' contracts/openapi.yaml
-          grep -q 'GoogleIdentityExchangeRequest' contracts/openapi.yaml
-          ! grep -R --line-number -E 'Google auth.*(missing|deferred|placeholder)|Part 3 = Frontend|backend.*not complete' docs/backend-final-closure docs/FINAL_MANAGER_HANDOFF.md 2>/dev/null || exit 1
-          echo BACKEND_FINAL_OPENAPI=PASS | tee evidence/openapi-gate.txt
-
-      - name: Real PostgreSQL migrations tests regressions security
+      - name: Prepare real PostgreSQL and Ktor
         shell: bash
         env:
           PGPASSWORD: postgres
         run: |
           set -euo pipefail
           psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'
-          gradle --no-daemon :core:test :server:test | tee evidence/backend-tests.txt
-          grep -q 'BUILD SUCCESSFUL' evidence/backend-tests.txt
-          bash scripts/run_local_regressions.sh | tee evidence/frozen-regressions.txt
-          grep -q 'LOCAL_REGRESSION_GATE=PASS total=105' evidence/frozen-regressions.txt
-          psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -Atc "SELECT script||':'||success FROM flyway_schema_history WHERE script IN ('V007__part3_final_capability_expansion.sql','V008__part3_final_depth.sql','V009__backend_final_identity.sql') ORDER BY installed_rank" | tee evidence/migrations.txt
-          grep -q 'V009__backend_final_identity.sql:t' evidence/migrations.txt
-          grep -q 'post("/auth/google")' server/src/main/kotlin/com/veltrix/hom/vnext/server/Main.kt
-          grep -q 'GoogleIdTokenVerifier' server/src/main/kotlin/com/veltrix/hom/vnext/server/GoogleIdentity.kt
-          grep -q 'payload.nonce' server/src/main/kotlin/com/veltrix/hom/vnext/server/GoogleIdentity.kt
-          grep -q 'FOR UPDATE OF s' server/src/main/kotlin/com/veltrix/hom/vnext/server/Repositories.kt
-          grep -q 'external_identity_deletion_tombstone' database/migrations/V009__backend_final_identity.sql
-          ! grep -R --line-number -E 'println\(.*idToken|logger.*idToken|log.*idToken' server/src/main/kotlin
-          ! git grep -nE 'sk-[A-Za-z0-9_-]{20,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' -- .env.example build.gradle.kts settings.gradle.kts gradle.properties server/src/main android/app/src/main database scripts contracts
-          test -s server/src/test/resources/google-fixture/private-key-pkcs8.pem
-          echo BACKEND_FINAL_POSTGRES_SECURITY=PASS | tee evidence/backend-security-gate.txt
-
-      - name: Exact Ktor HTTP compatibility and performance
-        shell: bash
-        run: |
-          set -euo pipefail
+          gradle --no-daemon :server:classes | tee evidence/server-classes.txt
           nohup gradle --no-daemon :server:run > evidence/server.log 2>&1 &
           echo $! > evidence/server.pid
           ready=0
@@ -133,21 +98,10 @@ jobs:
           done
           test "$ready" -eq 1
           grep -q '"ready":true' evidence/ready.json
-          VELTRIX_API_BASE_URL=http://127.0.0.1:8080 python3 scripts/part2_http_runtime_smoke.py | tee evidence/part2-http-smoke.txt
-          grep -q PART2_HTTP_RUNTIME_SMOKE=PASS evidence/part2-http-smoke.txt
-          VELTRIX_API_BASE_URL=http://127.0.0.1:8080 python3 scripts/part3_http_runtime_smoke.py | tee evidence/part3-http-smoke.txt
-          grep -q PART3_HTTP_RUNTIME_SMOKE=PASS evidence/part3-http-smoke.txt
-          VELTRIX_API_BASE_URL=http://127.0.0.1:8080 python3 scripts/part2_performance_smoke.py | tee evidence/performance-smoke.txt
-          grep -q PART2_PERFORMANCE_SMOKE=PASS evidence/performance-smoke.txt
-          status=$(curl -sS -o evidence/google-disabled.json -w '%{http_code}' -H 'Content-Type: application/json' -d '{"idToken":"malformed-token-but-long-enough-1234567890","nonce":"nonce-long-enough-1234567890"}' http://127.0.0.1:8080/v1/auth/google)
-          test "$status" = 503
-          grep -q 'AUTH_GOOGLE_NOT_CONFIGURED' evidence/google-disabled.json
-          echo BACKEND_FINAL_REAL_HTTP=PASS | tee evidence/http-gate.txt
-          echo BACKEND_FINAL_PERFORMANCE=PASS | tee evidence/performance-gate.txt
+          echo BACKEND_FINAL_RUNTIME_SERVER=PASS | tee evidence/server-runtime-gate.txt
 
-      - name: Build exact Android artifacts
-        uses: android-actions/setup-android@v3
-      - name: Android compile/package compatibility
+      - uses: android-actions/setup-android@v3
+      - name: Build exact APK and androidTest APK
         shell: bash
         run: |
           set -euo pipefail
@@ -167,10 +121,9 @@ jobs:
             echo 'Secret-like material detected in APK' >&2
             exit 1
           fi
-          echo BACKEND_FINAL_APK_SECRET_SCAN=PASS | tee evidence/apk-secret-gate.txt
-          echo BACKEND_FINAL_ANDROID_BUILD=PASS | tee evidence/android-build-gate.txt
+          echo BACKEND_FINAL_RUNTIME_BUILD=PASS | tee evidence/android-build-gate.txt
 
-      - name: Android16 API36 runtime and process-death
+      - name: Android16 API36 real-session runtime
         shell: bash
         run: |
           set -euo pipefail
@@ -197,25 +150,61 @@ jobs:
           grep -q V15_ANDROID_RUNTIME_ALL=PASS evidence/runtime/runtime-all.txt
           grep -Fx 16 evidence/runtime/android-release.txt
           grep -Fx 36 evidence/runtime/android-api.txt
+          grep -q V15_SERVER_DEVICE=PASS evidence/runtime/server-device-gate.txt
+          grep -q V15_PROCESS_DEATH=PASS evidence/runtime/process-gate.txt
+          grep -q V15_OFFLINE=PASS evidence/runtime/offline-gate.txt
+          echo BACKEND_FINAL_API36_REAL_SESSION_RUNTIME=PASS | tee evidence/runtime-final-gate.txt
+
+      - name: Part3 process-death and typed real-server proof
+        shell: bash
+        run: |
+          set -euo pipefail
           export ANDROID_SERIAL=$(adb devices | awk 'NR>1 && $2=="device" {print $1; exit}')
           test -n "$ANDROID_SERIAL"
           I=$(adb shell pm list instrumentation 2>/dev/null | sed -n 's/^instrumentation:\([^ ]*\).*target=com.veltrix.hom.vnext.dev.*/\1/p' | head -1 | tr -d '\r')
           test -n "$I"
           adb reverse --remove tcp:8080 >/dev/null 2>&1 || true
           adb reverse tcp:8080 tcp:8080
-          timeout 150s adb shell am instrument -w -e class 'com.veltrix.hom.vnext.Part3ProcessDeathInstrumentedTest#aSeedPart3State' "$I" | tee evidence/process-seed.txt
-          grep -q 'OK (1 test)' evidence/process-seed.txt
+          timeout 150s adb shell am instrument -w -e class 'com.veltrix.hom.vnext.Part3ProcessDeathInstrumentedTest#aSeedPart3State' "$I" | tee evidence/part3-process-seed.txt
+          grep -q 'OK (1 test)' evidence/part3-process-seed.txt
           adb shell am force-stop com.veltrix.hom.vnext.dev.test || true
           adb shell am force-stop com.veltrix.hom.vnext.dev || true
           sleep 2
-          timeout 150s adb shell am instrument -w -e class 'com.veltrix.hom.vnext.Part3ProcessDeathInstrumentedTest#zVerifyPart3StateAfterFreshInstrumentationProcess' "$I" | tee evidence/process-verify.txt
-          grep -q 'OK (1 test)' evidence/process-verify.txt
-          timeout 300s adb shell am instrument -w -e class 'com.veltrix.hom.vnext.Part3FinalStateInstrumentedTest' "$I" | tee evidence/part3-instrumentation.txt
-          grep -q 'OK (2 tests)' evidence/part3-instrumentation.txt
-          echo BACKEND_FINAL_ANDROID_RUNTIME=PASS | tee evidence/android-runtime-gate.txt
+          timeout 150s adb shell am instrument -w -e class 'com.veltrix.hom.vnext.Part3ProcessDeathInstrumentedTest#zVerifyPart3StateAfterFreshInstrumentationProcess' "$I" | tee evidence/part3-process-verify.txt
+          grep -q 'OK (1 test)' evidence/part3-process-verify.txt
+          timeout 300s adb shell am instrument -w -e class 'com.veltrix.hom.vnext.Part3FinalStateInstrumentedTest' "$I" | tee evidence/part3-final-state.txt
+          grep -q 'OK (2 tests)' evidence/part3-final-state.txt
+          echo BACKEND_FINAL_PART3_PROCESS_SERVER=PASS | tee evidence/part3-runtime-gate.txt
 
-      - name: Self red-team
+      - name: Require exact-SHA source audit GREEN and import its evidence
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SOURCE_RUN=''
+          for i in $(seq 1 40); do
+            SOURCE_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$TESTED_SHA&event=pull_request&per_page=50" --jq '.workflow_runs[] | select(.name=="Veltrix Backend Final Closure Source Audit") | .id' | head -1)
+            if [ -n "$SOURCE_RUN" ]; then
+              status=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" --jq '.status+":"+(.conclusion//"")')
+              echo "source-audit $SOURCE_RUN $status"
+              [ "$status" = 'completed:success' ] && break
+              case "$status" in completed:*) echo 'Exact-SHA source audit RED' >&2; exit 1;; esac
+            fi
+            sleep 10
+          done
+          test -n "$SOURCE_RUN"
+          status=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" --jq '.status+":"+(.conclusion//"")')
+          test "$status" = 'completed:success'
+          mkdir -p package/source-audit-evidence
+          gh run download "$SOURCE_RUN" -n "veltrix-backend-final-source-audit-$SOURCE_RUN" -D package/source-audit-evidence
+          printf 'source_audit_run=%s\nsource_audit_status=%s\n' "$SOURCE_RUN" "$status" | tee evidence/source-audit-provenance.txt
+          echo BACKEND_FINAL_EXACT_SOURCE_AUDIT=PASS | tee evidence/source-audit-gate.txt
+
+      - name: Final red-team and package exact source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           REDTEAM_TARGETS=(
@@ -244,27 +233,8 @@ jobs:
             grep -q 'require(keys.intersect(randomPurchaseTokens).isEmpty())' core/src/main/kotlin/com/veltrix/hom/vnext/core/Part3FinalSystems.kt
           fi
           ! grep -R --line-number 'continue-on-error: true' .github/workflows/backend-final-closure-*.yml
-          echo BACKEND_FINAL_RED_TEAM=PASS | tee evidence/red-team-gate.txt
-
-      - name: Resolve numeric job id
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" > evidence/jobs.json
-          python3 - <<'PY' > evidence/job-id.txt
-          import json
-          d=json.load(open('evidence/jobs.json'))
-          jobs=[j for j in d.get('jobs',[]) if j.get('name')=='final']
-          assert len(jobs)==1, len(jobs)
-          print(jobs[0]['id'])
-          PY
-
-      - name: Package exact source APKs docs evidence hashes
-        shell: bash
-        run: |
-          set -euo pipefail
+          JOB_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" --jq '.jobs[] | select(.name=="runtime-package") | .id')
+          test -n "$JOB_ID"
           APK=android/app/build/outputs/apk/debug/app-debug.apk
           TEST_APK=$(find android/app/build/outputs/apk/androidTest -name '*androidTest.apk' -type f -size +0c | head -1)
           git archive --format=zip --output=package/Veltrix-Hom-VNext-BACKEND-FINAL-EXACT-SOURCE.zip "$TESTED_SHA"
@@ -274,8 +244,7 @@ jobs:
           cp -R docs/backend-final-closure package/backend-final-closure-docs
           cp -R database/migrations package/database-migrations
           cp -R evidence package/evidence
-          JOB_ID=$(cat evidence/job-id.txt)
-          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\nintegrated_frontend=%s\nrun=%s\njob=%s\nandroid_runtime=Android-16-API36-google_apis-x86_64\ncompile_sdk=37\ntarget_sdk=37\n' "$GITHUB_REPOSITORY" "$GITHUB_HEAD_REF" "$TESTED_SHA" "$ACCEPTED_BACKEND_SHA" "$INTEGRATED_FRONTEND_SHA" "$GITHUB_RUN_ID" "$JOB_ID" > package/PROVENANCE.txt
+          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\nintegrated_frontend=%s\nruntime_run=%s\nruntime_job=%s\nandroid_runtime=Android-16-API36-google_apis-x86_64\ncompile_sdk=37\ntarget_sdk=37\n' "$GITHUB_REPOSITORY" "$GITHUB_HEAD_REF" "$TESTED_SHA" "$ACCEPTED_BACKEND_SHA" "$INTEGRATED_FRONTEND_SHA" "$GITHUB_RUN_ID" "$JOB_ID" > package/PROVENANCE.txt
           (cd package && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
           sha256sum package/Veltrix-Hom-VNext-BACKEND-FINAL-EXACT-SOURCE.zip | tee evidence/source-sha256.txt
           sha256sum package/Veltrix-Hom-VNext-BACKEND-FINAL.apk | tee evidence/final-apk-sha256.txt
@@ -283,9 +252,9 @@ jobs:
           (cd package && zip -qr ../artifact/Veltrix-Hom-VNext-BACKEND-FINAL-CLOSURE.zip .)
           sha256sum artifact/Veltrix-Hom-VNext-BACKEND-FINAL-CLOSURE.zip | tee evidence/package-sha256.txt
           cp evidence/*.txt artifact/ 2>/dev/null || true
-          echo BACKEND_FINAL_PACKAGE=PASS | tee artifact/FINAL_STATUS.txt
+          echo BACKEND_FINAL_RUNTIME_PACKAGE=PASS | tee artifact/FINAL_STATUS.txt
 
-      - name: Upload canonical final artifact
+      - name: Upload canonical backend final closure artifact
         uses: actions/upload-artifact@v4
         with:
           name: veltrix-hom-backend-final-closure-${{ github.run_id }}
