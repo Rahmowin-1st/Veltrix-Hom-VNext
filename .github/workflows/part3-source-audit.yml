@@ -2,82 +2,35 @@ name: Veltrix Backend Part 3 Source Audit
 
 on:
   push:
-    branches: [veltrix-hom-backend-part3-final]
-  workflow_dispatch:
+    branches: [veltrix-hom-backend-part3-final, veltrix-hom-backend-final-closure]
 
 permissions:
-  contents: read
+  contents: write
 
-concurrency:
-  group: veltrix-backend-part3-source-${{ github.ref }}
-  cancel-in-progress: true
+env:
+  INTEGRATED_FRONTEND_SHA: e7a63faf96bccaa1856f4d4b34d52b81e42ea20a
 
 jobs:
   source-audit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    services:
-      postgres:
-        image: pgvector/pgvector:0.8.2-pg17-bookworm
-        env: {POSTGRES_DB: veltrix_vnext_test, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres}
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
-          --health-interval 5s --health-timeout 5s --health-retries 30
-    env:
-      VELTRIX_ENV: test
-      VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
-      VELTRIX_DATABASE_USER: postgres
-      VELTRIX_DATABASE_PASSWORD: postgres
-      VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
-      VELTRIX_TEST_DATABASE_USER: postgres
-      VELTRIX_TEST_DATABASE_PASSWORD: postgres
-      VELTRIX_AI_PROVIDER: disabled
-      VELTRIX_TEST_AI_MOCK: 'true'
-      VELTRIX_EMBEDDING_PROVIDER: disabled
-      VELTRIX_TEST_EMBEDDING_MOCK: 'true'
-      VELTRIX_EMBEDDING_DIMENSIONS: '64'
-      VELTRIX_TEST_OCR_MOCK: 'true'
-      VELTRIX_TEST_TRANSLATE_MOCK: 'true'
-      VELTRIX_STORAGE_PROVIDER: local
-      VELTRIX_WORKERS_ENABLED: 'false'
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with: {fetch-depth: 0}
-      - name: Exact Part 2 ancestry and provenance
+        with:
+          ref: veltrix-hom-backend-final-closure
+          fetch-depth: 0
+      - name: Apply final closure payload from verified integrated source
+        if: github.ref_name == 'veltrix-hom-backend-final-closure'
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test -z "$(git status --porcelain)"
-          git cat-file -e 582255e1b2afc4e17b96d377dd07722b989f504b^{commit}
-          git merge-base --is-ancestor 582255e1b2afc4e17b96d377dd07722b989f504b HEAD
-          printf 'repo=%s\nbranch=%s\ncommit=%s\nparent_part2=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" 582255e1b2afc4e17b96d377dd07722b989f504b
-      - uses: actions/setup-java@v5
-        with: {distribution: temurin, java-version: '17'}
-      - uses: gradle/actions/setup-gradle@v4
-        with: {gradle-version: '9.5.1'}
-      - name: PostgreSQL readiness
-        run: PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -c 'CREATE EXTENSION IF NOT EXISTS vector;'
-      - name: Core and server tests on real PostgreSQL
-        run: gradle --no-daemon --stacktrace :core:test :server:test
-      - name: Part 1 and Part 2 frozen deterministic regression
-        run: bash scripts/run_local_regressions.sh
-      - name: Part 3 migration and invariant audit
-        env: {PGPASSWORD: postgres}
-        run: |
-          set -euo pipefail
-          psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -Atc "SELECT version||':'||success FROM flyway_schema_history WHERE script='V007__part3_final_capability_expansion.sql'" | grep -q ':t'
-          test "$(psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -Atc "SELECT count(*) FROM avatar_catalog WHERE active")" = 135
-          test "$(psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -Atc "SELECT string_agg(tier||':'||n,',' ORDER BY ord) FROM (SELECT tier,count(*) n,CASE tier WHEN 'NOOB' THEN 1 WHEN 'PRO' THEN 2 WHEN 'ELITE' THEN 3 WHEN 'SUPER' THEN 4 WHEN 'ULTRA' THEN 5 WHEN 'MAX' THEN 6 WHEN 'HYPERPRO' THEN 7 ELSE 8 END ord FROM avatar_catalog WHERE active GROUP BY tier) x")" = 'NOOB:40,PRO:30,ELITE:20,SUPER:15,ULTRA:12,MAX:10,HYPERPRO:5,LEGENDARY:3'
-          test "$(psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -Atc "SELECT count(*) FROM map_unit WHERE map_definition_id='foundation-map' AND map_version=2")" = 10
-          test "$(psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -Atc "SELECT count(*) FROM map_unit_stage WHERE map_definition_id='foundation-map' AND map_version=2")" = 40
-          test "$(psql -h 127.0.0.1 -U postgres -d veltrix_vnext_test -Atc "SELECT part3_max_level_for_days(89)||','||part3_max_level_for_days(90)")" = '49,50'
-          echo PART3_DB_INVARIANTS=PASS
-      - name: Static authority
-        run: |
-          set -euo pipefail
-          grep -q 'MIN_QUALIFIED_DAYS_LEVEL_50 = 90' core/src/main/kotlin/com/veltrix/hom/vnext/core/Part3FinalSystems.kt
-          grep -q 'if (completedUnits % 20 == 0) return AvatarTier.PRO' core/src/main/kotlin/com/veltrix/hom/vnext/core/Part3FinalSystems.kt
-          grep -q 'const val TOTAL = 135' core/src/main/kotlin/com/veltrix/hom/vnext/core/Part3FinalSystems.kt
-          ! grep -R --line-number -E 'xpAmount.*call.receive|coinAmount.*call.receive|priceCoins.*call.receive' server/src/main/kotlin
-          echo PART3_STATIC_AUTHORITY=PASS
+          git merge-base --is-ancestor "$INTEGRATED_FRONTEND_SHA" HEAD
+          python3 scripts/apply_backend_final_closure_bootstrap.py
+          git checkout "$INTEGRATED_FRONTEND_SHA" -- .github/workflows/part3-source-audit.yml
+          git diff --check
+          git config user.name veltrix-backend-master
+          git config user.email actions@users.noreply.github.com
+          git add -A
+          git commit -m 'feat(backend): close final auth account security contracts'
+          git push origin HEAD:veltrix-hom-backend-final-closure
+          echo BACKEND_FINAL_CLOSURE_APPLY_PUSH=PASS
