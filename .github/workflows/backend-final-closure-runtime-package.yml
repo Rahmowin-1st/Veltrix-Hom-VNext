@@ -207,7 +207,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git grep -nE 'TODO|FIXME|placeholder|fake API|fake citation|loot.?box|client-trusted XP|client-trusted Coins' -- ':!docs/**' ':!server/src/test/**' ':!android/app/src/androidTest/**' > evidence/red-team-findings.txt || true
+          git grep -nE 'TODO|FIXME|placeholder|fake API|fake citation|loot.?box|client-trusted XP|client-trusted Coins' -- ':!docs/**' ':!server/src/test/**' ':!android/app/src/androidTest/**' ':!.github/**' > evidence/red-team-findings.txt || true
           test ! -s evidence/red-team-findings.txt
           ! grep -R --line-number 'continue-on-error: true' .github/workflows/backend-final-closure-*.yml
           JOB_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" --jq '.jobs[] | select(.name=="runtime-package") | .id')
