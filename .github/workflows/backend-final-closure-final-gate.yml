@@ -18,6 +18,7 @@ env:
   INTEGRATED_FRONTEND_SHA: e7a63faf96bccaa1856f4d4b34d52b81e42ea20a
   TESTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
   IMAGE_PACKAGE: system-images;android-36;google_apis;x86_64
+  GPU_MODE: swiftshader_indirect
   VELTRIX_ENV: test
   VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
   VELTRIX_DATABASE_USER: postgres
@@ -115,7 +116,8 @@ jobs:
           grep -q 'FOR UPDATE OF s' server/src/main/kotlin/com/veltrix/hom/vnext/server/Repositories.kt
           grep -q 'external_identity_deletion_tombstone' database/migrations/V009__backend_final_identity.sql
           ! grep -R --line-number -E 'println\(.*idToken|logger.*idToken|log.*idToken' server/src/main/kotlin
-          ! grep -R --line-number -E 'sk-[A-Za-z0-9_-]{20,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' -- . ':!server/src/test/resources/google-fixture/private-key-pkcs8.pem'
+          ! git grep -nE 'sk-[A-Za-z0-9_-]{20,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' -- .env.example build.gradle.kts settings.gradle.kts gradle.properties server/src/main android/app/src/main database scripts contracts
+          test -s server/src/test/resources/google-fixture/private-key-pkcs8.pem
           echo BACKEND_FINAL_POSTGRES_SECURITY=PASS | tee evidence/backend-security-gate.txt
 
       - name: Exact Ktor HTTP compatibility and performance
@@ -161,6 +163,11 @@ jobs:
           "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging "$APK" | tee evidence/apk-badging.txt
           grep -q "targetSdkVersion:'37'" evidence/apk-badging.txt
           sha256sum "$APK" "$TEST_APK" | tee evidence/apk-sha256.txt
+          if unzip -p "$APK" 'classes*.dex' | strings | grep -E 'sk-[A-Za-z0-9_-]{20,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY'; then
+            echo 'Secret-like material detected in APK' >&2
+            exit 1
+          fi
+          echo BACKEND_FINAL_APK_SECRET_SCAN=PASS | tee evidence/apk-secret-gate.txt
           echo BACKEND_FINAL_ANDROID_BUILD=PASS | tee evidence/android-build-gate.txt
 
       - name: Android16 API36 runtime and process-death
