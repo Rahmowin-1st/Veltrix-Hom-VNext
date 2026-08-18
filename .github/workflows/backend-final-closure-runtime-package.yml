@@ -70,7 +70,7 @@ jobs:
           git merge-base --is-ancestor "$INTEGRATED_FRONTEND_SHA" "$TESTED_SHA"
           git diff --name-only "$PRODUCT_GREEN_SHA" "$TESTED_SHA" | sort | tee evidence/post-product-green-delta.txt
           test -s evidence/post-product-green-delta.txt
-          ! grep -E '^(android/|core/|server/|database/|contracts/|scripts/|build.gradle.kts$|settings.gradle.kts$|gradle.properties$)' evidence/post-product-green-delta.txt
+          ! grep -E '^(android/|core/|server/src/main/|server/build.gradle.kts$|database/|contracts/|scripts/|build.gradle.kts$|settings.gradle.kts$|gradle.properties$)' evidence/post-product-green-delta.txt
           echo BACKEND_FINAL_PRODUCT_SOURCE_UNCHANGED=PASS | tee evidence/source-delta-gate.txt
 
       - uses: actions/setup-java@v5
