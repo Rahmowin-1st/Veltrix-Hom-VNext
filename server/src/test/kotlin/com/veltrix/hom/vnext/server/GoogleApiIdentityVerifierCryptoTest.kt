@@ -38,7 +38,12 @@ class GoogleApiIdentityVerifierCryptoTest {
         assertAuthCode("AUTH_GOOGLE_INVALID") { verifier.verify(signedToken(expirationSeconds = (System.currentTimeMillis() / 1000L) - 3600L), nonce) }
         assertAuthCode("AUTH_GOOGLE_INVALID") { verifier.verify(signedToken(subject = null), nonce) }
 
-        val tampered = valid.dropLast(1) + if (valid.last() == 'a') 'b' else 'a'
+        val parts = valid.split('.')
+        assertEquals(3, parts.size)
+        val signature = Base64.getUrlDecoder().decode(parts[2])
+        signature[0] = (signature[0].toInt() xor 1).toByte()
+        val tamperedSignature = Base64.getUrlEncoder().withoutPadding().encodeToString(signature)
+        val tampered = "${parts[0]}.${parts[1]}.$tamperedSignature"
         assertAuthCode("AUTH_GOOGLE_INVALID") { verifier.verify(tampered, nonce) }
     }
 
