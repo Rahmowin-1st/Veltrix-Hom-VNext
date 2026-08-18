@@ -73,9 +73,9 @@ class GoogleApiIdentityVerifierCryptoTest {
             this.subject = subject
             this.email = "fixture@example.test"
             this.emailVerified = true
+            this.nonce = nonce
             this["name"] = "Fixture User"
             this["picture"] = "https://example.test/fixture.png"
-            this["nonce"] = nonce
         }
         return JsonWebSignature.signUsingRsaSha256(privateKey(), GsonFactory.getDefaultInstance(), header, payload)
     }
