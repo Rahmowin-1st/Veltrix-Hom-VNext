@@ -3,6 +3,8 @@ name: Veltrix Backend Final Closure Source Audit
 on:
   push:
     branches: [veltrix-hom-backend-final-closure]
+  pull_request:
+    branches: [veltrix-hom-backend-final-closure]
   workflow_dispatch:
 
 concurrency:
@@ -16,6 +18,7 @@ permissions:
 env:
   ACCEPTED_BACKEND_SHA: 4ed13cfcf7d4bb1fe6215b231426e0b4f208343a
   INTEGRATED_FRONTEND_SHA: e7a63faf96bccaa1856f4d4b34d52b81e42ea20a
+  TESTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
   VELTRIX_ENV: test
   VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
   VELTRIX_DATABASE_USER: postgres
@@ -52,6 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ env.TESTED_SHA }}
           fetch-depth: 0
 
       - name: Exact source provenance and ancestry
@@ -59,13 +63,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p evidence
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          git merge-base --is-ancestor "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA"
-          git merge-base --is-ancestor "$INTEGRATED_FRONTEND_SHA" "$GITHUB_SHA"
-          git diff --name-only "$INTEGRATED_FRONTEND_SHA" "$GITHUB_SHA" | sort | tee evidence/final-closure-delta.txt
+          test "$(git rev-parse HEAD)" = "$TESTED_SHA"
+          git merge-base --is-ancestor "$ACCEPTED_BACKEND_SHA" "$TESTED_SHA"
+          git merge-base --is-ancestor "$INTEGRATED_FRONTEND_SHA" "$TESTED_SHA"
+          git diff --name-only "$INTEGRATED_FRONTEND_SHA" "$TESTED_SHA" | sort | tee evidence/final-closure-delta.txt
           test -s evidence/final-closure-delta.txt
-          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\nintegrated_frontend=%s\nrun=%s\n' \
-            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" "$INTEGRATED_FRONTEND_SHA" "$GITHUB_RUN_ID" | tee evidence/provenance.txt
+          printf 'repo=%s\nevent=%s\nref=%s\ncommit=%s\naccepted_backend=%s\nintegrated_frontend=%s\nrun=%s\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_EVENT_NAME" "$GITHUB_REF_NAME" "$TESTED_SHA" "$ACCEPTED_BACKEND_SHA" "$INTEGRATED_FRONTEND_SHA" "$GITHUB_RUN_ID" | tee evidence/provenance.txt
 
       - uses: actions/setup-java@v5
         with:
@@ -112,6 +116,7 @@ jobs:
           grep -q 'post("/auth/google")' server/src/main/kotlin/com/veltrix/hom/vnext/server/Main.kt
           grep -q 'GoogleIdTokenVerifier' server/src/main/kotlin/com/veltrix/hom/vnext/server/GoogleIdentity.kt
           grep -q 'AUTH_GOOGLE_REPLAY' server/src/main/kotlin/com/veltrix/hom/vnext/server/FederatedAuthRepository.kt
+          grep -q 'FOR UPDATE OF s' server/src/main/kotlin/com/veltrix/hom/vnext/server/Repositories.kt
           grep -q 'external_identity_deletion_tombstone' database/migrations/V009__backend_final_identity.sql
           grep -q 'account_external_identity' server/src/main/kotlin/com/veltrix/hom/vnext/server/Part3CompletionRepository.kt
           ! grep -R --line-number -E 'INSERT INTO .*id.?token|id.?token.*INSERT INTO|nonce.*INSERT INTO.*account_external_identity' server/src/main/kotlin database/migrations
