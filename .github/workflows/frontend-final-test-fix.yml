@@ -35,3 +35,4 @@ jobs:
           git diff --cached --check
           git commit -m 'fix(frontend): make final auth and visual tests executable'
           git push origin HEAD:veltrix-hom-frontend-final-closure
+          # Triggered from an existing workflow revision so GitHub evaluates this push path deterministically.
