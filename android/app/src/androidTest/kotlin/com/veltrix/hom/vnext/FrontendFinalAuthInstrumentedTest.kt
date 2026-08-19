@@ -3,11 +3,13 @@ package com.veltrix.hom.vnext
 import android.graphics.Bitmap
 import android.os.SystemClock
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
@@ -61,8 +63,10 @@ class FrontendFinalAuthInstrumentedTest {
             compose.onNodeWithTag("home-stage40").assertIsDisplayed()
 
             compose.onNodeWithTag("home-menu").performClick()
-            awaitTag("root-sidebar", 10_000L)
-            compose.onNodeWithTag("drawer-secondary-SETTINGS").performScrollTo().performClick()
+            awaitTag("root-sidebar-list", 10_000L)
+            compose.onNodeWithTag("root-sidebar-list")
+                .performScrollToNode(hasTestTag("drawer-secondary-SETTINGS"))
+            compose.onNodeWithTag("drawer-secondary-SETTINGS").assertIsDisplayed().performClick()
             awaitTag("settings-stage70", 20_000L)
             compose.onNodeWithTag("settings-sign-out").performScrollTo().assertIsDisplayed()
             capture("settings-account")
