@@ -1,0 +1,211 @@
+name: Veltrix Frontend Final Closure Runtime Gate
+
+on:
+  push:
+    branches: [veltrix-hom-frontend-final-closure]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: veltrix-frontend-final-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ACCEPTED_BACKEND_SHA: c93653d1bb48c9e2ecea9fac570f966a5a878ff0
+  EVIDENCE_BRANCH: veltrix-hom-frontend-final-ci-evidence
+  VELTRIX_ENV: test
+  VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_DATABASE_USER: postgres
+  VELTRIX_DATABASE_PASSWORD: postgres
+  VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_TEST_DATABASE_USER: postgres
+  VELTRIX_TEST_DATABASE_PASSWORD: postgres
+  VELTRIX_AI_PROVIDER: disabled
+  VELTRIX_TEST_AI_MOCK: 'true'
+  VELTRIX_EMBEDDING_PROVIDER: disabled
+  VELTRIX_TEST_EMBEDDING_MOCK: 'true'
+  VELTRIX_EMBEDDING_DIMENSIONS: '64'
+  VELTRIX_TEST_OCR_MOCK: 'true'
+  VELTRIX_TEST_TRANSLATE_MOCK: 'true'
+  VELTRIX_STORAGE_PROVIDER: local
+  VELTRIX_WORKERS_ENABLED: 'true'
+
+jobs:
+  runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+
+      - name: Accepted backend boundary and exact provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/frontend-final-runtime
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git cat-file -e "$ACCEPTED_BACKEND_SHA^{commit}"
+          git merge-base --is-ancestor "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA"
+          if git diff --name-only "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA" | grep -E '^(server/|database/migrations/|core/src/main/)'; then
+            echo 'Frozen backend-owned source changed.' >&2
+            exit 1
+          fi
+          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\nrun=%s\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" "$GITHUB_RUN_ID" \
+            | tee evidence/frontend-final-runtime/provenance.txt
+          git diff --name-only "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA" | tee evidence/frontend-final-runtime/frontend-delta.txt
+          echo 'FRONTEND_BASE_ACCEPTED_BACKEND=PASS' | tee evidence/frontend-final-runtime/boundary.txt
+
+      - name: Final runtime source gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP=android/app/src/main/kotlin/com/veltrix/hom/vnext
+          TEST=android/app/src/androidTest/kotlin/com/veltrix/hom/vnext
+          grep -Fq 'orElse("/v1/auth/google")' android/app/build.gradle.kts
+          grep -Fq 'setNonce' "$APP/RootResetAuth.kt"
+          grep -Fq 'clearGoogleCredentialState' "$APP/RootResetAuth.kt"
+          grep -Fq 'clearAccountScopedState' "$APP/AppViewModel.kt"
+          test -s "$TEST/GoogleFrontendTransportInstrumentedTest.kt"
+          test -s "$TEST/FrontendFinalAuthInstrumentedTest.kt"
+          grep -Fq 'project-workspace' "$TEST/RootStage90InstrumentedTest.kt"
+          grep -Fq 'PERSONAL_SIGNAL_LAYOUT=PASS' scripts/root_reset_stage90_gate.sh
+          grep -Fq 'STORE_NO_RAW_JSON=PASS' scripts/root_reset_stage90_gate.sh
+          grep -Fq 'PROJECT_WORKSPACE_FULLY_LOADED=PASS' scripts/root_reset_stage90_gate.sh
+          grep -Fq 'LIVE_GOOGLE_E2E=NOT_VERIFIED_EXTERNAL' scripts/root_reset_stage90_gate.sh
+          if grep -RniE 'continue offline|offline mode|guest mode' "$APP/RootResetAuth.kt" "$APP/RootResetShell.kt"; then
+            echo 'Offline/guest product path found.' >&2
+            exit 1
+          fi
+          echo 'FINAL_RUNTIME_SOURCE=PASS' | tee evidence/frontend-final-runtime/source-gate.txt
+
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.5.1'}
+
+      - name: Backend preservation regressions and exact Android builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :core:test :server:test :android:app:testDebugUnitTest :android:app:assembleDebug :android:app:assembleDebugAndroidTest :android:app:assembleRelease | tee evidence/frontend-final-runtime/build.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/frontend-final-runtime/build.txt
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          test -s android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          RELEASE_APK="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$RELEASE_APK" && test -s "$RELEASE_APK"
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee evidence/frontend-final-runtime/debug-apk-sha256.txt
+          sha256sum android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk | tee evidence/frontend-final-runtime/androidtest-apk-sha256.txt
+          sha256sum "$RELEASE_APK" | tee evidence/frontend-final-runtime/release-apk-sha256.txt
+          printf 'ANDROID_BUILD=PASS\nBACKEND_REGRESSION=PASS\n' | tee evidence/frontend-final-runtime/build-gates.txt
+
+      - name: Start accepted backend runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup gradle --no-daemon :server:run > evidence/frontend-final-runtime/server-runtime.log 2>&1 &
+          ready=0
+          for i in $(seq 1 120); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8080/ready > evidence/frontend-final-runtime/ready.json; then ready=1; break; fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then tail -n 160 evidence/frontend-final-runtime/server-runtime.log || true; exit 1; fi
+          grep -q '"ready":true' evidence/frontend-final-runtime/ready.json
+          echo 'BACKEND_RUNTIME=PASS' | tee evidence/frontend-final-runtime/backend-runtime-gate.txt
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Provision API36 Google APIs runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'emulator' 'platforms;android-36' 'system-images;android-36;google_apis;x86_64'
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+          ls -l /dev/kvm | tee evidence/frontend-final-runtime/kvm.txt
+
+      - name: API36 final auth visual accessibility workspace and PF proof
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          cores: 4
+          disable-animations: false
+          emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
+          script: bash scripts/root_reset_stage90_gate.sh
+
+      - name: Fail-closed final runtime verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx 'FRONTEND_BASE_ACCEPTED_BACKEND=PASS' evidence/frontend-final-runtime/boundary.txt
+          grep -qx 'FINAL_RUNTIME_SOURCE=PASS' evidence/frontend-final-runtime/source-gate.txt
+          grep -qx 'BACKEND_RUNTIME=PASS' evidence/frontend-final-runtime/backend-runtime-gate.txt
+          grep -qx 'ROOT_STAGE90_TESTS=PASS tests=6 failures=0 errors=0 skipped=0' evidence/stage90/test-summary.txt
+          for marker in AUTH_GATEWAY=PASS GOOGLE_FRONTEND_TRANSPORT=PASS SERVER_SESSION_BOOTSTRAP=PASS SIGN_OUT=PASS NO_PRODUCT_BEFORE_SERVER_SESSION=PASS CURRENT_ROOT_VISUAL_PROOF=PASS PERSONAL_SIGNAL_LAYOUT=PASS STORE_NO_RAW_JSON=PASS STORE_NO_INTERNAL_ID_LEAK=PASS PROJECT_WORKSPACE_FULLY_LOADED=PASS FONT_SCALE_200=PASS REDUCED_MOTION_PATH=PASS API36_JANKSTATS_SANITY=PASS; do
+            grep -qx "$marker" evidence/stage90/stage90-gate.txt
+          done
+          grep -qx 'LIVE_GOOGLE_E2E=NOT_VERIFIED_EXTERNAL' evidence/stage90/stage90-gate.txt
+          grep -qx 'RELEASE_PROFILEABLE_PF=NOT_VERIFIED' evidence/stage90/stage90-gate.txt
+          grep -qx 'PHYSICAL_DEVICE_PF=NOT_VERIFIED' evidence/stage90/stage90-gate.txt
+          grep -qx 'PNG_DIMENSIONS=PASS count=13' evidence/stage90/png-dimensions.txt
+          test "$(wc -l < evidence/stage90/screenshot-sha256.txt | tr -d ' ')" = '13'
+          printf 'FINAL_FRONTEND_RUNTIME=PASS\nLIVE_GOOGLE_E2E=NOT_VERIFIED_EXTERNAL\nPHYSICAL_DEVICE_PF=NOT_VERIFIED\n' | tee evidence/frontend-final-runtime/final.txt
+
+      - name: Package exact runtime evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/frontend-final-runtime/stage90
+          cp -a evidence/stage90/. evidence/frontend-final-runtime/stage90/ 2>/dev/null || true
+          cp android/app/build/outputs/apk/debug/app-debug.apk evidence/frontend-final-runtime/Veltrix-Hom-VNext-debug.apk 2>/dev/null || true
+          cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk evidence/frontend-final-runtime/Veltrix-Hom-VNext-androidTest.apk 2>/dev/null || true
+          git archive --format=zip --output=evidence/frontend-final-runtime/exact-source.zip HEAD
+          sha256sum evidence/frontend-final-runtime/exact-source.zip | tee evidence/frontend-final-runtime/exact-source-sha256.txt
+          find evidence/frontend-final-runtime -type f -maxdepth 4 -print0 | sort -z | xargs -0 sha256sum > evidence/frontend-final-runtime/SHA256SUMS.txt || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: veltrix-frontend-final-runtime-${{ github.run_id }}
+          path: evidence/frontend-final-runtime/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish runtime status to evidence branch
+        if: always()
+        shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$EVIDENCE_BRANCH"
+          git worktree add /tmp/frontend-ci-evidence "origin/$EVIDENCE_BRANCH"
+          cd /tmp/frontend-ci-evidence
+          mkdir -p ci-status
+          printf 'workflow=frontend-final-runtime-gate\nstatus=%s\nrun_id=%s\ntested_sha=%s\naccepted_backend=%s\n' "$JOB_STATUS" "$GITHUB_RUN_ID" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" > ci-status/runtime-latest.txt
+          git config user.name 'Veltrix CI Evidence'
+          git config user.email 'actions@users.noreply.github.com'
+          git add ci-status/runtime-latest.txt
+          git commit -m "evidence(frontend): runtime ${JOB_STATUS} ${GITHUB_SHA}" || true
+          git push origin HEAD:"$EVIDENCE_BRANCH"

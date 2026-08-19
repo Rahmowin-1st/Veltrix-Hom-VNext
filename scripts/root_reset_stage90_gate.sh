@@ -10,9 +10,6 @@ adb reverse tcp:8080 tcp:8080
 adb reverse --list | tee "$OUT/adb-reverse.txt"
 grep -q 'tcp:8080 tcp:8080' "$OUT/adb-reverse.txt"
 
-# The workflow has already built these exact APKs from the current checkout. Run instrumentation
-# manually so Android Test Orchestrator/Gradle cleanup cannot uninstall the target before we export
-# the proof files written into its internal files directory.
 DEBUG_APK='android/app/build/outputs/apk/debug/app-debug.apk'
 TEST_APK='android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk'
 test -s "$DEBUG_APK"
@@ -44,12 +41,9 @@ RUNNER="$(awk -v prefix="instrumentation:${TEST_APP_ID}/" -v target="(target=${A
 test -n "$RUNNER"
 printf 'runner=%s\n' "$RUNNER" | tee "$OUT/instrumentation-runner.txt"
 
-# Never allow one silent Android instrumentation hang to consume the whole CI job. Every Stage 90
-# criterion runs in its own instrumentation process with a hard timeout and a durable per-test log.
-# The PF invocation gets more wall-clock allowance because account materialization/activity startup
-# are setup only and excluded from the measured JankStats window. Acceptance stays >=24 samples and
-# <=25% jank inside RootStage90PerformanceInstrumentedTest.
 TESTS=(
+  'google-transport|com.veltrix.hom.vnext.GoogleFrontendTransportInstrumentedTest#exchangePostsAcceptedPathAndUsesOnlyServerMintedVeltrixSession|120'
+  'auth-lifecycle|com.veltrix.hom.vnext.FrontendFinalAuthInstrumentedTest#signedOutColdLaunchServerSessionSignOutAndRelaunchAreFailClosed|300'
   'visual|com.veltrix.hom.vnext.RootStage90InstrumentedTest#realRootVisualMatrixAndCriticalTouchTargetsAreValid|240'
   'font200|com.veltrix.hom.vnext.RootStage90InstrumentedTest#twoHundredPercentFontKeepsSignedInAndAccountFlowsReachable|180'
   'reduced-motion|com.veltrix.hom.vnext.RootStage90InstrumentedTest#reducedMotionSystemPathKeepsNavigationFunctional|180'
@@ -61,11 +55,6 @@ for spec in "${TESTS[@]}"; do
   IFS='|' read -r name selector seconds <<< "$spec"
   log="$OUT/tests/${name}.txt"
 
-  # Each invocation must start from a clean process/task boundary. Previous Stage 90 tests launch the
-  # real MainActivity and deliberately change global display/animation settings; leaving their target
-  # or instrumentation process alive can make a subsequent ActivityScenario attach to stale task
-  # state and block before launch returns. Force-stop preserves app files/data but removes that process
-  # boundary ambiguity. Every test then establishes any non-default adaptation it specifically needs.
   adb shell am force-stop "$APP_ID" >/dev/null 2>&1 || true
   adb shell am force-stop "$TEST_APP_ID" >/dev/null 2>&1 || true
   adb shell settings put system font_scale 1.0 >/dev/null 2>&1 || true
@@ -98,13 +87,16 @@ for spec in "${TESTS[@]}"; do
   PASS_COUNT=$((PASS_COUNT + 1))
   printf 'STAGE90_TEST_PASS name=%s\n' "$name" | tee -a "$OUT/instrumentation.txt"
 done
-test "$PASS_COUNT" = '4'
-printf 'ROOT_STAGE90_TESTS=PASS tests=4 failures=0 errors=0 skipped=0\n' | tee "$OUT/test-summary.txt"
+test "$PASS_COUNT" = '6'
+printf 'ROOT_STAGE90_TESTS=PASS tests=6 failures=0 errors=0 skipped=0\n' | tee "$OUT/test-summary.txt"
+printf 'GOOGLE_FRONTEND_TRANSPORT=PASS endpoint=/v1/auth/google session_source=server_response\n' | tee "$OUT/google-frontend-transport.txt"
 
-# Proof lives in the still-installed debuggable target app's internal files directory. Export only
-# the fixed known proof filenames through the target app uid; no broad private-data export occurs.
 REMOTE_REL='files/stage90'
 FILES=(
+  auth-signed-out.png
+  settings-account.png
+  signout-auth.png
+  auth-relaunch-signed-out.png
   home.png
   personal.png
   store.png
@@ -114,6 +106,7 @@ FILES=(
   font200-personal.png
   font200-auth.png
   reduced-motion-home.png
+  final-auth-report.txt
   visual-a11y-report.txt
   font200-report.txt
   reduced-motion-report.txt
@@ -129,9 +122,15 @@ done
 printf 'transport=MANUAL_INSTRUMENTATION_RUN_AS_CAT_INTERNAL_FILES\napp_id=%s\nremote=%s\nfiles=%s\n' \
   "$APP_ID" "$REMOTE_REL" "${#FILES[@]}" | tee "$OUT/proof-pull.txt"
 
-for report in visual-a11y-report.txt font200-report.txt reduced-motion-report.txt jankstats-root.txt; do
+for report in final-auth-report.txt visual-a11y-report.txt font200-report.txt reduced-motion-report.txt jankstats-root.txt; do
   test -s "$OUT/screens/$report"
 done
+grep -q '^AUTH_GATEWAY=PASS$' "$OUT/screens/final-auth-report.txt"
+grep -q '^NO_PRODUCT_BEFORE_SERVER_SESSION=PASS$' "$OUT/screens/final-auth-report.txt"
+grep -q '^SERVER_SESSION_BOOTSTRAP=PASS$' "$OUT/screens/final-auth-report.txt"
+grep -q '^SIGN_OUT=PASS$' "$OUT/screens/final-auth-report.txt"
+grep -q '^LOCAL_SESSION_CLEARED=PASS$' "$OUT/screens/final-auth-report.txt"
+grep -q '^RELAUNCH_REMAINS_SIGNED_OUT=PASS$' "$OUT/screens/final-auth-report.txt"
 grep -q '^ROOT_STAGE90_VISUAL_MATRIX=PASS screens=5$' "$OUT/screens/visual-a11y-report.txt"
 grep -q '^CRITICAL_TOUCH_TARGETS=PASS min_dp=48$' "$OUT/screens/visual-a11y-report.txt"
 grep -q '^PERSONAL_SIGNAL_LAYOUT=PASS min_width_dp=220$' "$OUT/screens/visual-a11y-report.txt"
@@ -146,15 +145,15 @@ grep -q '^RELEASE_PROFILEABLE_PF=NOT_VERIFIED$' "$OUT/screens/jankstats-root.txt
 grep -q '^PHYSICAL_DEVICE_PF=NOT_VERIFIED$' "$OUT/screens/jankstats-root.txt"
 
 PNG_COUNT="$(find "$OUT/screens" -maxdepth 1 -type f -name '*.png' | wc -l | tr -d ' ')"
-test "$PNG_COUNT" = '9'
+test "$PNG_COUNT" = '13'
 find "$OUT/screens" -maxdepth 1 -type f -name '*.png' -size +20000c | sort > "$OUT/png-files.txt"
-test "$(wc -l < "$OUT/png-files.txt" | tr -d ' ')" = '9'
+test "$(wc -l < "$OUT/png-files.txt" | tr -d ' ')" = '13'
 
 python3 - "$OUT/screens" <<'PY' | tee "$OUT/png-dimensions.txt"
 import pathlib, struct, sys
 root=pathlib.Path(sys.argv[1])
 files=sorted(root.glob('*.png'))
-if len(files) != 9:
+if len(files) != 13:
     raise SystemExit(f'PNG_DIMENSIONS=FAIL count={len(files)}')
 for p in files:
     data=p.read_bytes()[:24]
@@ -164,14 +163,19 @@ for p in files:
     if w < 720 or h < 1280:
         raise SystemExit(f'PNG_DIMENSIONS=FAIL small={p.name} {w}x{h}')
     print(f'{p.name} {w}x{h}')
-print('PNG_DIMENSIONS=PASS count=9')
+print('PNG_DIMENSIONS=PASS count=13')
 PY
-grep -q '^PNG_DIMENSIONS=PASS count=9$' "$OUT/png-dimensions.txt"
+grep -q '^PNG_DIMENSIONS=PASS count=13$' "$OUT/png-dimensions.txt"
 
 sha256sum "$OUT"/screens/*.png | sort | tee "$OUT/screenshot-sha256.txt"
 sha256sum "$OUT"/screens/*.txt | sort | tee "$OUT/report-sha256.txt"
 
 cat > "$OUT/stage90-gate.txt" <<'EOF'
+AUTH_GATEWAY=PASS
+GOOGLE_FRONTEND_TRANSPORT=PASS
+SERVER_SESSION_BOOTSTRAP=PASS
+SIGN_OUT=PASS
+NO_PRODUCT_BEFORE_SERVER_SESSION=PASS
 CURRENT_ROOT_VISUAL_PROOF=PASS
 CORE_SCREEN_MATRIX=PASS
 CRITICAL_TOUCH_TARGETS=PASS
@@ -182,6 +186,7 @@ PROJECT_WORKSPACE_FULLY_LOADED=PASS
 FONT_SCALE_200=PASS
 REDUCED_MOTION_PATH=PASS
 API36_JANKSTATS_SANITY=PASS
+LIVE_GOOGLE_E2E=NOT_VERIFIED_EXTERNAL
 RELEASE_PROFILEABLE_PF=NOT_VERIFIED
 PHYSICAL_DEVICE_PF=NOT_VERIFIED
 EOF
