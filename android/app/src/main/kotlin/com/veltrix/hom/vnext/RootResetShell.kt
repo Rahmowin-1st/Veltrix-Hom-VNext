@@ -127,7 +127,14 @@ private fun RootAuthenticatedShell(root: RootResetViewModel, featureVm: AppViewM
     val inventoryUi = featureInventory.value?.takeIf { featureInventory.freshness == DataFreshness.FRESH } ?: inventory
     val avatarsUi = featureAvatars.value?.takeIf { featureAvatars.freshness == DataFreshness.FRESH } ?: avatars
     val gameUi = featureGame.value?.takeIf { featureGame.freshness == DataFreshness.FRESH } ?: game
-    val signOut: () -> Unit = { featureVm.clearAccountScopedState(); root.signOut { clearGoogleCredentialState(context) } }
+    var signOutInFlight by rememberSaveable { mutableStateOf(false) }
+    val signOut: () -> Unit = {
+        if (!signOutInFlight) {
+            signOutInFlight = true
+            featureVm.clearAccountScopedState()
+            root.signOut { clearGoogleCredentialState(context) }
+        }
+    }
 
     LaunchedEffect(world) { continuity.enter(world) }
     LaunchedEffect(home?.avatarId, personal?.avatarId) { continuity.avatar(home?.avatarId ?: personal?.avatarId) }
