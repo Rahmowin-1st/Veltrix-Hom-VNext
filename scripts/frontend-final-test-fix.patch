@@ -1,0 +1,168 @@
+diff --git a/android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/RootStage90InstrumentedTest.kt b/android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/RootStage90InstrumentedTest.kt
+--- a/android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/RootStage90InstrumentedTest.kt
++++ b/android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/RootStage90InstrumentedTest.kt
+@@ -3,10 +3,9 @@ package com.veltrix.hom.vnext
+ import android.graphics.Bitmap
+ import android.os.SystemClock
+ import androidx.compose.ui.test.assertIsDisplayed
+-import androidx.compose.ui.test.hasText
+ import androidx.compose.ui.test.junit4.createEmptyComposeRule
+-import androidx.compose.ui.test.onAllNodes
+ import androidx.compose.ui.test.onAllNodesWithTag
++import androidx.compose.ui.test.onAllNodesWithText
+ import androidx.compose.ui.test.onNodeWithTag
+ import androidx.compose.ui.test.performClick
+ import androidx.compose.ui.test.performScrollTo
+@@ -164,7 +163,7 @@ class RootStage90InstrumentedTest {
+     private fun assertStoreHasNoImplementationLeakage() {
+         val forbidden = listOf("minLevel", "requirements", "identityMetadataJson")
+         forbidden.forEach { text ->
+-            val matches = compose.onAllNodes(hasText(text, substring = true, ignoreCase = true), useUnmergedTree = true).fetchSemanticsNodes()
++            val matches = compose.onAllNodesWithText(text, substring = true, ignoreCase = true, useUnmergedTree = true).fetchSemanticsNodes()
+             assertTrue("Store must not expose internal contract text: $text", matches.isEmpty())
+         }
+     }
+diff --git a/android/app/src/test/kotlin/com/veltrix/hom/vnext/GoogleAuthContractUnitTest.kt b/android/app/src/test/kotlin/com/veltrix/hom/vnext/GoogleAuthContractUnitTest.kt
+--- a/android/app/src/test/kotlin/com/veltrix/hom/vnext/GoogleAuthContractUnitTest.kt
++++ b/android/app/src/test/kotlin/com/veltrix/hom/vnext/GoogleAuthContractUnitTest.kt
+@@ -1,61 +1,14 @@
+ package com.veltrix.hom.vnext
+ 
+ import org.junit.Assert.assertEquals
+ import org.junit.Assert.assertTrue
+ import org.junit.Test
+-import java.io.BufferedReader
+-import java.io.InputStreamReader
+-import java.net.ServerSocket
+-import java.util.concurrent.CountDownLatch
+-import java.util.concurrent.TimeUnit
+-import kotlin.concurrent.thread
+ 
+ class GoogleAuthContractUnitTest {
+     @Test
+-    fun exchangeGoogleIdentityUsesAcceptedBackendContractAndServerSession() {
+-        val server = ServerSocket(0)
+-        val received = StringBuilder()
+-        val served = CountDownLatch(1)
+-        val worker = thread(start = true, isDaemon = true) {
+-            server.use { socket ->
+-                val client = socket.accept()
+-                client.use {
+-                    val reader = BufferedReader(InputStreamReader(it.getInputStream(), Charsets.UTF_8))
+-                    val requestLine = reader.readLine()
+-                    received.appendLine(requestLine)
+-                    var contentLength = 0
+-                    while (true) {
+-                        val line = reader.readLine() ?: break
+-                        if (line.isBlank()) break
+-                        received.appendLine(line)
+-                        if (line.startsWith("Content-Length:", ignoreCase = true)) {
+-                            contentLength = line.substringAfter(':').trim().toInt()
+-                        }
+-                    }
+-                    val body = CharArray(contentLength)
+-                    if (contentLength > 0) reader.read(body, 0, contentLength)
+-                    received.append(String(body))
+-                    val payload = "{\"accountId\":\"account-server-owned\",\"sessionToken\":\"veltrix-session-server-minted\"}"
+-                    val response = buildString {
+-                        append("HTTP/1.1 200 OK\r\n")
+-                        append("Content-Type: application/json\r\n")
+-                        append("Content-Length: ${payload.toByteArray().size}\r\n")
+-                        append("Connection: close\r\n\r\n")
+-                        append(payload)
+-                    }
+-                    it.getOutputStream().write(response.toByteArray())
+-                    it.getOutputStream().flush()
+-                    served.countDown()
+-                }
+-            }
+-        }
+-
+-        val api = VeltrixApiClient("http://127.0.0.1:${server.localPort}")
+-        val session = api.exchangeGoogleIdentity("google-id-token", "nonce-123")
+-        assertTrue(served.await(2, TimeUnit.SECONDS))
+-        worker.join(2_000)
+-
+-        val text = received.toString()
+-        assertTrue(text.startsWith("POST /v1/auth/google HTTP/1.1"))
+-        assertTrue(text.contains("\"idToken\":\"google-id-token\""))
+-        assertTrue(text.contains("\"nonce\":\"nonce-123\""))
+-        assertEquals("account-server-owned", session.accountId)
+-        assertEquals("veltrix-session-server-minted", session.token)
++    fun acceptedGoogleEndpointIsBuildConfigured() {
++        assertEquals("/v1/auth/google", BuildConfig.VELTRIX_GOOGLE_AUTH_ENDPOINT)
+     }
+ 
+     @Test
+diff --git a/android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/GoogleFrontendTransportInstrumentedTest.kt b/android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/GoogleFrontendTransportInstrumentedTest.kt
+new file mode 100644
+--- /dev/null
++++ b/android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/GoogleFrontendTransportInstrumentedTest.kt
+@@ -0,0 +1,70 @@
++package com.veltrix.hom.vnext
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import java.io.BufferedReader
++import java.io.InputStreamReader
++import java.net.ServerSocket
++import java.util.concurrent.CountDownLatch
++import java.util.concurrent.TimeUnit
++import kotlin.concurrent.thread
++
++class GoogleFrontendTransportInstrumentedTest {
++    @Test
++    fun exchangePostsAcceptedPathAndUsesOnlyServerMintedVeltrixSession() {
++        val server = ServerSocket(0)
++        val received = StringBuilder()
++        val served = CountDownLatch(1)
++        val worker = thread(start = true, isDaemon = true) {
++            server.use { socket ->
++                socket.accept().use { client ->
++                    val reader = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
++                    received.appendLine(reader.readLine())
++                    var contentLength = 0
++                    while (true) {
++                        val line = reader.readLine() ?: break
++                        if (line.isBlank()) break
++                        if (line.startsWith("Content-Length:", ignoreCase = true)) {
++                            contentLength = line.substringAfter(':').trim().toInt()
++                        }
++                    }
++                    val body = CharArray(contentLength)
++                    var offset = 0
++                    while (offset < contentLength) {
++                        val read = reader.read(body, offset, contentLength - offset)
++                        if (read <= 0) break
++                        offset += read
++                    }
++                    received.append(String(body, 0, offset))
++                    val payload = "{\"accountId\":\"account-server-owned\",\"sessionToken\":\"veltrix-session-server-minted\"}"
++                    val bytes = payload.toByteArray(Charsets.UTF_8)
++                    val response = buildString {
++                        append("HTTP/1.1 200 OK\r\n")
++                        append("Content-Type: application/json\r\n")
++                        append("Content-Length: ${bytes.size}\r\n")
++                        append("Connection: close\r\n\r\n")
++                        append(payload)
++                    }.toByteArray(Charsets.UTF_8)
++                    client.getOutputStream().use { output -> output.write(response); output.flush() }
++                    served.countDown()
++                }
++            }
++        }
++
++        val session = VeltrixApiClient("http://127.0.0.1:${server.localPort}")
++            .exchangeGoogleIdentity("synthetic-google-id-token", "synthetic-nonce")
++
++        assertTrue("local contract server must receive request", served.await(2, TimeUnit.SECONDS))
++        worker.join(2_000)
++        val request = received.toString()
++        assertTrue(request.startsWith("POST /v1/auth/google HTTP/1.1"))
++        assertTrue(request.contains("\"idToken\":\"synthetic-google-id-token\""))
++        assertTrue(request.contains("\"nonce\":\"synthetic-nonce\""))
++        assertEquals("account-server-owned", session.accountId)
++        assertEquals("veltrix-session-server-minted", session.token)
++    }
++}
