@@ -1,0 +1,112 @@
+name: Veltrix Frontend Final Closure Compile Gate
+
+on:
+  push:
+    branches: [veltrix-hom-frontend-final-closure]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: veltrix-frontend-final-compile-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ACCEPTED_BACKEND_SHA: c93653d1bb48c9e2ecea9fac570f966a5a878ff0
+  VELTRIX_ENV: test
+  VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_DATABASE_USER: postgres
+  VELTRIX_DATABASE_PASSWORD: postgres
+  VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_TEST_DATABASE_USER: postgres
+  VELTRIX_TEST_DATABASE_PASSWORD: postgres
+  VELTRIX_AI_PROVIDER: disabled
+  VELTRIX_TEST_AI_MOCK: 'true'
+  VELTRIX_EMBEDDING_PROVIDER: disabled
+  VELTRIX_TEST_EMBEDDING_MOCK: 'true'
+  VELTRIX_EMBEDDING_DIMENSIONS: '64'
+  VELTRIX_TEST_OCR_MOCK: 'true'
+  VELTRIX_TEST_TRANSLATE_MOCK: 'true'
+  VELTRIX_STORAGE_PROVIDER: local
+  VELTRIX_WORKERS_ENABLED: 'true'
+
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Accepted backend boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/frontend-final
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git cat-file -e "$ACCEPTED_BACKEND_SHA^{commit}"
+          git merge-base --is-ancestor "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA"
+          if git diff --name-only "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA" | grep -E '^(server/|database/migrations/|core/src/main/)'; then
+            echo 'Frozen backend-owned source changed.' >&2; exit 1
+          fi
+          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\nrun=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" "$GITHUB_RUN_ID" | tee evidence/frontend-final/provenance.txt
+          git diff --name-only "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA" | tee evidence/frontend-final/frontend-delta.txt
+          echo 'FRONTEND_BASE_ACCEPTED_BACKEND=PASS' | tee evidence/frontend-final/boundary.txt
+      - name: Fail-closed frontend source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP=android/app/src/main/kotlin/com/veltrix/hom/vnext
+          grep -Fq 'orElse("/v1/auth/google")' android/app/build.gradle.kts
+          grep -Fq 'exchangeGoogleIdentity' "$APP/VeltrixApiClient.kt"
+          grep -Fq 'setNonce' "$APP/RootResetAuth.kt"
+          grep -Fq 'clearGoogleCredentialState' "$APP/RootResetAuth.kt"
+          grep -Fq 'clearAccountScopedState' "$APP/AppViewModel.kt"
+          grep -Fq 'userFacingAvailability' "$APP/RootStoreStage70.kt"
+          if grep -F 'item.requirements' "$APP/RootStoreStage70.kt"; then echo 'Raw Store requirement rendered.' >&2; exit 1; fi
+          grep -Fq 'personal-signal-$tag' "$APP/RootPersonalStage50.kt"
+          grep -Fq 'PROJECT_WORKSPACE_FULLY_LOADED=PASS' scripts/root_reset_stage90_gate.sh
+          test "$(grep -o 'VeltrixWorld\.[A-Z]*' "$APP/RootResetShell.kt" | sort -u | grep -Ec 'VeltrixWorld\.(HOME|PERSONAL|STORE|PROJECTS)')" -ge 4
+          if grep -RniE 'continue offline|offline mode|guest mode' "$APP/RootResetAuth.kt" "$APP/RootResetShell.kt"; then echo 'Offline/guest product path found.' >&2; exit 1; fi
+          printf 'CONTINUE_WITH_GOOGLE_WIRING=PASS\nSIGN_OUT_SOURCE=PASS\nSTORE_TYPED_AVAILABILITY=PASS\nPERSONAL_LAYOUT_SOURCE=PASS\nPROJECT_WORKSPACE_SUCCESS_GATE=PASS\nNO_GUEST_MODE=PASS\nNO_OFFLINE_PRODUCT_MODE=PASS\n' | tee evidence/frontend-final/source-gates.txt
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.5.1'}
+      - name: Backend preservation regressions and Android exact build
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :core:test :server:test :android:app:testDebugUnitTest :android:app:assembleDebug :android:app:assembleDebugAndroidTest | tee evidence/frontend-final/build.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/frontend-final/build.txt
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          test -s android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee evidence/frontend-final/debug-apk-sha256.txt
+          sha256sum android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk | tee evidence/frontend-final/androidtest-apk-sha256.txt
+          printf 'ANDROID_BUILD=PASS\nBACKEND_REGRESSION=PASS\nGOOGLE_AUTH_CONTRACT_UNIT=PASS\n' | tee evidence/frontend-final/build-gates.txt
+      - name: Package exact compile evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p evidence/frontend-final
+          git archive --format=zip --output=evidence/frontend-final/exact-source.zip HEAD
+          sha256sum evidence/frontend-final/exact-source.zip | tee evidence/frontend-final/exact-source-sha256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: veltrix-frontend-final-compile-${{ github.run_id }}
+          path: evidence/frontend-final/
+          if-no-files-found: error
+          retention-days: 30
