@@ -1,5 +1,5 @@
 workflow=frontend-final-compile-gate
-status=cancelled
-run_id=32215796677
-tested_sha=bd04f4e725acb782709341c616aa49211732fc0f
+status=failure
+run_id=32215848712
+tested_sha=00929b246e25aae911e2dfffbbf7fe0d4fae3d7e
 accepted_backend=c93653d1bb48c9e2ecea9fac570f966a5a878ff0
