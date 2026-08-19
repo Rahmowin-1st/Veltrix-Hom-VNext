@@ -29,6 +29,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -186,12 +187,56 @@ fun RootHomeWorldStage40(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
+                            model?.let { verified ->
+                                val rhythm = buildList {
+                                    if (verified.qualifiedActiveDays > 0) add("${verified.qualifiedActiveDays} active days")
+                                    verified.memoryMaturity.takeIf { it.isNotBlank() }?.let { add("${it.lowercase()} memory") }
+                                }.joinToString(" · ")
+                                if (rhythm.isNotBlank()) Text(
+                                    rhythm,
+                                    modifier = Modifier.testTag("home-recent-state"),
+                                    color = KineticColor.Muted,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
-                        KineticAvatar(
-                            avatar,
-                            Modifier.size(if (compact) 112.dp else 148.dp),
-                            "Current Veltrix avatar",
-                        )
+                        Box(
+                            Modifier.size(if (compact) 150.dp else 184.dp).testTag("home-avatar-anchor"),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Canvas(Modifier.fillMaxSize()) {
+                                val stroke = if (compact) 7.dp.toPx() else 8.dp.toPx()
+                                drawCircle(Color.White.copy(.46f), radius = size.minDimension * .44f, style = Stroke(stroke))
+                                drawArc(
+                                    color = KineticColor.Sky.copy(.88f),
+                                    startAngle = -90f,
+                                    sweepAngle = 360f * progress,
+                                    useCenter = false,
+                                    style = Stroke(stroke, cap = StrokeCap.Round),
+                                )
+                                drawCircle(KineticColor.Violet.copy(.18f), radius = size.minDimension * .34f, style = Stroke(1.2.dp.toPx()))
+                            }
+                            KineticAvatar(
+                                avatar,
+                                Modifier.size(if (compact) 118.dp else 146.dp),
+                                "Current Veltrix avatar, level $level",
+                            )
+                            KineticGlass(
+                                Modifier.align(Alignment.BottomEnd).testTag("home-level-orbit"),
+                                radius = 15.dp,
+                                strong = true,
+                            ) {
+                                Text(
+                                    if (model == null) "L$level" else if (model.remainingXp > 0) "L$level · ${model.remainingXp} XP" else "L$level · ready",
+                                    Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                                    color = KineticColor.Ink,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
                     }
 
                     Column(verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp)) {
@@ -223,8 +268,6 @@ fun RootHomeWorldStage40(
                                 }
                             }
                         }
-
-                        HomeProgress40(progress, model, compact)
 
                         PressableGlass(
                             onClick = { nextMove.route?.let(onNextMove) },

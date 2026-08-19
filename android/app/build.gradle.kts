@@ -16,7 +16,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "VELTRIX_API_BASE_URL", "\"${providers.gradleProperty("VELTRIX_API_BASE_URL").orElse("http://10.0.2.2:8080").get()}\"")
         buildConfigField("String", "VELTRIX_GOOGLE_SERVER_CLIENT_ID", "\"${providers.gradleProperty("VELTRIX_GOOGLE_SERVER_CLIENT_ID").orElse("").get()}\"")
-        buildConfigField("String", "VELTRIX_GOOGLE_AUTH_ENDPOINT", "\"${providers.gradleProperty("VELTRIX_GOOGLE_AUTH_ENDPOINT").orElse("").get()}\"")
+        buildConfigField("String", "VELTRIX_GOOGLE_AUTH_ENDPOINT", "\"${providers.gradleProperty("VELTRIX_GOOGLE_AUTH_ENDPOINT").orElse("/v1/auth/google").get()}\"")
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -43,6 +43,7 @@ dependencies {
     implementation("androidx.credentials:credentials:1.6.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.6.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.2.0")
+    testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.room:room-testing:2.8.4")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")

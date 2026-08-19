@@ -111,6 +111,7 @@ FILES=(
   projects.png
   project-workspace.png
   font200-home.png
+  font200-personal.png
   font200-auth.png
   reduced-motion-home.png
   visual-a11y-report.txt
@@ -133,6 +134,10 @@ for report in visual-a11y-report.txt font200-report.txt reduced-motion-report.tx
 done
 grep -q '^ROOT_STAGE90_VISUAL_MATRIX=PASS screens=5$' "$OUT/screens/visual-a11y-report.txt"
 grep -q '^CRITICAL_TOUCH_TARGETS=PASS min_dp=48$' "$OUT/screens/visual-a11y-report.txt"
+grep -q '^PERSONAL_SIGNAL_LAYOUT=PASS min_width_dp=220$' "$OUT/screens/visual-a11y-report.txt"
+grep -q '^STORE_NO_RAW_JSON=PASS$' "$OUT/screens/visual-a11y-report.txt"
+grep -q '^STORE_NO_INTERNAL_RULE_COPY=PASS$' "$OUT/screens/visual-a11y-report.txt"
+grep -q '^PROJECT_WORKSPACE_FULLY_LOADED=PASS$' "$OUT/screens/visual-a11y-report.txt"
 grep -q '^FONT_SCALE_200=PASS$' "$OUT/screens/font200-report.txt"
 grep -q '^REDUCED_MOTION_PATH=PASS$' "$OUT/screens/reduced-motion-report.txt"
 grep -q '^ROOT_STAGE90_JANKSTATS=PASS$' "$OUT/screens/jankstats-root.txt"
@@ -141,15 +146,15 @@ grep -q '^RELEASE_PROFILEABLE_PF=NOT_VERIFIED$' "$OUT/screens/jankstats-root.txt
 grep -q '^PHYSICAL_DEVICE_PF=NOT_VERIFIED$' "$OUT/screens/jankstats-root.txt"
 
 PNG_COUNT="$(find "$OUT/screens" -maxdepth 1 -type f -name '*.png' | wc -l | tr -d ' ')"
-test "$PNG_COUNT" = '8'
+test "$PNG_COUNT" = '9'
 find "$OUT/screens" -maxdepth 1 -type f -name '*.png' -size +20000c | sort > "$OUT/png-files.txt"
-test "$(wc -l < "$OUT/png-files.txt" | tr -d ' ')" = '8'
+test "$(wc -l < "$OUT/png-files.txt" | tr -d ' ')" = '9'
 
 python3 - "$OUT/screens" <<'PY' | tee "$OUT/png-dimensions.txt"
 import pathlib, struct, sys
 root=pathlib.Path(sys.argv[1])
 files=sorted(root.glob('*.png'))
-if len(files) != 8:
+if len(files) != 9:
     raise SystemExit(f'PNG_DIMENSIONS=FAIL count={len(files)}')
 for p in files:
     data=p.read_bytes()[:24]
@@ -159,9 +164,9 @@ for p in files:
     if w < 720 or h < 1280:
         raise SystemExit(f'PNG_DIMENSIONS=FAIL small={p.name} {w}x{h}')
     print(f'{p.name} {w}x{h}')
-print('PNG_DIMENSIONS=PASS count=8')
+print('PNG_DIMENSIONS=PASS count=9')
 PY
-grep -q '^PNG_DIMENSIONS=PASS count=8$' "$OUT/png-dimensions.txt"
+grep -q '^PNG_DIMENSIONS=PASS count=9$' "$OUT/png-dimensions.txt"
 
 sha256sum "$OUT"/screens/*.png | sort | tee "$OUT/screenshot-sha256.txt"
 sha256sum "$OUT"/screens/*.txt | sort | tee "$OUT/report-sha256.txt"
@@ -170,6 +175,10 @@ cat > "$OUT/stage90-gate.txt" <<'EOF'
 CURRENT_ROOT_VISUAL_PROOF=PASS
 CORE_SCREEN_MATRIX=PASS
 CRITICAL_TOUCH_TARGETS=PASS
+PERSONAL_SIGNAL_LAYOUT=PASS
+STORE_NO_RAW_JSON=PASS
+STORE_NO_INTERNAL_ID_LEAK=PASS
+PROJECT_WORKSPACE_FULLY_LOADED=PASS
 FONT_SCALE_200=PASS
 REDUCED_MOTION_PATH=PASS
 API36_JANKSTATS_SANITY=PASS

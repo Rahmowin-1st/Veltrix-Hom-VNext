@@ -3,7 +3,9 @@ package com.veltrix.hom.vnext
 import android.graphics.Bitmap
 import android.os.SystemClock
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodes
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -20,9 +22,9 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * Current-root Stage 90 visual and accessibility proof. This intentionally launches MainActivity,
- * never the legacy evidence activity. Frame timing lives in RootStage90PerformanceInstrumentedTest,
- * which intentionally has no Compose test clock.
+ * Current-root Stage 90 structural visual/A11Y proof. It deliberately launches MainActivity and
+ * checks the defect classes that escaped the earlier screenshot-existence gate. Human/agent pixel
+ * review remains a separate final acceptance gate; this class does not self-certify aesthetics.
  */
 class RootStage90InstrumentedTest {
     @get:Rule val compose = createEmptyComposeRule()
@@ -63,18 +65,28 @@ class RootStage90InstrumentedTest {
             capture("home")
 
             compose.onNodeWithTag("world-PERSONAL").performClick(); compose.waitForIdle()
-            awaitTag("personal-stage50", 20_000L); assertMinTouchTarget("personal-menu"); capture("personal")
+            awaitTag("personal-stage50", 20_000L)
+            assertMinTouchTarget("personal-menu")
+            assertPersonalSignalLayout()
+            capture("personal")
 
             compose.onNodeWithTag("world-STORE").performClick(); compose.waitForIdle()
-            awaitTag("store-stage70", 20_000L); awaitTag("store-preview", 20_000L); assertMinTouchTarget("store-menu"); capture("store")
+            awaitTag("store-stage70", 20_000L)
+            awaitTag("store-preview", 20_000L)
+            assertMinTouchTarget("store-menu")
+            assertStoreHasNoImplementationLeakage()
+            capture("store")
 
             compose.onNodeWithTag("world-PROJECTS").performClick(); compose.waitForIdle()
-            awaitTag("projects-stage60", 20_000L); awaitTag("project-card-${project.id}", 20_000L)
+            awaitTag("projects-stage60", 20_000L)
+            awaitTag("project-card-${project.id}", 20_000L)
             assertMinTouchTarget("projects-menu")
             capture("projects")
 
             compose.onNodeWithTag("project-card-${project.id}").performClick(); compose.waitForIdle()
-            awaitTag("project-workspace", 20_000L); capture("project-workspace")
+            awaitTag("project-workspace", 30_000L)
+            assertWorkspaceFullyLoaded()
+            capture("project-workspace")
 
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
             compose.waitForIdle(); awaitTag("projects-stage60", 10_000L)
@@ -86,6 +98,10 @@ class RootStage90InstrumentedTest {
             buildString {
                 appendLine("ROOT_STAGE90_VISUAL_MATRIX=PASS screens=${pngs.size}")
                 appendLine("CRITICAL_TOUCH_TARGETS=PASS min_dp=48")
+                appendLine("PERSONAL_SIGNAL_LAYOUT=PASS min_width_dp=220")
+                appendLine("STORE_NO_RAW_JSON=PASS")
+                appendLine("STORE_NO_INTERNAL_RULE_COPY=PASS")
+                appendLine("PROJECT_WORKSPACE_FULLY_LOADED=PASS")
                 pngs.forEach { appendLine("screen=${it.name} bytes=${it.length()}") }
             },
         )
@@ -103,6 +119,13 @@ class RootStage90InstrumentedTest {
             compose.onNodeWithTag("home-next-move").assertIsDisplayed()
             compose.onNodeWithTag("world-PERSONAL").assertIsDisplayed()
             capture("font200-home")
+
+            compose.onNodeWithTag("world-PERSONAL").performClick(); compose.waitForIdle()
+            awaitTag("personal-stage50", 20_000L)
+            compose.onNodeWithTag("personal-identity").assertIsDisplayed()
+            assertPersonalSignalLayout()
+            compose.onNodeWithTag("personal-signal-strength").performScrollTo().assertIsDisplayed()
+            capture("font200-personal")
         }
 
         runBlocking { SessionStore(targetContext).clear(explicitSignOut = true) }
@@ -113,7 +136,9 @@ class RootStage90InstrumentedTest {
             compose.onNodeWithTag("auth-submit").performScrollTo().assertIsDisplayed()
             capture("font200-auth")
         }
-        File(stage90Dir, "font200-report.txt").writeText("FONT_SCALE_200=PASS\nHOME_CRITICAL_CONTROLS=PASS\nAUTH_CRITICAL_CONTROLS=PASS\n")
+        File(stage90Dir, "font200-report.txt").writeText(
+            "FONT_SCALE_200=PASS\nHOME_CRITICAL_CONTROLS=PASS\nPERSONAL_SIGNAL_LAYOUT=PASS\nAUTH_CRITICAL_CONTROLS=PASS\n",
+        )
     }
 
     @Test
@@ -136,6 +161,33 @@ class RootStage90InstrumentedTest {
         File(stage90Dir, "reduced-motion-report.txt").writeText("REDUCED_MOTION_PATH=PASS\nDIRECT_NAVIGATION=PASS\nBACK_CONTINUITY=PASS\n")
     }
 
+    private fun assertPersonalSignalLayout(minDp: Float = 220f) {
+        val density = targetContext.resources.displayMetrics.density
+        listOf("strength", "needs-review", "goal").forEach { suffix ->
+            val node = compose.onNodeWithTag("personal-signal-$suffix").fetchSemanticsNode()
+            val widthDp = node.boundsInRoot.width / density
+            assertTrue("personal-signal-$suffix width ${widthDp}dp must stay readable", widthDp + .5f >= minDp)
+        }
+    }
+
+    private fun assertStoreHasNoImplementationLeakage() {
+        val forbidden = listOf("minLevel", "requirements", "identityMetadataJson")
+        forbidden.forEach { text ->
+            val matches = compose.onAllNodes(hasText(text, substring = true, ignoreCase = true), useUnmergedTree = true).fetchSemanticsNodes()
+            assertTrue("Store must not expose internal contract text: $text", matches.isEmpty())
+        }
+    }
+
+    private fun assertWorkspaceFullyLoaded() {
+        compose.onNodeWithTag("project-workspace").assertIsDisplayed()
+        compose.onNodeWithTag("project-workspace-title").assertIsDisplayed()
+        compose.onNodeWithTag("project-brain").performScrollTo().assertIsDisplayed()
+        val loading = compose.onAllNodesWithTag("project-workspace-loading").fetchSemanticsNodes()
+        val unavailable = compose.onAllNodesWithTag("project-workspace-unavailable").fetchSemanticsNodes()
+        assertTrue("Success capture cannot still be loading", loading.isEmpty())
+        assertTrue("Success capture cannot be unavailable/error state", unavailable.isEmpty())
+    }
+
     private fun assertMinTouchTarget(tag: String, minDp: Float = 48f) {
         val node = compose.onNodeWithTag(tag).fetchSemanticsNode()
         val density = targetContext.resources.displayMetrics.density
@@ -146,7 +198,7 @@ class RootStage90InstrumentedTest {
 
     private fun capture(name: String) {
         instrumentation.waitForIdleSync()
-        SystemClock.sleep(180)
+        SystemClock.sleep(220)
         val bitmap = instrumentation.uiAutomation.takeScreenshot()
         val file = File(stage90Dir, "$name.png")
         FileOutputStream(file).use { output ->

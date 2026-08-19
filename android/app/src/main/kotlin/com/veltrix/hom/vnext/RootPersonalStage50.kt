@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -78,10 +79,10 @@ fun RootPersonalWorldStage50(
             }
             PressableGlass(
                 onClick = { expanded = !expanded },
-                modifier = Modifier.height(44.dp).testTag("personal-growth-toggle"),
+                modifier = Modifier.height(44.dp).width(88.dp).testTag("personal-growth-toggle"),
                 radius = 22.dp,
             ) {
-                Box(Modifier.padding(horizontal = 14.dp).fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize().padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
                     Text(if (expanded) "Less" else "Details", color = KineticColor.Ink, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                 }
             }
@@ -125,10 +126,11 @@ private fun PersonalIdentityWorld50(
     identity: String?,
     tier: String?,
 ) {
+    val largeText = LocalDensity.current.fontScale >= 1.5f
     Box(
         Modifier
             .fillMaxWidth()
-            .height(242.dp)
+            .height(if (largeText) 330.dp else 242.dp)
             .clip(RoundedCornerShape(36.dp))
             .drawWithCache {
                 val base = Brush.linearGradient(
@@ -157,35 +159,69 @@ private fun PersonalIdentityWorld50(
             }
             .testTag("personal-identity"),
     ) {
-        Row(
-            Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Box(Modifier.size(150.dp).testTag("personal-character")) {
-                KineticAvatar(
-                    identity,
-                    Modifier.fillMaxSize(),
-                    buildString { append("Equipped Veltrix character"); tier?.let { append(", $it tier") } },
-                )
-            }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        if (largeText) {
+            Column(
+                Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(Modifier.size(104.dp).testTag("personal-character")) {
+                    KineticAvatar(identity, Modifier.fillMaxSize(), buildString { append("Equipped Veltrix character"); tier?.let { append(", $it tier") } })
+                }
                 Text("IDENTITY IN MOTION", color = KineticColor.Violet, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
                 Text(
                     model?.displayName?.takeIf(String::isNotBlank) ?: "Veltrix learner",
-                    Modifier.semantics { heading() },
-                    style = MaterialTheme.typography.headlineSmall,
+                    Modifier.fillMaxWidth().semantics { heading() },
+                    style = MaterialTheme.typography.titleLarge,
                     color = KineticColor.Ink,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text("Level ${model?.level ?: game?.level ?: 1}", color = KineticColor.Violet, fontWeight = FontWeight.Bold)
-                tier?.let { Text("${it.lowercase().replaceFirstChar(Char::uppercase)} character", color = KineticColor.Muted, style = MaterialTheme.typography.bodySmall) }
-                KineticGlass(radius = 18.dp, strong = true) {
-                    Column(Modifier.padding(horizontal = 11.dp, vertical = 7.dp)) {
-                        Text("${model?.coins ?: game?.coinBalance ?: 0} ◈", color = KineticColor.Ink, fontWeight = FontWeight.Bold)
-                        Text("Memory ${model?.memoryMaturity?.takeIf(String::isNotBlank)?.lowercase() ?: "building"}", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Level ${model?.level ?: game?.level ?: 1}", color = KineticColor.Violet, fontWeight = FontWeight.Bold)
+                    tier?.let { Text("${it.lowercase().replaceFirstChar(Char::uppercase)} character", color = KineticColor.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1) }
+                }
+                Text(
+                    "${model?.coins ?: game?.coinBalance ?: 0} ◈ · Memory ${model?.memoryMaturity?.takeIf(String::isNotBlank)?.lowercase() ?: "building"}",
+                    modifier = Modifier.fillMaxWidth(),
+                    color = KineticColor.Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        } else {
+            Row(
+                Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Box(Modifier.size(150.dp).testTag("personal-character")) {
+                    KineticAvatar(
+                        identity,
+                        Modifier.fillMaxSize(),
+                        buildString { append("Equipped Veltrix character"); tier?.let { append(", $it tier") } },
+                    )
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("IDENTITY IN MOTION", color = KineticColor.Violet, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                    Text(
+                        model?.displayName?.takeIf(String::isNotBlank) ?: "Veltrix learner",
+                        Modifier.semantics { heading() },
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = KineticColor.Ink,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text("Level ${model?.level ?: game?.level ?: 1}", color = KineticColor.Violet, fontWeight = FontWeight.Bold)
+                    tier?.let { Text("${it.lowercase().replaceFirstChar(Char::uppercase)} character", color = KineticColor.Muted, style = MaterialTheme.typography.bodySmall) }
+                    KineticGlass(radius = 18.dp, strong = true) {
+                        Column(Modifier.padding(horizontal = 11.dp, vertical = 7.dp)) {
+                            Text("${model?.coins ?: game?.coinBalance ?: 0} ◈", color = KineticColor.Ink, fontWeight = FontWeight.Bold)
+                            Text("Memory ${model?.memoryMaturity?.takeIf(String::isNotBlank)?.lowercase() ?: "building"}", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
             }
@@ -196,15 +232,24 @@ private fun PersonalIdentityWorld50(
 @Composable
 private fun Signal50(label: String, values: List<String>, accent: Color, expanded: Boolean) {
     val visible = if (expanded) values.take(6) else values.take(1)
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label.uppercase(), color = accent, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-        if (visible.isEmpty()) Text("Not enough evidence yet", color = KineticColor.Muted)
-        else visible.forEach {
-            KineticGlass(radius = 17.dp) { Text(it, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = KineticColor.Ink, maxLines = 1) }
+    val tag = label.lowercase().replace(" ", "-")
+    KineticGlass(Modifier.fillMaxWidth().testTag("personal-signal-$tag"), radius = 20.dp) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(label.uppercase(), color = accent, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+            if (visible.isEmpty()) {
+                Text("Not enough evidence yet", color = KineticColor.Muted, style = MaterialTheme.typography.bodySmall)
+            } else {
+                visible.forEachIndexed { index, value ->
+                    Text(
+                        value,
+                        modifier = Modifier.fillMaxWidth().testTag("personal-signal-$tag-value-$index"),
+                        color = KineticColor.Ink,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = if (expanded) 4 else 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }

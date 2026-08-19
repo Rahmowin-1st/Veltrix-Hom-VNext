@@ -102,14 +102,14 @@ fun RootStoreWorldStage70(
                         .testTag("store-avatar-${avatar.avatarId}")
                         .semantics {
                             role = Role.Button
-                            contentDescription = "Preview ${avatar.name}, ${avatar.tier} tier, ${if (avatar.equipped) "equipped" else if (avatar.owned) "owned" else "not owned"}"
+                            contentDescription = "Preview ${avatarDisplayName70(avatar)}, ${avatar.tier} tier, ${if (avatar.equipped) "equipped" else if (avatar.owned) "owned" else "not owned"}"
                         },
                     radius = 24.dp,
                     strong = chosen,
                 ) {
                     Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Box(Modifier.size(82.dp)) { KineticAvatar(avatar.avatarId, Modifier.fillMaxSize(), avatar.name) }
-                        Text(avatar.name, color = KineticColor.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Box(Modifier.size(82.dp)) { KineticAvatar(avatar.avatarId, Modifier.fillMaxSize(), avatarDisplayName70(avatar)) }
+                        Text(avatarDisplayName70(avatar), color = KineticColor.Ink, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(
                             when {
                                 avatar.equipped -> "Equipped"
@@ -242,12 +242,12 @@ private fun StoreCharacterWorld70(
             }
 
             Box(Modifier.size(184.dp)) {
-                KineticAvatar(selected?.avatarId ?: game?.avatarId, Modifier.fillMaxSize(), selected?.name ?: "Current Veltrix character")
+                KineticAvatar(selected?.avatarId ?: game?.avatarId, Modifier.fillMaxSize(), selected?.let(::avatarDisplayName70) ?: "Current Veltrix character")
             }
 
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Column(Modifier.weight(1f)) {
-                    Text(selected?.name ?: "Your character", color = KineticColor.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(selected?.let(::avatarDisplayName70) ?: "Your character", color = KineticColor.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
                         when {
                             selected == null -> "Catalog syncing"
@@ -293,10 +293,10 @@ private fun StoreItem70(item: StoreItemUiModel, balance: Long, onPurchase: (Stri
                 }
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(friendlyType70(item.itemType), color = KineticColor.Ink, fontWeight = FontWeight.SemiBold)
+                Text(item.displayName.takeIf { it.isNotBlank() } ?: friendlyType70(item.itemType), color = KineticColor.Ink, fontWeight = FontWeight.SemiBold)
                 Text("${item.priceCoins} ◈", color = KineticColor.Muted, style = MaterialTheme.typography.labelMedium)
-                item.requirements.takeIf { it.isNotBlank() }?.let {
-                    Text(it, color = KineticColor.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                item.userFacingAvailability(balance)?.let { message ->
+                    Text(message, color = KineticColor.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("store-availability-${item.itemId}"))
                 }
             }
             when {
@@ -311,6 +311,17 @@ private fun StoreItem70(item: StoreItemUiModel, balance: Long, onPurchase: (Stri
                 ) { Text(if (canAfford) "Buy" else "Need coins") }
             }
         }
+    }
+}
+
+internal fun avatarDisplayName70(avatar: AvatarCatalogUiModel): String {
+    val raw = avatar.name.trim()
+    val skuLike = Regex("^(noob|pro|elite|super|ultra|max|hyperpro|legendary)[ _-]*\\d{2,}$", RegexOption.IGNORE_CASE)
+    return when {
+        raw.isBlank() -> "${friendlyType70(avatar.tier)} identity"
+        skuLike.matches(raw) -> "${friendlyType70(avatar.tier)} identity"
+        raw.equals(avatar.avatarId, ignoreCase = true) -> "${friendlyType70(avatar.tier)} identity"
+        else -> raw
     }
 }
 

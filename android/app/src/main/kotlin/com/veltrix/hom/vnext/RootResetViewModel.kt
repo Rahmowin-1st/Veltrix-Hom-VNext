@@ -101,7 +101,8 @@ class RootResetViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { bootstrap() }
     }
 
-    fun signOut(afterCredentialStateCleared: (() -> Unit)? = null) {
+    fun signOut(clearCredentialState: suspend () -> Unit = {}) {
+        _gate.value = ProductGateState(kind = ProductGateKind.CHECKING)
         viewModelScope.launch {
             val current = _session.value
             if (current != null && network.currentValidated()) {
@@ -112,9 +113,9 @@ class RootResetViewModel(app: Application) : AndroidViewModel(app) {
             sessionStore.clear(explicitSignOut = true)
             _session.value = null
             clearWorldState()
+            runCatching { clearCredentialState() }
             _auth.value = AuthUiState(mode = AuthMode.SIGN_IN)
             _gate.value = ProductGateState(kind = ProductGateKind.AUTH)
-            afterCredentialStateCleared?.invoke()
         }
     }
 

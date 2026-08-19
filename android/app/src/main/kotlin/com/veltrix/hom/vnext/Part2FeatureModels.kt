@@ -29,7 +29,24 @@ data class PracticeCheckUiModel(val item:PracticeItemUiModel,val correct:Boolean
 data class PracticeCompleteUiModel(val answered:Int,val correct:Int,val accuracy:Double,val summary:String)
 data class FlashcardUiModel(val id:String,val deckId:String,val projectId:String?,val front:String,val back:String,val explanation:String?,val dueAt:String,val intervalDays:Int,val repetitions:Int,val lapses:Int,val revision:Long)
 data class MistakeUiModel(val id:String,val projectId:String?,val sourceId:String?,val topic:String,val prompt:String,val userAnswer:String?,val expectedAnswer:String?,val occurrenceCount:Int,val status:String,val revision:Long)
-data class StoreItemUiModel(val itemId:String,val itemType:String,val priceCoins:Long,val owned:Boolean,val available:Boolean,val requirements:String,val metadata:String)
+data class StoreAvailabilityUiModel(
+    val state:String = "UNKNOWN",
+    val reasonCode:String = "NONE",
+    val requiredLevel:Int? = null,
+    val requiredSeasonId:String? = null,
+    val requiredAchievementId:String? = null,
+)
+data class StoreItemUiModel(
+    val itemId:String,
+    val itemType:String,
+    val priceCoins:Long,
+    val owned:Boolean,
+    val available:Boolean,
+    val requirements:String,
+    val metadata:String,
+    val displayName:String = "",
+    val availability:StoreAvailabilityUiModel = StoreAvailabilityUiModel(),
+)
 data class StoreCatalogUiModel(val catalogVersion:String,val coinBalance:Long,val items:List<StoreItemUiModel>)
 data class InventoryItemUiModel(val itemId:String,val type:String,val ownershipSource:String,val acquiredAt:String,val quantity:Long,val metadata:String,val revision:Long)
 data class AvatarCatalogUiModel(val avatarId:String,val name:String,val assetKey:String,val tier:String,val owned:Boolean,val equipped:Boolean,val storePrice:Long?,val catalogVersion:String,val identityMetadata:String)
@@ -168,7 +185,44 @@ private fun parsePracticeComplete(o:JSONObject)=PracticeCompleteUiModel(o.optInt
 private fun parseFlashcards(a:JSONArray):List<FlashcardUiModel> = a.objects().map(::parseFlashcard)
 private fun parseFlashcard(o:JSONObject)=FlashcardUiModel(o.getString("id"),o.getString("deckId"),o.optNullable("projectId"),o.optString("front"),o.optString("back"),o.optNullable("explanation"),o.optString("dueAt"),o.optInt("intervalDays"),o.optInt("repetitions"),o.optInt("lapses"),o.optLong("revision"))
 private fun parseMistakes(a:JSONArray):List<MistakeUiModel> = a.objects().map{MistakeUiModel(it.getString("id"),it.optNullable("projectId"),it.optNullable("sourceId"),it.optString("topic"),it.optString("prompt"),it.optNullable("userAnswer"),it.optNullable("expectedAnswer"),it.optInt("occurrenceCount"),it.optString("status"),it.optLong("revision"))}
-private fun parseStore(o:JSONObject):StoreCatalogUiModel{val catalog=o.optJSONObject("catalog")?:o;val items=o.optJSONArray("items")?:catalog.optJSONArray("items");return StoreCatalogUiModel(o.optString("catalogVersion",catalog.optString("catalogVersion")),o.optLong("coinBalance",catalog.optLong("coinBalance")),items.orEmptyArray().objects().map{StoreItemUiModel(it.optString("itemId"),it.optString("itemType"),it.optLong("priceCoins"),it.optBoolean("owned"),it.optBoolean("available"),it.optString("requirements"),it.optString("metadata"))})}
+private fun parseStore(o:JSONObject):StoreCatalogUiModel {
+    val catalog=o.optJSONObject("catalog")?:o
+    val items=o.optJSONArray("items")?:catalog.optJSONArray("items")
+    return StoreCatalogUiModel(
+        o.optString("catalogVersion",catalog.optString("catalogVersion")),
+        o.optLong("coinBalance",catalog.optLong("coinBalance")),
+        items.orEmptyArray().objects().map { item ->
+            val availability=item.optJSONObject("availability")
+            StoreItemUiModel(
+                itemId=item.optString("itemId"),
+                itemType=item.optString("itemType"),
+                priceCoins=item.optLong("priceCoins"),
+                owned=item.optBoolean("owned"),
+                available=item.optBoolean("available"),
+                requirements=item.optString("requirements"),
+                metadata=item.optString("metadata"),
+                displayName=item.optString("displayName"),
+                availability=StoreAvailabilityUiModel(
+                    state=availability?.optString("state").orEmpty(),
+                    reasonCode=availability?.optString("reasonCode").orEmpty(),
+                    requiredLevel=availability?.let { a -> a.optInt("requiredLevel").takeIf { a.has("requiredLevel") && !a.isNull("requiredLevel") } },
+                    requiredSeasonId=availability?.optString("requiredSeasonId")?.takeIf { it.isNotBlank() },
+                    requiredAchievementId=availability?.optString("requiredAchievementId")?.takeIf { it.isNotBlank() },
+                ),
+            )
+        },
+    )
+}
+
+fun StoreItemUiModel.userFacingAvailability(balance:Long):String? = when {
+    owned -> "Owned"
+    availability.reasonCode == "LEVEL_REQUIRED" && availability.requiredLevel != null -> "Unlocks at Level ${availability.requiredLevel}"
+    availability.reasonCode == "SEASON_REQUIRED" -> "Unavailable this season"
+    availability.reasonCode == "ACHIEVEMENT_REQUIRED" -> "Requires an achievement"
+    !available -> "Currently unavailable"
+    balance < priceCoins -> "Not enough Coins"
+    else -> null
+}
 private fun parseInventory(a:JSONArray):List<InventoryItemUiModel> = a.objects().map{InventoryItemUiModel(it.optString("itemId"),it.optString("type"),it.optString("ownershipSource"),it.optString("acquiredAt"),it.optLong("quantity"),it.optString("metadata"),it.optLong("revision"))}
 private fun parseAvatars(a:JSONArray):List<AvatarCatalogUiModel> = a.objects().map{AvatarCatalogUiModel(it.optString("avatarId"),it.optString("permanentName").ifBlank{it.optString("avatarId")},it.optString("assetKey"),it.optString("tier"),it.optBoolean("owned"),it.optBoolean("equipped"),if(it.has("storePrice")&&!it.isNull("storePrice"))it.optLong("storePrice") else null,it.optString("catalogVersion"),it.optString("identityMetadataJson"))}
 private fun parseMap(o:JSONObject):PersonalMapUiModel{val e=o.optJSONObject("eligibility")?:JSONObject();return PersonalMapUiModel(o.optNullable("mapId"),o.optString("mapDefinitionId"),o.optInt("mapVersion"),o.optString("state"),e.optBoolean("eligible"),e.optInt("levelRequirement"),e.optString("memoryRequirement"),e.optBoolean("levelSatisfied"),e.optBoolean("memorySatisfied"),e.optString("unlockState"),o.optJSONArray("units").orEmptyArray().objects().map{MapUnitUiModel(it.optString("unitId"),it.optInt("ordinal"),it.optString("semanticKey"),it.optString("titleKey"),it.optString("state"),it.optLong("progress"),it.optLong("requiredProgress"),it.optLong("revision"))},o.optLong("revision"))}

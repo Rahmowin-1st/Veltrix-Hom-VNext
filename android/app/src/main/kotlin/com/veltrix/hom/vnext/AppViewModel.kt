@@ -123,6 +123,46 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun clearAccountScopedState() {
+        _session.value = null
+        _home.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _personal.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _remoteProjects.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _workspace.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _chats.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _messages.value = RepositoryState(emptyList(), DataFreshness.OFFLINE)
+        _sources.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _flashcards.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _mistakes.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _store.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _inventory.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _avatars.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _map.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _gameProfile.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _history.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _search.value = RepositoryState(emptyList(), DataFreshness.FRESH)
+        _assessment.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _attempt.value = null
+        _assessmentResult.value = null
+        _practice.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _practiceHint.value = null
+        _practiceCheck.value = null
+        _practiceComplete.value = null
+        _streamingText.value = ""
+        _streaming.value = false
+        _streamError.value = null
+        _selectedSources.value = emptySet()
+        _citations.value = emptyMap()
+        _mutationFeedback.value = null
+        _createdConversationId.value = null
+        _openedPracticeId.value = null
+        _notificationIntents.value = RepositoryState(emptyList(), DataFreshness.OFFLINE)
+        _notificationPreferences.value = RepositoryState(emptyList(), DataFreshness.OFFLINE)
+        _profileControls.value = RepositoryState(null, DataFreshness.OFFLINE)
+        _settingsControls.value = RepositoryState(emptyList(), DataFreshness.OFFLINE)
+        _accountExport.value = RepositoryState(null, DataFreshness.OFFLINE)
+    }
+
     fun refreshHome() = viewModelScope.launch { loadHome(true) }
     fun refreshPersonal() = viewModelScope.launch { loadPersonal(true); loadMap(true); loadGame(true) }
     fun refreshAll(force: Boolean = true) = viewModelScope.launch { refreshPart1(force); refreshCorePart2(force) }
