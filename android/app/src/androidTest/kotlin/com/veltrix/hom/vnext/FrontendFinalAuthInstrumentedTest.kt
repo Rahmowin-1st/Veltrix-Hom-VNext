@@ -8,7 +8,6 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
@@ -68,7 +67,7 @@ class FrontendFinalAuthInstrumentedTest {
                 .performScrollToNode(hasTestTag("drawer-secondary-SETTINGS"))
             compose.onNodeWithTag("drawer-secondary-SETTINGS").assertIsDisplayed().performClick()
             awaitTag("settings-stage70", 20_000L)
-            compose.onNodeWithTag("settings-sign-out").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("settings-sign-out").assertIsDisplayed()
             capture("settings-account")
 
             compose.onNodeWithTag("settings-sign-out").performClick()
