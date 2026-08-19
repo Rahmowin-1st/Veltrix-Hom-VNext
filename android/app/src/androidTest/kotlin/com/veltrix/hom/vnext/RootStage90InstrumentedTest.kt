@@ -117,12 +117,15 @@ class RootStage90InstrumentedTest {
             compose.onNodeWithTag("home-menu").assertIsDisplayed()
             compose.onNodeWithTag("home-next-move").assertIsDisplayed()
             compose.onNodeWithTag("world-PERSONAL").assertIsDisplayed()
+            assertLargeTextPrimaryNav()
             capture("font200-home")
 
             compose.onNodeWithTag("world-PERSONAL").performClick(); compose.waitForIdle()
             awaitTag("personal-stage50", 20_000L)
             compose.onNodeWithTag("personal-identity").assertIsDisplayed()
+            assertPersonalHeaderFits()
             assertPersonalSignalLayout()
+            assertLargeTextPrimaryNav()
             compose.onNodeWithTag("personal-signal-strength").performScrollTo().assertIsDisplayed()
             capture("font200-personal")
         }
@@ -133,6 +136,8 @@ class RootStage90InstrumentedTest {
             awaitTag("auth-login", 20_000L)
             compose.onNodeWithTag("auth-password").performScrollTo().assertIsDisplayed()
             compose.onNodeWithTag("auth-submit").performScrollTo().assertIsDisplayed()
+            assertMinTouchTarget("continue-google", 72f)
+            compose.onNodeWithTag("continue-google-label").assertIsDisplayed()
             capture("font200-auth")
         }
         File(stage90Dir, "font200-report.txt").writeText(
@@ -160,6 +165,22 @@ class RootStage90InstrumentedTest {
         File(stage90Dir, "reduced-motion-report.txt").writeText("REDUCED_MOTION_PATH=PASS\nDIRECT_NAVIGATION=PASS\nBACK_CONTINUITY=PASS\n")
     }
 
+    private fun assertLargeTextPrimaryNav() {
+        listOf("HOME", "PERSONAL", "STORE", "PROJECTS").forEach { world ->
+            assertMinTouchTarget("world-$world")
+            val labels = compose.onAllNodesWithTag("world-label-$world").fetchSemanticsNodes()
+            assertTrue("200% font must switch $world to icon-first navigation instead of colliding text", labels.isEmpty())
+        }
+    }
+
+    private fun assertPersonalHeaderFits() {
+        val density = targetContext.resources.displayMetrics.density
+        val header = compose.onNodeWithTag("personal-header").fetchSemanticsNode().boundsInRoot
+        val subtitle = compose.onNodeWithTag("personal-header-subtitle").fetchSemanticsNode().boundsInRoot
+        assertTrue("Personal subtitle must stay fully inside its adaptive header at 200% font", subtitle.bottom <= header.bottom + density && subtitle.top >= header.top - density)
+        assertTrue("Personal subtitle must retain visible height at 200% font", subtitle.height / density >= 18f)
+    }
+
     private fun assertPersonalSignalLayout(minDp: Float = 220f) {
         val density = targetContext.resources.displayMetrics.density
         listOf("strength", "needs-review", "goal").forEach { suffix ->
@@ -170,7 +191,7 @@ class RootStage90InstrumentedTest {
     }
 
     private fun assertStoreHasNoImplementationLeakage() {
-        val forbidden = listOf("minLevel", "requirements", "identityMetadataJson")
+        val forbidden = listOf("minLevel", "requirements", "identityMetadataJson", "noob default", "noob identity", "noob tier")
         forbidden.forEach { text ->
             val matches = compose.onAllNodesWithText(text, substring = true, ignoreCase = true, useUnmergedTree = true).fetchSemanticsNodes()
             assertTrue("Store must not expose internal contract text: $text", matches.isEmpty())

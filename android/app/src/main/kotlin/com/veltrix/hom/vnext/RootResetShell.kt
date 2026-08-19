@@ -42,6 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -276,6 +277,7 @@ private fun RootKineticBottomBar(
     modifier: Modifier = Modifier,
 ) {
     val itemWidth = 76.dp
+    val largeText = LocalDensity.current.fontScale >= 1.5f
     val index = VeltrixWorld.entries.indexOf(selectedWorld).coerceAtLeast(0)
     val policy = rememberVeltrixEffectPolicy()
     val lensX = animateDpAsState(
@@ -339,11 +341,15 @@ private fun RootKineticBottomBar(
                             .fillMaxSize()
                             .clickable { onSelected(item) }
                             .testTag("world-${item.name}")
-                            .semantics { this.selected = selected; role = Role.Tab },
+                            .semantics {
+                                this.selected = selected
+                                role = Role.Tab
+                                contentDescription = "${item.name.lowercase().replaceFirstChar { it.uppercase() }} world"
+                            },
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(if (largeText) 24.dp else 18.dp), contentAlignment = Alignment.Center) {
                             androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
                                 val c = if (selected) itemAccent else KineticColor.Muted.copy(alpha = .64f)
                                 when (item) {
@@ -366,12 +372,15 @@ private fun RootKineticBottomBar(
                                 }
                             }
                         }
-                        Text(
-                            item.name.lowercase().replaceFirstChar { it.uppercase() },
-                            color = if (selected) KineticColor.Ink else KineticColor.Muted,
-                            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        )
+                        if (!largeText) {
+                            Text(
+                                item.name.lowercase().replaceFirstChar { it.uppercase() },
+                                modifier = Modifier.testTag("world-label-${item.name}"),
+                                color = if (selected) KineticColor.Ink else KineticColor.Muted,
+                                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                        }
                     }
                 }
             }

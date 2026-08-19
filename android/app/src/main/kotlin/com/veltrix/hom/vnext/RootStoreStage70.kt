@@ -102,7 +102,7 @@ fun RootStoreWorldStage70(
                         .testTag("store-avatar-${avatar.avatarId}")
                         .semantics {
                             role = Role.Button
-                            contentDescription = "Preview ${avatarDisplayName70(avatar)}, ${avatar.tier} tier, ${if (avatar.equipped) "equipped" else if (avatar.owned) "owned" else "not owned"}"
+                            contentDescription = "Preview ${avatarDisplayName70(avatar)}, ${avatarTierLabel70(avatar.tier)} tier, ${if (avatar.equipped) "equipped" else if (avatar.owned) "owned" else "not owned"}"
                         },
                     radius = 24.dp,
                     strong = chosen,
@@ -149,7 +149,7 @@ fun RootStoreWorldStage70(
 
 @Composable
 private fun StoreHeader70(onMenu: () -> Unit, balance: Long) {
-    Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("store-header"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         PressableGlass(onClick = onMenu, modifier = Modifier.size(48.dp).testTag("store-menu"), radius = 24.dp, strong = true) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("≡", color = KineticColor.Ink, fontWeight = FontWeight.Black) }
         }
@@ -236,7 +236,7 @@ private fun StoreCharacterWorld70(
                 }
                 selected?.tier?.takeIf { it.isNotBlank() }?.let { tier ->
                     KineticGlass(radius = 17.dp) {
-                        Text(tier.lowercase().replaceFirstChar(Char::uppercase), Modifier.padding(horizontal = 10.dp, vertical = 7.dp), color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
+                        Text(avatarTierLabel70(tier), Modifier.padding(horizontal = 10.dp, vertical = 7.dp).testTag("store-tier-label"), color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
@@ -316,17 +316,25 @@ private fun StoreItem70(item: StoreItemUiModel, balance: Long, onPurchase: (Stri
 
 internal fun avatarDisplayName70(avatar: AvatarCatalogUiModel): String {
     val raw = avatar.name.trim()
-    val skuLike = Regex("^(noob|pro|elite|super|ultra|max|hyperpro|legendary)[ _-]*\\d{2,}$", RegexOption.IGNORE_CASE)
-    return when {
-        raw.isBlank() -> "${friendlyType70(avatar.tier)} identity"
-        skuLike.matches(raw) -> "${friendlyType70(avatar.tier)} identity"
-        raw.equals(avatar.avatarId, ignoreCase = true) -> "${friendlyType70(avatar.tier)} identity"
-        else -> raw
-    }
+    val internalLike = raw.isBlank() ||
+        raw.equals(avatar.avatarId, ignoreCase = true) ||
+        Regex("^(noob|pro|elite|super|ultra|max|hyperpro|legendary)([ _-]+(default|avatar|identity|\\d+))?$", RegexOption.IGNORE_CASE).matches(raw)
+    return if (internalLike) avatarFamilyName70(avatar.avatarId) else raw
+}
+
+internal fun avatarTierLabel70(raw: String): String = when (raw.trim().lowercase()) {
+    "noob", "default", "core" -> "Starter"
+    else -> friendlyType70(raw)
+}
+
+private fun avatarFamilyName70(avatarId: String): String {
+    val family = (avatarId.hashCode() and Int.MAX_VALUE) % 5
+    return listOf("Prism", "Sentinel", "Bloom", "Comet", "Atlas")[family]
 }
 
 private fun friendlyType70(raw: String): String = raw
     .lowercase()
     .replace('_', ' ')
     .split(' ')
+    .filter { it.isNotBlank() }
     .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }

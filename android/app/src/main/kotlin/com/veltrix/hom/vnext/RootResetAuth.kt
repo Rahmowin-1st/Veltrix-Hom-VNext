@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -89,7 +90,7 @@ fun RootResetBootstrapGate() {
             Text("VELTRIX", color = RootInk, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, letterSpacing = 1.6.sp)
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 IdentityMark(Modifier.size(86.dp))
-                Text("Restoring your world", color = RootInk, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                Text("Restoring your world", modifier = Modifier.testTag("auth-bootstrap-title"), color = RootInk, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text("Checking your secure session before personal data is shown.", color = RootMuted)
             }
         }
@@ -154,6 +155,7 @@ fun RootResetAuthGateway(
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
     val scope = rememberCoroutineScope()
+    val largeText = LocalDensity.current.fontScale >= 1.5f
     var login by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var displayName by rememberSaveable { mutableStateOf("") }
@@ -212,7 +214,7 @@ fun RootResetAuthGateway(
                                 )
                             }
                         },
-                        modifier = Modifier.fillMaxWidth().height(56.dp).testTag("continue-google"),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = if (largeText) 76.dp else 56.dp).testTag("continue-google"),
                         radius = 28.dp,
                         strong = true,
                     ) {
@@ -225,9 +227,14 @@ fun RootResetAuthGateway(
                                 Text("G", color = RootInk, fontWeight = FontWeight.Black)
                             }
                             Spacer(Modifier.width(10.dp))
-                            Text("Continue with Google", color = RootInk, fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.weight(1f))
-                            Text("→", color = RootSky, fontWeight = FontWeight.Bold)
+                            Text(
+                                "Continue with Google",
+                                modifier = Modifier.weight(1f).testTag("continue-google-label"),
+                                color = RootInk,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = if (largeText) 2 else 1,
+                            )
+                            if (!largeText) Text("→", color = RootSky, fontWeight = FontWeight.Bold)
                         }
                     }
 

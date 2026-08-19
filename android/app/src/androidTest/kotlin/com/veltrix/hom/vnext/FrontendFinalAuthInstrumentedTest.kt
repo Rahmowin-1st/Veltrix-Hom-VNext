@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
@@ -44,7 +45,8 @@ class FrontendFinalAuthInstrumentedTest {
             awaitTag("continue-google", 20_000L)
             compose.onNodeWithTag("continue-google").assertIsDisplayed()
             assertNoTag("home-stage40")
-            capture("auth-signed-out")
+            awaitTextAbsent("Restoring your world", 10_000L)
+            capture("auth-signed-out", settleMillis = 800L)
         }
 
         val stamp = System.currentTimeMillis()
@@ -74,7 +76,8 @@ class FrontendFinalAuthInstrumentedTest {
             awaitTag("continue-google", 30_000L)
             compose.onNodeWithTag("continue-google").assertIsDisplayed()
             assertNoTag("home-stage40")
-            capture("signout-auth")
+            awaitTextAbsent("Restoring your world", 10_000L)
+            capture("signout-auth", settleMillis = 800L)
         }
 
         val store = SessionStore(targetContext)
@@ -85,7 +88,8 @@ class FrontendFinalAuthInstrumentedTest {
             awaitTag("continue-google", 20_000L)
             compose.onNodeWithTag("continue-google").assertIsDisplayed()
             assertNoTag("home-stage40")
-            capture("auth-relaunch-signed-out")
+            awaitTextAbsent("Restoring your world", 10_000L)
+            capture("auth-relaunch-signed-out", settleMillis = 800L)
         }
 
         File(outDir, "final-auth-report.txt").writeText(
@@ -111,9 +115,13 @@ class FrontendFinalAuthInstrumentedTest {
         compose.waitUntil(timeoutMillis) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
     }
 
-    private fun capture(name: String) {
+    private fun awaitTextAbsent(text: String, timeoutMillis: Long) {
+        compose.waitUntil(timeoutMillis) { compose.onAllNodesWithText(text, substring = false).fetchSemanticsNodes().isEmpty() }
+    }
+
+    private fun capture(name: String, settleMillis: Long = 220L) {
         instrumentation.waitForIdleSync()
-        SystemClock.sleep(220)
+        SystemClock.sleep(settleMillis)
         val bitmap = instrumentation.uiAutomation.takeScreenshot()
         val file = File(outDir, "$name.png")
         FileOutputStream(file).use { output ->

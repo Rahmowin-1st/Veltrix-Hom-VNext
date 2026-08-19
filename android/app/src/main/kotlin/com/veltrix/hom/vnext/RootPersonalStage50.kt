@@ -108,13 +108,13 @@ fun RootPersonalWorldStage50(
 
 @Composable
 private fun PersonalHeader50(onMenu: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("personal-header"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         PressableGlass(onClick = onMenu, modifier = Modifier.size(48.dp).testTag("personal-menu"), radius = 24.dp, strong = true) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("≡", color = KineticColor.Ink, fontWeight = FontWeight.Black) }
         }
         Column {
             Text("Personal", color = KineticColor.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text("WHO YOU'RE BECOMING", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
+            Text("WHO YOU'RE BECOMING", modifier = Modifier.testTag("personal-header-subtitle"), color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)
         }
     }
 }

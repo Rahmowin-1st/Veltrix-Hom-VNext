@@ -101,7 +101,7 @@ private fun ProjectOverview60(projects: List<ProjectCardModel>, onMenu: () -> Un
 
 @Composable
 private fun ProjectsHeader60(onMenu: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("projects-header"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         PressableGlass(onClick = onMenu, modifier = Modifier.size(48.dp).testTag("projects-menu"), radius = 24.dp, strong = true) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("≡", color = KineticColor.Ink, fontWeight = FontWeight.Black) }
         }
