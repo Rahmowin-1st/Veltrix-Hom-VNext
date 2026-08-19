@@ -1,0 +1,5 @@
+workflow=frontend-final-compile-gate
+status=failure
+run_id=32215156856
+tested_sha=1126ea5e6c525da7f2036141b485bf66e6fc336a
+accepted_backend=c93653d1bb48c9e2ecea9fac570f966a5a878ff0
