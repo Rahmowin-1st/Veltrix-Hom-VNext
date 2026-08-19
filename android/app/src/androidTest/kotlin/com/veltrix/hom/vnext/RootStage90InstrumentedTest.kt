@@ -3,10 +3,9 @@ package com.veltrix.hom.vnext
 import android.graphics.Bitmap
 import android.os.SystemClock
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import androidx.compose.ui.test.onAllNodes
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -173,7 +172,7 @@ class RootStage90InstrumentedTest {
     private fun assertStoreHasNoImplementationLeakage() {
         val forbidden = listOf("minLevel", "requirements", "identityMetadataJson")
         forbidden.forEach { text ->
-            val matches = compose.onAllNodes(hasText(text, substring = true, ignoreCase = true), useUnmergedTree = true).fetchSemanticsNodes()
+            val matches = compose.onAllNodesWithText(text, substring = true, ignoreCase = true, useUnmergedTree = true).fetchSemanticsNodes()
             assertTrue("Store must not expose internal contract text: $text", matches.isEmpty())
         }
     }
