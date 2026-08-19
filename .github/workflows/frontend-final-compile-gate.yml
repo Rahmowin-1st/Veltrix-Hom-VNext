@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 concurrency:
@@ -15,6 +15,7 @@ concurrency:
 
 env:
   ACCEPTED_BACKEND_SHA: c93653d1bb48c9e2ecea9fac570f966a5a878ff0
+  EVIDENCE_BRANCH: veltrix-hom-frontend-final-ci-evidence
   VELTRIX_ENV: test
   VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
   VELTRIX_DATABASE_USER: postgres
@@ -110,3 +111,20 @@ jobs:
           path: evidence/frontend-final/
           if-no-files-found: error
           retention-days: 30
+      - name: Publish compile status to evidence branch
+        if: always()
+        shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$EVIDENCE_BRANCH"
+          git worktree add /tmp/frontend-ci-evidence "origin/$EVIDENCE_BRANCH"
+          cd /tmp/frontend-ci-evidence
+          mkdir -p ci-status
+          printf 'workflow=frontend-final-compile-gate\nstatus=%s\nrun_id=%s\ntested_sha=%s\naccepted_backend=%s\n' "$JOB_STATUS" "$GITHUB_RUN_ID" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" > ci-status/compile-latest.txt
+          git config user.name 'Veltrix CI Evidence'
+          git config user.email 'actions@users.noreply.github.com'
+          git add ci-status/compile-latest.txt
+          git commit -m "evidence(frontend): compile ${JOB_STATUS} ${GITHUB_SHA}" || true
+          git push origin HEAD:"$EVIDENCE_BRANCH"
