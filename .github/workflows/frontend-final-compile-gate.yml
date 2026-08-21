@@ -51,41 +51,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - name: Apply staged visual P1 patch once
-        shell: bash
-        run: |
-          set -euo pipefail
-          if grep -Fq 'val largeText = LocalDensity.current.fontScale >= 1.5f' android/app/src/main/kotlin/com/veltrix/hom/vnext/RootResetShell.kt; then
-            echo 'Visual P1 patch already applied.'
-            exit 0
-          fi
-          test -s .github/workflows/frontend-visual-p1-patch.yml
-          awk 'BEGIN{f=0} /python3 - <<.PY./{f=1; next} f && /^          PY$/{f=0; exit} f{sub(/^          /,""); print}' .github/workflows/frontend-visual-p1-patch.yml > /tmp/frontend_visual_p1_patch.py
-          test -s /tmp/frontend_visual_p1_patch.py
-          python3 - <<'PY'
-          from pathlib import Path
-          source = Path('android/app/src/main/kotlin/com/veltrix/hom/vnext/RootPersonalStage50.kt')
-          text = source.read_text()
-          old = """Text("WHO YOU'RE BECOMING", color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)"""
-          new = """Text("WHO YOU'RE BECOMING", modifier = Modifier.testTag("personal-header-subtitle"), color = KineticColor.Muted, style = MaterialTheme.typography.labelSmall)"""
-          if old not in text:
-              raise SystemExit('Personal subtitle source pattern missing before visual patch')
-          source.write_text(text.replace(old, new, 1))
-          patch = Path('/tmp/frontend_visual_p1_patch.py')
-          lines = [line for line in patch.read_text().splitlines() if 'WHO YOU' not in line]
-          patch.write_text('\n'.join(lines) + '\n')
-          PY
-          python3 -m py_compile /tmp/frontend_visual_p1_patch.py
-          python3 /tmp/frontend_visual_p1_patch.py
-          rm .github/workflows/frontend-visual-p1-patch.yml
-          git diff --check
-          git config user.name 'Veltrix Frontend Master'
-          git config user.email 'actions@users.noreply.github.com'
-          git add -A
-          git commit -m 'fix(frontend): close manual visual P1 defects'
-          git push origin HEAD:veltrix-hom-frontend-final-closure
-          echo 'Patch commit pushed; this executor SHA is intentionally not acceptance evidence.'
-          exit 1
       - name: Accepted backend boundary
         shell: bash
         run: |
