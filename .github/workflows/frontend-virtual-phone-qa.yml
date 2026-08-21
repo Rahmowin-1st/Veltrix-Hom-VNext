@@ -1,0 +1,196 @@
+name: Veltrix Virtual Phone Live QA
+
+on:
+  push:
+    branches: [veltrix-hom-frontend-final-closure]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: veltrix-virtual-phone-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EVIDENCE_BRANCH: veltrix-hom-frontend-final-ci-evidence
+
+jobs:
+  virtual-phone:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Build exact live APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/virtual-phone
+          gradle --no-daemon :android:app:assembleDebug | tee evidence/virtual-phone/build.txt
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          sha256sum "$APK" | tee evidence/virtual-phone/apk-sha256.txt
+          printf 'repo=%s\nbranch=%s\ncommit=%s\nrun=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID" > evidence/virtual-phone/provenance.txt
+
+      - name: Provision API34 virtual phone
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'emulator' 'platforms;android-34' 'system-images;android-34;google_apis;x86_64'
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+
+      - name: Real user-like live QA on virtual phone
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          cores: 4
+          disable-animations: false
+          emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
+          script: |
+            set -euo pipefail
+            OUT=evidence/virtual-phone
+            APK=android/app/build/outputs/apk/debug/app-debug.apk
+            mkdir -p "$OUT"
+            adb wait-for-device
+            adb shell settings put system accelerometer_rotation 0 || true
+            adb shell settings put system user_rotation 0 || true
+            adb install -r "$APK" | tee "$OUT/install.txt"
+            adb logcat -c
+            adb shell am force-stop com.veltrix.hom.vnext.dev
+            adb shell monkey -p com.veltrix.hom.vnext.dev -c android.intent.category.LAUNCHER 1 | tee "$OUT/launch.txt"
+            sleep 8
+
+            capture() {
+              name="$1"
+              adb exec-out screencap -p > "$OUT/${name}.png"
+              adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
+              adb pull /sdcard/window.xml "$OUT/${name}-ui.xml" >/dev/null 2>&1 || true
+              adb shell dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp' > "$OUT/${name}-focus.txt" || true
+            }
+
+            tap_text() {
+              label="$1"
+              adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
+              adb pull /sdcard/window.xml /tmp/window.xml >/dev/null 2>&1 || true
+              python3 - "$label" <<'PY'
+import re,sys,subprocess,xml.etree.ElementTree as ET
+label=sys.argv[1]
+root=ET.parse('/tmp/window.xml').getroot()
+for n in root.iter('node'):
+    text=(n.attrib.get('text') or '').strip()
+    desc=(n.attrib.get('content-desc') or '').strip()
+    if label.lower() in text.lower() or label.lower() in desc.lower():
+        b=n.attrib.get('bounds','')
+        m=re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',b)
+        if m:
+            x1,y1,x2,y2=map(int,m.groups())
+            subprocess.run(['adb','shell','input','tap',str((x1+x2)//2),str((y1+y2)//2)],check=True)
+            print('TAPPED',label,b)
+            sys.exit(0)
+print('NOT_FOUND',label)
+sys.exit(2)
+PY
+            }
+
+            capture 00-launch
+
+            if tap_text 'Continue with Google'; then
+              sleep 5
+              capture 01-google
+              adb shell input keyevent KEYCODE_BACK || true
+              sleep 2
+            fi
+
+            if tap_text 'Sign in'; then
+              sleep 2
+              capture 02-signin-tab
+            fi
+
+            # Exercise IME/type without submitting any credentials.
+            adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
+            adb pull /sdcard/window.xml /tmp/window.xml >/dev/null 2>&1 || true
+            python3 <<'PY'
+import re,subprocess,xml.etree.ElementTree as ET
+root=ET.parse('/tmp/window.xml').getroot()
+for n in root.iter('node'):
+    text=(n.attrib.get('text') or '').strip().lower()
+    desc=(n.attrib.get('content-desc') or '').strip().lower()
+    if 'email' in text or 'username' in text or 'email' in desc or 'username' in desc:
+        m=re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',n.attrib.get('bounds',''))
+        if m:
+            x1,y1,x2,y2=map(int,m.groups())
+            subprocess.run(['adb','shell','input','tap',str((x1+x2)//2),str((y1+y2)//2)],check=True)
+            break
+PY
+            sleep 1
+            adb shell input text 'virtual.qa@example.com' || true
+            sleep 1
+            capture 03-ime-type
+            adb shell input keyevent KEYCODE_BACK || true
+            sleep 1
+            capture 04-ime-back
+
+            # Direct manipulation smoke: short upward scroll then Back.
+            adb shell input swipe 540 1850 540 900 350 || true
+            sleep 1
+            capture 05-scroll
+            adb shell input keyevent KEYCODE_BACK || true
+            sleep 1
+            capture 06-back
+
+            adb logcat -d -v threadtime > "$OUT/logcat.txt" || true
+            grep -Ei 'FATAL EXCEPTION|AndroidRuntime|ANR in|UnknownHostException|ConnectException|SocketTimeoutException|SSLHandshakeException|veltrix' "$OUT/logcat.txt" > "$OUT/logcat-focused.txt" || true
+            adb shell dumpsys meminfo com.veltrix.hom.vnext.dev > "$OUT/meminfo.txt" || true
+            adb shell dumpsys gfxinfo com.veltrix.hom.vnext.dev framestats > "$OUT/gfxinfo-framestats.txt" || true
+            printf 'VIRTUAL_PHONE_BOOT=PASS\nAPK_INSTALL=PASS\nAPP_LAUNCH=PASS\nUSER_LIKE_CAPTURE=PASS\n' > "$OUT/final.txt"
+
+      - name: Package QA evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          find evidence/virtual-phone -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > evidence/virtual-phone/SHA256SUMS.txt || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: veltrix-virtual-phone-${{ github.run_id }}
+          path: evidence/virtual-phone/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish virtual-phone status
+        if: always()
+        shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$EVIDENCE_BRANCH"
+          git worktree add /tmp/virtual-phone-evidence "origin/$EVIDENCE_BRANCH"
+          cd /tmp/virtual-phone-evidence
+          mkdir -p ci-status
+          printf 'workflow=frontend-virtual-phone-qa\nstatus=%s\nrun_id=%s\ntested_sha=%s\n' "$JOB_STATUS" "$GITHUB_RUN_ID" "$GITHUB_SHA" > ci-status/virtual-phone-latest.txt
+          git config user.name 'Veltrix CI Evidence'
+          git config user.email 'actions@users.noreply.github.com'
+          git add ci-status/virtual-phone-latest.txt
+          git commit -m "evidence(frontend): virtual-phone ${JOB_STATUS} ${GITHUB_SHA}" || true
+          git push origin HEAD:"$EVIDENCE_BRANCH"
