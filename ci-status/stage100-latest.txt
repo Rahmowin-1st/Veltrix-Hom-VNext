@@ -1,5 +1,5 @@
 workflow=frontend-final-stage100-gate
-status=cancelled
-run_id=32451628044
-tested_sha=2f48a1cc6f29cf78ba53d052c32fa0b3cf7facb7
+status=failure
+run_id=32452153705
+tested_sha=b2f0e1b13131c19d391b7407a87fd80103a2aca0
 accepted_backend=c93653d1bb48c9e2ecea9fac570f966a5a878ff0
