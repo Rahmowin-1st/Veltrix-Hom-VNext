@@ -16,3 +16,4 @@ rootProject.name = "Veltrix-Hom-VNext"
 include(":core")
 include(":server")
 include(":android:app")
+include(":android:benchmark")
