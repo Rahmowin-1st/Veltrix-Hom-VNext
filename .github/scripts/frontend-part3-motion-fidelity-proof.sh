@@ -117,7 +117,7 @@ cat >> "$HANDOFF" <<'EOF_HANDOFF'
 
 ## High-fidelity motion closure addendum
 - The three Android screenrecord MP4s remain real-runtime route/input context only; their sparse/VFR encoding is **not** treated as render FPS.
-- A separate fail-closed production-motion gate captures **49 independently rendered frames** from the real `MainActivity.PrimaryNavLens` spring by advancing Compose's manual test clock one frame at a time.
+- A separate fail-closed production-motion gate captures **49 independently rendered frames** from the real `RootKineticBottomBar` `world-lens` spring by advancing Compose's manual test clock one frame at a time.
 - Acceptance requires at least **12 distinct rendered source frames** and **12 distinct measured lens positions**, preventing duplicate-frame or endpoint-only slideshow evidence from passing.
 - `04-primary-nav-deterministic.mp4` is encoded at **60fps playback cadence** from those source frames for review. This is deterministic visual playback evidence, **not a runtime-FPS claim**.
 - MainActivity runtime pacing remains independently captured with screenrecord-free AndroidX JankStats and classified as CI-emulator sanity only. Physical-device performance/touch feel remains explicitly unverified.
