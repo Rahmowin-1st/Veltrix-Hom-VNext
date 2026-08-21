@@ -33,6 +33,14 @@ class ShellInstrumentedTest {
         )
         assertNotNull("Seeded session must survive into the real Activity test process", persistedSession)
 
+        // RootResetApp intentionally fail-closes behind an asynchronous server-session validation.
+        // Do not treat the initial CHECKING gate as a missing shell; wait for the validated PRODUCT world.
+        compose.waitUntil(15_000) {
+            runCatching {
+                compose.onNodeWithTag("nav-HOME").assertIsDisplayed()
+                true
+            }.getOrDefault(false)
+        }
         compose.onNodeWithTag("nav-HOME").assertIsDisplayed().assertHasClickAction()
         try {
             compose.waitUntil(8_000) {
