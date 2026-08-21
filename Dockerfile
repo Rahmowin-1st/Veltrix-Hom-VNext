@@ -1,7 +1,7 @@
 FROM gradle:9.5.1-jdk17 AS build
 WORKDIR /workspace
 COPY . .
-RUN gradle --no-daemon --settings-file settings.server.gradle.kts :server:installDist
+RUN cp settings.server.gradle.kts settings.gradle.kts && gradle --no-daemon :server:installDist
 
 FROM eclipse-temurin:17-jre
 WORKDIR /app
