@@ -134,11 +134,12 @@ class RootStage90InstrumentedTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             awaitTag("continue-google", 20_000L)
             awaitTag("auth-login", 20_000L)
-            compose.onNodeWithTag("auth-password").performScrollTo().assertIsDisplayed()
-            compose.onNodeWithTag("auth-submit").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("continue-google").performScrollTo().assertIsDisplayed()
             assertMinTouchTarget("continue-google", 72f)
             compose.onNodeWithTag("continue-google-label").assertIsDisplayed()
             capture("font200-auth")
+            compose.onNodeWithTag("auth-password").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("auth-submit").performScrollTo().assertIsDisplayed()
         }
         File(stage90Dir, "font200-report.txt").writeText(
             "FONT_SCALE_200=PASS\nHOME_CRITICAL_CONTROLS=PASS\nPERSONAL_SIGNAL_LAYOUT=PASS\nAUTH_CRITICAL_CONTROLS=PASS\n",
