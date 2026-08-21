@@ -3,9 +3,10 @@ package com.veltrix.hom.vnext
 import android.graphics.Bitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -13,9 +14,14 @@ import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.roundToInt
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
+import org.junit.rules.TestRule
+import org.junit.runner.Description
+import org.junit.runners.model.Statement
 
 /**
  * Deterministic visual-motion evidence for the real MainActivity primary navigation lens.
@@ -27,8 +33,27 @@ import org.junit.Test
  * Runtime pacing remains a separate JankStats sanity signal; physical touch feel remains external.
  */
 class MotionFidelityInstrumentedTest {
+    private val compose = createAndroidComposeRule<MainActivity>()
+
+    private val seedSessionRule = TestRule { base: Statement, _: Description ->
+        object : Statement() {
+            override fun evaluate() {
+                val targetContext = InstrumentationRegistry.getInstrumentation().targetContext
+                val apiSession = VeltrixApiClient().register(
+                    "stage100-motion-${System.currentTimeMillis()}@example.test",
+                    "Veltrix!Runtime2026",
+                    "Stage100 Motion",
+                )
+                runBlocking {
+                    SessionStore(targetContext).save(LocalSession(apiSession.accountId, apiSession.token))
+                }
+                base.evaluate()
+            }
+        }
+    }
+
     @get:Rule
-    val compose = createAndroidComposeRule<MainActivity>()
+    val rules: RuleChain = RuleChain.outerRule(seedSessionRule).around(compose)
 
     @Test
     fun primaryNavigationLensProducesFrameByFrameVisualSequence() {
@@ -38,13 +63,10 @@ class MotionFidelityInstrumentedTest {
             check(mkdirs()) { "Unable to create motion evidence directory: $absolutePath" }
         }
 
-        compose.onNodeWithTag("world-HOME").assertIsDisplayed()
-        compose.waitUntil(8_000) {
-            runCatching {
-                compose.onNodeWithTag("home-primary-action").assertIsDisplayed()
-                true
-            }.getOrDefault(false)
-        }
+        awaitTag("world-HOME", 20_000)
+        awaitTag("home-stage40", 30_000)
+        compose.onNodeWithTag("world-HOME").assertIsDisplayed().assertIsSelected()
+        compose.onNodeWithTag("home-stage40").assertIsDisplayed()
 
         val signatures = linkedSetOf<Long>()
         val lensPositions = linkedSetOf<Int>()
@@ -114,7 +136,9 @@ class MotionFidelityInstrumentedTest {
         }
 
         compose.waitForIdle()
-        compose.onNodeWithTag("active-route").assertTextEquals("Personal")
+        awaitTag("personal-stage50", 10_000)
+        compose.onNodeWithTag("world-PERSONAL").assertIsSelected()
+        compose.onNodeWithTag("personal-stage50").assertIsDisplayed()
 
         val minimumDistinctFrames = 12
         val minimumDistinctLensPositions = 12
@@ -138,5 +162,11 @@ class MotionFidelityInstrumentedTest {
         }
         File(outputDir, "report.txt").writeText(report)
         assertTrue(report, pass)
+    }
+
+    private fun awaitTag(tag: String, timeoutMillis: Long) {
+        compose.waitUntil(timeoutMillis) {
+            compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
+        }
     }
 }

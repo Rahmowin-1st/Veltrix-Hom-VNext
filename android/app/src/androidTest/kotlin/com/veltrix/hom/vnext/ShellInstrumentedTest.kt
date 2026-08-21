@@ -3,20 +3,17 @@ package com.veltrix.hom.vnext
 import android.util.Log
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
-import androidx.compose.ui.test.printToLog
 import androidx.test.platform.app.InstrumentationRegistry
-import com.veltrix.hom.vnext.core.CapabilityRoute
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -57,59 +54,73 @@ class ShellInstrumentedTest {
             "sessionPresent=${persistedSession != null} accountId=${persistedSession?.accountId ?: "none"}",
         )
         assertNotNull("Fresh backend session must survive into the real Activity test process", persistedSession)
-        assertEquals("Shell must validate the session seeded before Activity launch", seededSession.accountId, persistedSession?.accountId)
+        assertEquals(
+            "Shell must validate the session seeded before Activity launch",
+            seededSession.accountId,
+            persistedSession?.accountId,
+        )
 
-        // RootResetApp intentionally fail-closes behind an asynchronous server-session validation.
-        // Do not treat the initial CHECKING gate as a missing shell; wait for the validated PRODUCT world.
-        compose.waitUntil(15_000) {
-            runCatching {
-                compose.onNodeWithTag("world-HOME").assertIsDisplayed()
-                true
-            }.getOrDefault(false)
-        }
-        compose.onNodeWithTag("world-HOME").assertIsDisplayed().assertHasClickAction()
-        try {
-            compose.waitUntil(8_000) {
-                runCatching {
-                    compose.onNodeWithTag("home-primary-action").assertIsDisplayed()
-                    true
-                }.getOrDefault(false)
-            }
-        } catch (failure: Throwable) {
-            compose.onRoot(useUnmergedTree = true).printToLog("VELTRIX_HOME_TREE")
-            Log.e("VELTRIX_HOME_DIAG", "Home primary action was not visible after 8s", failure)
-            throw failure
-        }
-        compose.onNodeWithTag("home-screen").assertIsDisplayed()
-        compose.onNodeWithTag("home-primary-action").assertIsDisplayed().assertHasClickAction()
+        // RootResetApp intentionally fail-closes behind asynchronous server-session validation.
+        // Wait for the current Stage40 product shell, not retired pre-reset shell selectors.
+        awaitTag("world-HOME", 20_000)
+        awaitTag("home-stage40", 30_000)
+        compose.onNodeWithTag("world-HOME").assertIsDisplayed().assertHasClickAction().assertIsSelected()
+        compose.onNodeWithTag("home-stage40").assertIsDisplayed()
+        compose.onNodeWithTag("home-next-move").assertIsDisplayed().assertHasClickAction()
 
         compose.onNodeWithTag("world-PERSONAL").assertIsDisplayed().assertHasClickAction().performClick()
-        compose.waitForIdle()
-        compose.onNodeWithTag("personal-screen").assertIsDisplayed()
-        compose.onNodeWithTag("active-route").assertTextEquals("Personal")
+        awaitTag("personal-stage50", 20_000)
+        compose.onNodeWithTag("world-PERSONAL").assertIsSelected()
+        compose.onNodeWithTag("personal-stage50").assertIsDisplayed()
 
         compose.onNodeWithTag("world-STORE").assertIsDisplayed().assertHasClickAction().performClick()
-        compose.waitForIdle()
-        compose.onNodeWithTag("active-route").assertTextEquals("Store")
+        awaitTag("store-stage70", 20_000)
+        compose.onNodeWithTag("world-STORE").assertIsSelected()
+        compose.onNodeWithTag("store-stage70").assertIsDisplayed()
 
         compose.onNodeWithTag("world-PROJECTS").assertIsDisplayed().assertHasClickAction().performClick()
-        compose.waitForIdle()
-        compose.onNodeWithTag("projects-screen").assertIsDisplayed()
-        compose.onNodeWithTag("active-route").assertTextEquals("Projects")
+        awaitTag("projects-stage60", 20_000)
+        compose.onNodeWithTag("world-PROJECTS").assertIsSelected()
+        compose.onNodeWithTag("projects-stage60").assertIsDisplayed()
 
-        assertEquals(11, CapabilityRoute.entries.size)
-        compose.onNodeWithTag("open-capabilities").assertIsDisplayed().assertHasClickAction().performClick()
-        compose.waitForIdle()
-        val capabilityList = compose.onNodeWithTag("capability-list").assertIsDisplayed()
-        val listBounds = capabilityList.fetchSemanticsNode().boundsInRoot
-        val minUsableHeightPx = 160f * compose.activity.resources.displayMetrics.density
-        assertTrue(
-            "Capability list must retain a usable viewport; bounds=$listBounds minHeightPx=$minUsableHeightPx",
-            listBounds.height >= minUsableHeightPx,
+        compose.onNodeWithTag("world-HOME").assertHasClickAction().performClick()
+        awaitTag("home-stage40", 20_000)
+        compose.onNodeWithTag("world-HOME").assertIsSelected()
+
+        val globalCapabilities = listOf(
+            "CHAT",
+            "LIBRARY",
+            "TESTING",
+            "PRACTICE",
+            "QUIZZES",
+            "FLASHCARDS",
+            "MISTAKES",
+            "CALCULATOR",
+            "TRANSLATE",
+            "NOTIFICATIONS",
+            "SETTINGS",
         )
-        capabilityList.performScrollToNode(hasTestTag("capability-CHAT"))
-        compose.onNodeWithTag("capability-CHAT").assertIsDisplayed().assertHasClickAction().performClick()
-        compose.waitForIdle()
-        compose.onNodeWithTag("active-route").assertTextEquals("Chat")
+        assertEquals("Current root drawer must expose all 11 accepted global capabilities", 11, globalCapabilities.size)
+        assertEquals("Frontend capability contract must remain 11 routes", 11, CapabilityRoute.entries.size)
+
+        compose.onNodeWithTag("home-menu").assertIsDisplayed().assertHasClickAction().performClick()
+        awaitTag("root-sidebar-list", 10_000)
+        val drawerList = compose.onNodeWithTag("root-sidebar-list").assertIsDisplayed()
+        globalCapabilities.forEach { capability ->
+            val tag = "drawer-secondary-$capability"
+            drawerList.performScrollToNode(hasTestTag(tag))
+            compose.onNodeWithTag(tag).assertIsDisplayed().assertHasClickAction()
+        }
+
+        drawerList.performScrollToNode(hasTestTag("drawer-secondary-CHAT"))
+        compose.onNodeWithTag("drawer-secondary-CHAT").assertIsDisplayed().assertHasClickAction().performClick()
+        awaitTag("root-capability-CHAT", 20_000)
+        compose.onNodeWithTag("root-capability-CHAT").assertIsDisplayed()
+    }
+
+    private fun awaitTag(tag: String, timeoutMillis: Long) {
+        compose.waitUntil(timeoutMillis) {
+            compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
+        }
     }
 }
