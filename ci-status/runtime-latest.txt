@@ -1,5 +1,5 @@
 workflow=frontend-final-runtime-gate
-status=failure
-run_id=32435561954
-tested_sha=c5ecedf368da1383ab472307c619210abde57eac
+status=cancelled
+run_id=32437376146
+tested_sha=fc8e6f6d333ace693d6e3d9be4b58494272b1e56
 accepted_backend=c93653d1bb48c9e2ecea9fac570f966a5a878ff0
