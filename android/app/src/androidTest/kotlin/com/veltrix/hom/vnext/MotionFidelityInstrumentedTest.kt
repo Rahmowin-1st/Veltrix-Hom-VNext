@@ -1,14 +1,11 @@
 package com.veltrix.hom.vnext
 
 import android.graphics.Bitmap
-import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
-import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
@@ -75,7 +72,11 @@ class MotionFidelityInstrumentedTest {
 
         fun captureFrame(index: Int) {
             compose.waitForIdle()
-            val source = compose.onRoot(useUnmergedTree = true).captureToImage().asAndroidBitmap()
+            val screenshot = checkNotNull(
+                InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot(),
+            ) { "Unable to capture rendered display for motion frame $index" }
+            val source = screenshot.copy(Bitmap.Config.ARGB_8888, false)
+            screenshot.recycle()
             val width = minOf(720, source.width).coerceAtLeast(2).let { if (it % 2 == 0) it else it - 1 }
             val rawHeight = (source.height * (width.toFloat() / source.width.toFloat())).roundToInt().coerceAtLeast(2)
             val height = if (rawHeight % 2 == 0) rawHeight else rawHeight - 1
