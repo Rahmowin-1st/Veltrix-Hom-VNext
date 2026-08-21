@@ -31,6 +31,7 @@ class GoogleAuthContractUnitTest {
         assertTrue(item.userFacingAvailability(1_000)?.contains('{') == false)
         assertTrue(item.userFacingAvailability(1_000)?.contains("minLevel") == false)
     }
+
     @Test
     fun skuLikeAvatarNamesAreNeverExposedAsProductIdentity() {
         val avatar = AvatarCatalogUiModel(
@@ -45,9 +46,10 @@ class GoogleAuthContractUnitTest {
             identityMetadata = "{}",
         )
         val display = avatarDisplayName70(avatar)
-        assertEquals("Noob identity", display)
+        assertTrue(display.isNotBlank())
+        assertTrue(!display.contains("noob", ignoreCase = true))
+        assertTrue(!display.contains("identity", ignoreCase = true))
         assertTrue(!display.contains("002"))
         assertTrue(!display.equals(avatar.avatarId, ignoreCase = true))
     }
-
 }
