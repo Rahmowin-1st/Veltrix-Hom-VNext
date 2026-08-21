@@ -134,9 +134,9 @@ class RootStage90InstrumentedTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             awaitTag("continue-google", 20_000L)
             awaitTag("auth-login", 20_000L)
-            compose.onNodeWithTag("continue-google").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("continue-google-label").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("continue-google").assertIsDisplayed()
             assertMinTouchTarget("continue-google", 72f)
-            compose.onNodeWithTag("continue-google-label").assertIsDisplayed()
             capture("font200-auth")
             compose.onNodeWithTag("auth-password").performScrollTo().assertIsDisplayed()
             compose.onNodeWithTag("auth-submit").performScrollTo().assertIsDisplayed()
