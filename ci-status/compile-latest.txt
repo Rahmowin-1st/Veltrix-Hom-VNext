@@ -1,5 +1,5 @@
 workflow=frontend-final-compile-gate
 status=success
-run_id=32446509796
-tested_sha=d4d1339a8f4c8a01ca47aaadd87de5effd44f637
+run_id=32447887116
+tested_sha=776cc71492c9622672285609dab4ec4652db0d16
 accepted_backend=c93653d1bb48c9e2ecea9fac570f966a5a878ff0
