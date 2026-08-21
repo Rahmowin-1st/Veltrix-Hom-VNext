@@ -6,7 +6,6 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -39,7 +38,7 @@ class MotionFidelityInstrumentedTest {
             check(mkdirs()) { "Unable to create motion evidence directory: $absolutePath" }
         }
 
-        compose.onNodeWithTag("nav-HOME").assertIsDisplayed()
+        compose.onNodeWithTag("world-HOME").assertIsDisplayed()
         compose.waitUntil(8_000) {
             runCatching {
                 compose.onNodeWithTag("home-primary-action").assertIsDisplayed()
@@ -84,7 +83,7 @@ class MotionFidelityInstrumentedTest {
             }
             signatures += signature
             val lensLeft = compose
-                .onNodeWithContentDescription("Selected destination lens", useUnmergedTree = true)
+                .onNodeWithTag("world-lens", useUnmergedTree = true)
                 .fetchSemanticsNode()
                 .boundsInRoot
                 .left
@@ -105,7 +104,7 @@ class MotionFidelityInstrumentedTest {
         try {
             compose.mainClock.autoAdvance = false
             captureFrame(0)
-            compose.onNodeWithTag("nav-PERSONAL").performClick()
+            compose.onNodeWithTag("world-PERSONAL").performClick()
             repeat(frameCount - 1) { offset ->
                 compose.mainClock.advanceTimeByFrame()
                 captureFrame(offset + 1)
@@ -134,7 +133,7 @@ class MotionFidelityInstrumentedTest {
                     "transition=HOME_TO_PERSONAL source=compose_main_test_clock",
             )
             appendLine("FRAME_ADVANCE=advanceTimeByFrame playback_fps_claim=NONE runtime_fps_claim=NONE")
-            appendLine("PRODUCTION_PRIMITIVE=MainActivity.PrimaryNavLens spring")
+            appendLine("PRODUCTION_PRIMITIVE=RootKineticBottomBar world-lens spring")
             appendLine("PHYSICAL_TOUCH_FEEL=NOT_VERIFIED")
         }
         File(outputDir, "report.txt").writeText(report)

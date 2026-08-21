@@ -63,11 +63,11 @@ class ShellInstrumentedTest {
         // Do not treat the initial CHECKING gate as a missing shell; wait for the validated PRODUCT world.
         compose.waitUntil(15_000) {
             runCatching {
-                compose.onNodeWithTag("nav-HOME").assertIsDisplayed()
+                compose.onNodeWithTag("world-HOME").assertIsDisplayed()
                 true
             }.getOrDefault(false)
         }
-        compose.onNodeWithTag("nav-HOME").assertIsDisplayed().assertHasClickAction()
+        compose.onNodeWithTag("world-HOME").assertIsDisplayed().assertHasClickAction()
         try {
             compose.waitUntil(8_000) {
                 runCatching {
@@ -83,16 +83,16 @@ class ShellInstrumentedTest {
         compose.onNodeWithTag("home-screen").assertIsDisplayed()
         compose.onNodeWithTag("home-primary-action").assertIsDisplayed().assertHasClickAction()
 
-        compose.onNodeWithTag("nav-PERSONAL").assertIsDisplayed().assertHasClickAction().performClick()
+        compose.onNodeWithTag("world-PERSONAL").assertIsDisplayed().assertHasClickAction().performClick()
         compose.waitForIdle()
         compose.onNodeWithTag("personal-screen").assertIsDisplayed()
         compose.onNodeWithTag("active-route").assertTextEquals("Personal")
 
-        compose.onNodeWithTag("nav-STORE").assertIsDisplayed().assertHasClickAction().performClick()
+        compose.onNodeWithTag("world-STORE").assertIsDisplayed().assertHasClickAction().performClick()
         compose.waitForIdle()
         compose.onNodeWithTag("active-route").assertTextEquals("Store")
 
-        compose.onNodeWithTag("nav-PROJECTS").assertIsDisplayed().assertHasClickAction().performClick()
+        compose.onNodeWithTag("world-PROJECTS").assertIsDisplayed().assertHasClickAction().performClick()
         compose.waitForIdle()
         compose.onNodeWithTag("projects-screen").assertIsDisplayed()
         compose.onNodeWithTag("active-route").assertTextEquals("Projects")
