@@ -1,4 +1,4 @@
 workflow=frontend-live-apk
 status=success
-run_id=32484360293
-tested_sha=bfa04146bd8404ac4e5e5a185f3b4a7c398005ca
+run_id=32485528444
+tested_sha=379cd0c6f29c0d8e4fab368a5b0cceff328470b9
