@@ -51,6 +51,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
+      - name: Restore exact Stage90 proof and apply one narrow reorder
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "9f11ac2ccbc4c44fb6ced292928adb6e7c1d6761"
+          TEST=android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/RootStage90InstrumentedTest.kt
+          git show 1367712c378125569be74194564775678e54d074:"$TEST" > "$TEST"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/RootStage90InstrumentedTest.kt')
+          s = p.read_text()
+          old = '''            compose.onNodeWithTag("auth-password").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("auth-submit").performScrollTo().assertIsDisplayed()
+            assertMinTouchTarget("continue-google", 72f)
+            compose.onNodeWithTag("continue-google-label").assertIsDisplayed()
+            capture("font200-auth")'''
+          new = '''            compose.onNodeWithTag("continue-google").performScrollTo().assertIsDisplayed()
+            assertMinTouchTarget("continue-google", 72f)
+            compose.onNodeWithTag("continue-google-label").assertIsDisplayed()
+            capture("font200-auth")
+            compose.onNodeWithTag("auth-password").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("auth-submit").performScrollTo().assertIsDisplayed()'''
+          if s.count(old) != 1:
+              raise SystemExit(f'Expected exactly one font200 block, found {s.count(old)}')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          test "$(sha256sum "$TEST" | cut -d' ' -f1)" = "6810667463d3d54a53dac8bc6aa202ebeccd21d97dd9562a39b09b56b45ecb3e"
+          git show 1367712c378125569be74194564775678e54d074:.github/workflows/frontend-final-compile-gate.yml > .github/workflows/frontend-final-compile-gate.yml
+          git diff --check
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = ".github/workflows/frontend-final-compile-gate.yml android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/RootStage90InstrumentedTest.kt "
+          git config user.name 'Veltrix Frontend Master'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/workflows/frontend-final-compile-gate.yml "$TEST"
+          git commit -m 'test(frontend): restore Stage90 proof and reorder Google CTA check'
+          git push origin HEAD:veltrix-hom-frontend-final-closure
+          echo 'Corrective commit pushed; executor SHA is intentionally not acceptance evidence.'
+          exit 1
       - name: Accepted backend boundary
         shell: bash
         run: |
