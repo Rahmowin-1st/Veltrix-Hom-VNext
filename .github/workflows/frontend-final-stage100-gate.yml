@@ -1,0 +1,238 @@
+name: Veltrix Frontend Final Stage100 Gate
+
+on:
+  push:
+    branches: [veltrix-hom-frontend-final-closure]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: veltrix-frontend-final-stage100-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ACCEPTED_BACKEND_SHA: c93653d1bb48c9e2ecea9fac570f966a5a878ff0
+  PART1_SHA: ae8499fec896bd8715f5f114fc0eb95f12e8ebe1
+  PART2_BASELINE_SHA: b032bad2771b7abbee3ee1de8ff9f2d9491c0eb3
+  EVIDENCE_BRANCH: veltrix-hom-frontend-final-ci-evidence
+  VELTRIX_ENV: test
+  VELTRIX_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_DATABASE_USER: postgres
+  VELTRIX_DATABASE_PASSWORD: postgres
+  VELTRIX_TEST_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/veltrix_vnext_test
+  VELTRIX_TEST_DATABASE_USER: postgres
+  VELTRIX_TEST_DATABASE_PASSWORD: postgres
+  VELTRIX_AI_PROVIDER: disabled
+  VELTRIX_TEST_AI_MOCK: 'true'
+  VELTRIX_EMBEDDING_PROVIDER: disabled
+  VELTRIX_TEST_EMBEDDING_MOCK: 'true'
+  VELTRIX_EMBEDDING_DIMENSIONS: '64'
+  VELTRIX_TEST_OCR_MOCK: 'true'
+  VELTRIX_TEST_TRANSLATE_MOCK: 'true'
+  VELTRIX_STORAGE_PROVIDER: local
+  VELTRIX_WORKERS_ENABLED: 'true'
+
+jobs:
+  stage100:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: veltrix_vnext_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d veltrix_vnext_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Current closure provenance and frozen backend boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/frontend-stage100 package-stage100
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          for sha in "$ACCEPTED_BACKEND_SHA" "$PART1_SHA" "$PART2_BASELINE_SHA"; do
+            git cat-file -e "$sha^{commit}"
+            git merge-base --is-ancestor "$sha" "$GITHUB_SHA"
+          done
+          if git diff --name-only "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA" | grep -E '^(server/|database/migrations/|core/src/main/)'; then
+            echo 'Frozen backend-owned source changed after accepted backend authority.' >&2
+            exit 1
+          fi
+          printf 'repo=%s\nbranch=%s\ncommit=%s\naccepted_backend=%s\npart1=%s\npart2=%s\nrun=%s\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" "$PART1_SHA" "$PART2_BASELINE_SHA" "$GITHUB_RUN_ID" \
+            | tee evidence/frontend-stage100/provenance.txt
+          git diff --name-only "$ACCEPTED_BACKEND_SHA" "$GITHUB_SHA" | tee evidence/frontend-stage100/frontend-delta.txt
+          printf 'FROZEN_BACKEND=PASS\nHISTORICAL_FRONTEND_BASELINES=ANCESTORS\n' | tee evidence/frontend-stage100/boundary.txt
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+
+      - name: Regressions and exact debug test release builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :core:test :server:test :android:app:testDebugUnitTest \
+            :android:app:assembleDebug :android:app:assembleDebugAndroidTest :android:app:assembleRelease \
+            | tee evidence/frontend-stage100/build.txt
+          grep -q 'BUILD SUCCESSFUL' evidence/frontend-stage100/build.txt
+          bash scripts/run_local_regressions.sh | tee evidence/frontend-stage100/local-regressions.txt
+          grep -q 'LOCAL_REGRESSION_GATE=PASS total=105' evidence/frontend-stage100/local-regressions.txt
+          DEBUG_APK=android/app/build/outputs/apk/debug/app-debug.apk
+          TEST_APK=android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          RELEASE_APK="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -s "$DEBUG_APK"; test -s "$TEST_APK"; test -n "$RELEASE_APK"; test -s "$RELEASE_APK"
+          sha256sum "$DEBUG_APK" | tee evidence/frontend-stage100/debug-apk-sha256.txt
+          sha256sum "$TEST_APK" | tee evidence/frontend-stage100/androidtest-apk-sha256.txt
+          sha256sum "$RELEASE_APK" | tee evidence/frontend-stage100/release-apk-sha256.txt
+          printf 'BUILD=PASS\nBACKEND_REGRESSION=PASS\nLOCAL_REGRESSION_105=PASS\n' | tee evidence/frontend-stage100/build-gate.txt
+
+      - name: Start accepted backend runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup gradle --no-daemon :server:run > evidence/frontend-stage100/server-runtime.log 2>&1 &
+          ready=0
+          for i in $(seq 1 120); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8080/ready > evidence/frontend-stage100/ready.json; then ready=1; break; fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then tail -n 180 evidence/frontend-stage100/server-runtime.log || true; exit 1; fi
+          grep -q '"ready":true' evidence/frontend-stage100/ready.json
+          echo 'BACKEND_RUNTIME=PASS' | tee evidence/frontend-stage100/backend-runtime.txt
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Provision API36 and motion tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'emulator' 'platforms;android-36' 'build-tools;37.0.0' 'system-images;android-36;google_apis;x86_64'
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+          ls -l /dev/kvm | tee evidence/frontend-stage100/kvm.txt
+          if ! command -v ffprobe >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y ffmpeg; fi
+          ffprobe -version | head -1 | tee evidence/frontend-stage100/ffprobe-version.txt
+
+      - name: API36 current-root plus comprehensive visual motion A11Y adaptive proof
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          cores: 4
+          disable-animations: false
+          emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
+          script: >-
+            bash scripts/root_reset_stage90_gate.sh &&
+            bash .github/scripts/frontend-part3-final-proof.sh &&
+            bash .github/scripts/frontend-part3-motion-fidelity-proof.sh
+
+      - name: Fail-closed Stage100 automated verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx 'ROOT_STAGE90_TESTS=PASS tests=6 failures=0 errors=0 skipped=0' evidence/stage90/test-summary.txt
+          for marker in AUTH_GATEWAY=PASS GOOGLE_FRONTEND_TRANSPORT=PASS SERVER_SESSION_BOOTSTRAP=PASS SIGN_OUT=PASS NO_PRODUCT_BEFORE_SERVER_SESSION=PASS CURRENT_ROOT_VISUAL_PROOF=PASS PERSONAL_SIGNAL_LAYOUT=PASS STORE_NO_RAW_JSON=PASS STORE_NO_INTERNAL_ID_LEAK=PASS PROJECT_WORKSPACE_FULLY_LOADED=PASS FONT_SCALE_200=PASS REDUCED_MOTION_PATH=PASS API36_JANKSTATS_SANITY=PASS; do
+            grep -qx "$marker" evidence/stage90/stage90-gate.txt
+          done
+          grep -qx 'PNG_DIMENSIONS=PASS count=13' evidence/stage90/png-dimensions.txt
+          test "$(wc -l < evidence/stage90/screenshot-sha256.txt | tr -d ' ')" = '13'
+
+          grep -q 'PART1=CLOSED' evidence/runtime/final-gate.txt
+          grep -q 'PART2=CLOSED' evidence/runtime/final-gate.txt
+          grep -q 'PART3=CLOSED' evidence/runtime/final-gate.txt
+          grep -q 'VISUAL_MATRIX=PASS count=35 semantic=35 complete_render=35 bounds_gate=PASS fresh_manifest=PASS' evidence/screens/visual-matrix-gate.txt
+          grep -q 'CRITICAL_LAYOUT_BOUNDS=PASS count=8' evidence/screens/layout-bounds-gate.txt
+          grep -q 'MOTION_TEMPORAL_EVIDENCE=PASS clips=3 vfr_safe=1' evidence/motion/motion-gate.txt
+          grep -q 'MOTION_FRAME_PACING_EMULATOR=PASS source=jankstats_ui_cpu screenrecord_free=1' evidence/motion/motion-gate.txt
+          grep -q 'MOTION_HIGH_FIDELITY=PASS source=compose_main_test_clock source_frames=49 minimum_distinct=12 minimum_lens_positions=12 playback_fps=60 runtime_fps_claim=NONE' evidence/motion/motion-gate.txt
+          grep -q 'JANKSTATS_UI_CPU_EMULATOR=PASS' evidence/performance/jankstats-ui-cpu.txt
+          grep -q 'EXTREME_FONT=PASS' evidence/accessibility/adaptive-gate.txt
+          grep -q 'REDUCED_MOTION=PASS' evidence/accessibility/adaptive-gate.txt
+          grep -q 'HIGH_CONTRAST=PASS' evidence/accessibility/adaptive-gate.txt
+          grep -q 'RTL=PASS' evidence/accessibility/adaptive-gate.txt
+          grep -q 'EXPANDED_LAYOUT=PASS' evidence/accessibility/adaptive-gate.txt
+          grep -q 'NARROW_LAYOUT=PASS' evidence/accessibility/adaptive-gate.txt
+          test "$(find evidence/screens -maxdepth 1 -type f -name '*.png' | wc -l | tr -d ' ')" = '49'
+          test "$(find evidence/motion/high-fidelity/frames -maxdepth 1 -type f -name 'frame-*.jpg' | wc -l | tr -d ' ')" = '49'
+          test "$(find evidence/motion -maxdepth 1 -type f -name '*.mp4' | wc -l | tr -d ' ')" = '3'
+          sha256sum -c evidence/screens/screenshot-sha256.txt
+          sha256sum -c evidence/motion/high-fidelity/frame-sha256.txt
+
+          cat > evidence/frontend-stage100/final.txt <<'EOF'
+          STAGE90_CURRENT_ROOT=PASS
+          STAGE100_VISUAL_MATRIX=PASS
+          STAGE100_CRITICAL_BOUNDS=PASS
+          STAGE100_MOTION_TEMPORAL=PASS
+          STAGE100_MOTION_DETERMINISTIC=PASS
+          STAGE100_A11Y_ADAPTIVE=PASS
+          STAGE100_DURABILITY=PASS
+          STAGE100_EMULATOR_PF_SANITY=PASS
+          LIVE_GOOGLE_E2E=NOT_VERIFIED_EXTERNAL
+          RELEASE_PROFILEABLE_PF=NOT_VERIFIED
+          PHYSICAL_DEVICE_PF=NOT_VERIFIED
+          HUMAN_VISUAL_ACCEPTANCE=NOT_VERIFIED
+          FRONTEND_STAGE100_AUTOMATED=PASS
+          EOF
+
+      - name: Package exact Stage100 evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p package-stage100
+          git archive --format=zip --output=package-stage100/Veltrix-Hom-Frontend-Stage100-EXACT-SOURCE.zip HEAD
+          cp android/app/build/outputs/apk/debug/app-debug.apk package-stage100/Veltrix-Hom-VNext-debug.apk 2>/dev/null || true
+          cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk package-stage100/Veltrix-Hom-VNext-androidTest.apk 2>/dev/null || true
+          RELEASE_APK="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' 2>/dev/null | head -n 1 || true)"
+          if [ -n "$RELEASE_APK" ] && [ -s "$RELEASE_APK" ]; then cp "$RELEASE_APK" package-stage100/Veltrix-Hom-VNext-release.apk; fi
+          cp -a evidence package-stage100/evidence
+          (cd package-stage100 && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+          sha256sum package-stage100/Veltrix-Hom-Frontend-Stage100-EXACT-SOURCE.zip | tee evidence/frontend-stage100/exact-source-sha256.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: veltrix-frontend-final-stage100-${{ github.run_id }}
+          path: package-stage100/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish Stage100 status to evidence branch
+        if: always()
+        shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$EVIDENCE_BRANCH"
+          git worktree add /tmp/frontend-stage100-evidence "origin/$EVIDENCE_BRANCH"
+          cd /tmp/frontend-stage100-evidence
+          mkdir -p ci-status
+          printf 'workflow=frontend-final-stage100-gate\nstatus=%s\nrun_id=%s\ntested_sha=%s\naccepted_backend=%s\n' \
+            "$JOB_STATUS" "$GITHUB_RUN_ID" "$GITHUB_SHA" "$ACCEPTED_BACKEND_SHA" > ci-status/stage100-latest.txt
+          git config user.name 'Veltrix CI Evidence'
+          git config user.email 'actions@users.noreply.github.com'
+          git add ci-status/stage100-latest.txt
+          git commit -m "evidence(frontend): stage100 ${JOB_STATUS} ${GITHUB_SHA}" || true
+          git push origin HEAD:"$EVIDENCE_BRANCH"
