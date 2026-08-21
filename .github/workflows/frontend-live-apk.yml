@@ -1,0 +1,57 @@
+name: Veltrix Live APK
+
+on:
+  push:
+    branches: [veltrix-hom-frontend-final-closure]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: veltrix-live-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-live-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.5.1'}
+      - name: Build live installable APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :android:app:assembleDebug
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          mkdir -p live-apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk live-apk/Veltrix-Hom-VNext-LIVE.apk
+          sha256sum live-apk/Veltrix-Hom-VNext-LIVE.apk > live-apk/SHA256.txt
+          printf 'tested_sha=%s\napi_url=https://veltrix-hom-vnext-server.onrender.com\ngoogle_client_id=134258068461-juhu2o7uh49utuiha9kkvkc9n0g9v2ce.apps.googleusercontent.com\n' "$GITHUB_SHA" > live-apk/PROVENANCE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-live-apk-${{ github.run_id }}
+          path: live-apk/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish live APK status
+        if: always()
+        shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          git fetch origin veltrix-hom-frontend-final-ci-evidence
+          git worktree add /tmp/frontend-ci-evidence origin/veltrix-hom-frontend-final-ci-evidence
+          cd /tmp/frontend-ci-evidence
+          mkdir -p ci-status
+          printf 'workflow=frontend-live-apk\nstatus=%s\nrun_id=%s\ntested_sha=%s\n' "$JOB_STATUS" "$GITHUB_RUN_ID" "$GITHUB_SHA" > ci-status/live-apk-latest.txt
+          git config user.name 'Veltrix CI Evidence'
+          git config user.email 'actions@users.noreply.github.com'
+          git add ci-status/live-apk-latest.txt
+          git commit -m "evidence(frontend): live apk ${JOB_STATUS} ${GITHUB_SHA}" || true
+          git push origin HEAD:veltrix-hom-frontend-final-ci-evidence
