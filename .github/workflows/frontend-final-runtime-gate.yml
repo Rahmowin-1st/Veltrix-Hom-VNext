@@ -182,7 +182,7 @@ jobs:
           cp android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk evidence/frontend-final-runtime/Veltrix-Hom-VNext-androidTest.apk 2>/dev/null || true
           git archive --format=zip --output=evidence/frontend-final-runtime/exact-source.zip HEAD
           sha256sum evidence/frontend-final-runtime/exact-source.zip | tee evidence/frontend-final-runtime/exact-source-sha256.txt
-          find evidence/frontend-final-runtime -type f -maxdepth 4 -print0 | sort -z | xargs -0 sha256sum > evidence/frontend-final-runtime/SHA256SUMS.txt || true
+          find evidence/frontend-final-runtime -maxdepth 4 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > evidence/frontend-final-runtime/SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         if: always()
