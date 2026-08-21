@@ -14,8 +14,8 @@ android {
         versionCode = 7
         versionName = "0.7.0-final-root-reset"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "VELTRIX_API_BASE_URL", "\"${providers.gradleProperty("VELTRIX_API_BASE_URL").orElse("http://10.0.2.2:8080").get()}\"")
-        buildConfigField("String", "VELTRIX_GOOGLE_SERVER_CLIENT_ID", "\"${providers.gradleProperty("VELTRIX_GOOGLE_SERVER_CLIENT_ID").orElse("").get()}\"")
+        buildConfigField("String", "VELTRIX_API_BASE_URL", "\"${providers.gradleProperty("VELTRIX_API_BASE_URL").orElse("https://veltrix-hom-vnext-server.onrender.com").get()}\"")
+        buildConfigField("String", "VELTRIX_GOOGLE_SERVER_CLIENT_ID", "\"${providers.gradleProperty("VELTRIX_GOOGLE_SERVER_CLIENT_ID").orElse("134258068461-juhu2o7uh49utuiha9kkvkc9n0g9v2ce.apps.googleusercontent.com").get()}\"")
         buildConfigField("String", "VELTRIX_GOOGLE_AUTH_ENDPOINT", "\"${providers.gradleProperty("VELTRIX_GOOGLE_AUTH_ENDPOINT").orElse("/v1/auth/google").get()}\"")
     }
     buildFeatures { compose = true; buildConfig = true }
