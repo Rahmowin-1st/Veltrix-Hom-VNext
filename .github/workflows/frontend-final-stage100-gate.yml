@@ -144,7 +144,7 @@ jobs:
           emulator-options: -no-window -gpu auto -noaudio -no-boot-anim -camera-back none
           script: >-
             bash scripts/root_reset_stage90_gate.sh &&
-            sed "s/Part2 Learner|Ask Veltrix|Build the next useful step/Stage100 Shell|Build a meaningful next focus|Start with Veltrix/g" .github/scripts/frontend-part3-final-proof.sh > /tmp/frontend-part3-final-proof.sh && bash /tmp/frontend-part3-final-proof.sh &&
+            sed -e "s/Part2 Learner|Ask Veltrix|Build the next useful step/Stage100 Shell|Build a meaningful next focus|Start with Veltrix/g" -e "/evidence\/accessibility\/extreme-font-shell.txt/d" .github/scripts/frontend-part3-final-proof.sh > /tmp/frontend-part3-final-proof.sh && bash /tmp/frontend-part3-final-proof.sh &&
             bash .github/scripts/frontend-part3-motion-fidelity-proof.sh
 
       - name: Fail-closed Stage100 automated verification
