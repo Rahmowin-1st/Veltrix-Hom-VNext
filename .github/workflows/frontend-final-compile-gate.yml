@@ -55,27 +55,38 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "9f11ac2ccbc4c44fb6ced292928adb6e7c1d6761"
+          test "$(git rev-parse HEAD^)" = "553455603ff49685633ab9f3af1f6afcb0ebcaf9"
           TEST=android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/RootStage90InstrumentedTest.kt
           git show 1367712c378125569be74194564775678e54d074:"$TEST" > "$TEST"
           python3 - <<'PY'
           from pathlib import Path
           p = Path('android/app/src/androidTest/kotlin/com/veltrix/hom/vnext/RootStage90InstrumentedTest.kt')
-          s = p.read_text()
-          old = '''            compose.onNodeWithTag("auth-password").performScrollTo().assertIsDisplayed()
-            compose.onNodeWithTag("auth-submit").performScrollTo().assertIsDisplayed()
-            assertMinTouchTarget("continue-google", 72f)
-            compose.onNodeWithTag("continue-google-label").assertIsDisplayed()
-            capture("font200-auth")'''
-          new = '''            compose.onNodeWithTag("continue-google").performScrollTo().assertIsDisplayed()
-            assertMinTouchTarget("continue-google", 72f)
-            compose.onNodeWithTag("continue-google-label").assertIsDisplayed()
-            capture("font200-auth")
-            compose.onNodeWithTag("auth-password").performScrollTo().assertIsDisplayed()
-            compose.onNodeWithTag("auth-submit").performScrollTo().assertIsDisplayed()'''
-          if s.count(old) != 1:
-              raise SystemExit(f'Expected exactly one font200 block, found {s.count(old)}')
-          p.write_text(s.replace(old, new, 1))
+          lines = p.read_text().splitlines(keepends=True)
+          old = [
+              'compose.onNodeWithTag("auth-password").performScrollTo().assertIsDisplayed()',
+              'compose.onNodeWithTag("auth-submit").performScrollTo().assertIsDisplayed()',
+              'assertMinTouchTarget("continue-google", 72f)',
+              'compose.onNodeWithTag("continue-google-label").assertIsDisplayed()',
+              'capture("font200-auth")',
+          ]
+          hits = []
+          for i in range(len(lines) - len(old) + 1):
+              if [line.strip() for line in lines[i:i + len(old)]] == old:
+                  hits.append(i)
+          if len(hits) != 1:
+              raise SystemExit(f'Expected one font200 block, found {len(hits)}')
+          i = hits[0]
+          indent = lines[i][:-len(lines[i].lstrip())]
+          new = [
+              'compose.onNodeWithTag("continue-google").performScrollTo().assertIsDisplayed()',
+              'assertMinTouchTarget("continue-google", 72f)',
+              'compose.onNodeWithTag("continue-google-label").assertIsDisplayed()',
+              'capture("font200-auth")',
+              'compose.onNodeWithTag("auth-password").performScrollTo().assertIsDisplayed()',
+              'compose.onNodeWithTag("auth-submit").performScrollTo().assertIsDisplayed()',
+          ]
+          replacement = [indent + line + '\n' for line in new]
+          p.write_text(''.join(lines[:i] + replacement + lines[i + len(old):]))
           PY
           test "$(sha256sum "$TEST" | cut -d' ' -f1)" = "6810667463d3d54a53dac8bc6aa202ebeccd21d97dd9562a39b09b56b45ecb3e"
           git show 1367712c378125569be74194564775678e54d074:.github/workflows/frontend-final-compile-gate.yml > .github/workflows/frontend-final-compile-gate.yml
