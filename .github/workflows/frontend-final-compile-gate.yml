@@ -80,8 +80,12 @@ jobs:
           grep -Fq 'personal-signal-$tag' "$APP/RootPersonalStage50.kt"
           grep -Fq 'PROJECT_WORKSPACE_FULLY_LOADED=PASS' scripts/root_reset_stage90_gate.sh
           test "$(grep -o 'VeltrixWorld\.[A-Z]*' "$APP/RootResetShell.kt" | sort -u | grep -Ec 'VeltrixWorld\.(HOME|PERSONAL|STORE|PROJECTS)')" -ge 4
+          grep -Fq 'create("benchmark")' android/app/build.gradle.kts
+          grep -Fq 'isProfileable = true' android/app/build.gradle.kts
+          grep -Fq 'targetProjectPath = ":android:app"' android/benchmark/build.gradle.kts
+          grep -Fq 'MacrobenchmarkRule' android/benchmark/src/main/kotlin/com/veltrix/hom/vnext/benchmark/StartupBenchmark.kt
           if grep -RniE 'continue offline|offline mode|guest mode' "$APP/RootResetAuth.kt" "$APP/RootResetShell.kt"; then echo 'Offline/guest product path found.' >&2; exit 1; fi
-          printf 'CONTINUE_WITH_GOOGLE_WIRING=PASS\nSIGN_OUT_SOURCE=PASS\nSTORE_TYPED_AVAILABILITY=PASS\nPERSONAL_LAYOUT_SOURCE=PASS\nPROJECT_WORKSPACE_SUCCESS_GATE=PASS\nNO_GUEST_MODE=PASS\nNO_OFFLINE_PRODUCT_MODE=PASS\n' | tee evidence/frontend-final/source-gates.txt
+          printf 'CONTINUE_WITH_GOOGLE_WIRING=PASS\nSIGN_OUT_SOURCE=PASS\nSTORE_TYPED_AVAILABILITY=PASS\nPERSONAL_LAYOUT_SOURCE=PASS\nPROJECT_WORKSPACE_SUCCESS_GATE=PASS\nNO_GUEST_MODE=PASS\nNO_OFFLINE_PRODUCT_MODE=PASS\nPROFILEABLE_BENCHMARK_SOURCE=PASS\n' | tee evidence/frontend-final/source-gates.txt
       - uses: actions/setup-java@v5
         with: {distribution: temurin, java-version: '17'}
       - uses: gradle/actions/setup-gradle@v4
@@ -90,13 +94,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gradle --no-daemon :core:test :server:test :android:app:testDebugUnitTest :android:app:assembleDebug :android:app:assembleDebugAndroidTest | tee evidence/frontend-final/build.txt
+          gradle --no-daemon :core:test :server:test :android:app:testDebugUnitTest :android:app:assembleDebug :android:app:assembleDebugAndroidTest :android:app:assembleBenchmark :android:benchmark:assemble | tee evidence/frontend-final/build.txt
           grep -q 'BUILD SUCCESSFUL' evidence/frontend-final/build.txt
           test -s android/app/build/outputs/apk/debug/app-debug.apk
           test -s android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          BENCHMARK_APK="$(find android/app/build/outputs/apk/benchmark -type f -name '*.apk' | head -n 1)"
+          test -n "$BENCHMARK_APK"; test -s "$BENCHMARK_APK"
           sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee evidence/frontend-final/debug-apk-sha256.txt
           sha256sum android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk | tee evidence/frontend-final/androidtest-apk-sha256.txt
-          printf 'ANDROID_BUILD=PASS\nBACKEND_REGRESSION=PASS\nGOOGLE_AUTH_CONTRACT_UNIT=PASS\n' | tee evidence/frontend-final/build-gates.txt
+          sha256sum "$BENCHMARK_APK" | tee evidence/frontend-final/benchmark-apk-sha256.txt
+          printf 'ANDROID_BUILD=PASS\nBACKEND_REGRESSION=PASS\nGOOGLE_AUTH_CONTRACT_UNIT=PASS\nPROFILEABLE_BENCHMARK_BUILD=PASS\n' | tee evidence/frontend-final/build-gates.txt
       - name: Package exact compile evidence
         if: always()
         shell: bash
