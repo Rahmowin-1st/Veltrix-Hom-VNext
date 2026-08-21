@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.printToLog
+import androidx.test.platform.app.InstrumentationRegistry
 import com.veltrix.hom.vnext.core.CapabilityRoute
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -18,9 +19,33 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
+import org.junit.rules.TestRule
+import org.junit.runner.Description
+import org.junit.runners.model.Statement
 
 class ShellInstrumentedTest {
-    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    private val compose = createAndroidComposeRule<MainActivity>()
+    private lateinit var seededSession: LocalSession
+
+    private val seedSessionRule = TestRule { base: Statement, _: Description ->
+        object : Statement() {
+            override fun evaluate() {
+                val targetContext = InstrumentationRegistry.getInstrumentation().targetContext
+                val apiSession = VeltrixApiClient().register(
+                    "stage100-shell-${System.currentTimeMillis()}@example.test",
+                    "Veltrix!Runtime2026",
+                    "Stage100 Shell",
+                )
+                seededSession = LocalSession(apiSession.accountId, apiSession.token)
+                runBlocking { SessionStore(targetContext).save(seededSession) }
+                base.evaluate()
+            }
+        }
+    }
+
+    @get:Rule
+    val rules: RuleChain = RuleChain.outerRule(seedSessionRule).around(compose)
 
     @Test
     fun fourPrimaryWorldsAndGlobalCapabilitiesRemainReachable() {
@@ -31,7 +56,8 @@ class ShellInstrumentedTest {
             "VELTRIX_HOME_DIAG",
             "sessionPresent=${persistedSession != null} accountId=${persistedSession?.accountId ?: "none"}",
         )
-        assertNotNull("Seeded session must survive into the real Activity test process", persistedSession)
+        assertNotNull("Fresh backend session must survive into the real Activity test process", persistedSession)
+        assertEquals("Shell must validate the session seeded before Activity launch", seededSession.accountId, persistedSession?.accountId)
 
         // RootResetApp intentionally fail-closes behind an asynchronous server-session validation.
         // Do not treat the initial CHECKING gate as a missing shell; wait for the validated PRODUCT world.
