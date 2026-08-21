@@ -1,0 +1,205 @@
+name: Veltrix Physical Android Device Control
+
+on:
+  push:
+    branches: [veltrix-hom-frontend-final-closure]
+    paths:
+      - 'device-control/command.json'
+      - '.github/workflows/physical-device-control.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: veltrix-physical-device-control
+  cancel-in-progress: false
+
+env:
+  EVIDENCE_BRANCH: veltrix-hom-frontend-final-ci-evidence
+
+jobs:
+  physical-device:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Connect and drive physical Android device
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidence = Join-Path $PWD 'device-control/evidence'
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+
+          $adbCandidates = @()
+          if ($env:ANDROID_HOME) { $adbCandidates += (Join-Path $env:ANDROID_HOME 'platform-tools/adb.exe') }
+          if ($env:ANDROID_SDK_ROOT) { $adbCandidates += (Join-Path $env:ANDROID_SDK_ROOT 'platform-tools/adb.exe') }
+          if ($env:LOCALAPPDATA) { $adbCandidates += (Join-Path $env:LOCALAPPDATA 'Android/Sdk/platform-tools/adb.exe') }
+          $cmd = Get-Command adb.exe -ErrorAction SilentlyContinue
+          if ($cmd) { $adbCandidates += $cmd.Source }
+          $adb = $adbCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+
+          if (-not $adb) {
+            $zip = Join-Path $env:RUNNER_TEMP 'platform-tools-latest-windows.zip'
+            $sdk = Join-Path $env:RUNNER_TEMP 'veltrix-android-platform-tools'
+            Invoke-WebRequest -Uri 'https://dl.google.com/android/repository/platform-tools-latest-windows.zip' -OutFile $zip
+            if (Test-Path $sdk) { Remove-Item -Recurse -Force $sdk }
+            Expand-Archive -Path $zip -DestinationPath $sdk -Force
+            $adb = Join-Path $sdk 'platform-tools/adb.exe'
+          }
+
+          & $adb start-server | Out-File -Encoding utf8 (Join-Path $evidence 'adb-start.txt')
+          $deviceLines = @(& $adb devices -l)
+          $deviceLines | Out-File -Encoding utf8 (Join-Path $evidence 'adb-devices.txt')
+          $authorized = @($deviceLines | Where-Object { $_ -match '^\S+\s+device\b' })
+          $unauthorized = @($deviceLines | Where-Object { $_ -match '^\S+\s+unauthorized\b' })
+
+          if ($unauthorized.Count -gt 0) {
+            'PHYSICAL_DEVICE=UNAUTHORIZED' | Out-File -Encoding utf8 (Join-Path $evidence 'status.txt')
+            throw 'Phone is connected but USB debugging authorization has not been accepted on the phone.'
+          }
+          if ($authorized.Count -eq 0) {
+            'PHYSICAL_DEVICE=NOT_CONNECTED' | Out-File -Encoding utf8 (Join-Path $evidence 'status.txt')
+            throw 'No authorized physical Android device is visible to ADB.'
+          }
+          if ($authorized.Count -gt 1) {
+            'PHYSICAL_DEVICE=MULTIPLE_DEVICES' | Out-File -Encoding utf8 (Join-Path $evidence 'status.txt')
+            throw 'More than one authorized Android device is connected; disconnect extras.'
+          }
+
+          $serial = ($authorized[0] -split '\s+')[0]
+          $model = (& $adb -s $serial shell getprop ro.product.model).Trim()
+          $manufacturer = (& $adb -s $serial shell getprop ro.product.manufacturer).Trim()
+          $android = (& $adb -s $serial shell getprop ro.build.version.release).Trim()
+          $sdkLevel = (& $adb -s $serial shell getprop ro.build.version.sdk).Trim()
+          $fingerprint = (& $adb -s $serial shell getprop ro.build.fingerprint).Trim()
+          @(
+            "serial=$serial"
+            "manufacturer=$manufacturer"
+            "model=$model"
+            "android=$android"
+            "sdk=$sdkLevel"
+            "fingerprint=$fingerprint"
+          ) | Out-File -Encoding utf8 (Join-Path $evidence 'device-meta.txt')
+
+          function Capture-Step([int]$index, [string]$label) {
+            $safe = ($label -replace '[^A-Za-z0-9._-]', '_')
+            $prefix = ('{0:D2}-{1}' -f $index, $safe)
+            & $adb -s $serial shell screencap -p /sdcard/veltrix-device.png | Out-Null
+            & $adb -s $serial pull /sdcard/veltrix-device.png (Join-Path $evidence "$prefix.png") | Out-Null
+            try {
+              & $adb -s $serial shell uiautomator dump /sdcard/veltrix-window.xml | Out-Null
+              & $adb -s $serial pull /sdcard/veltrix-window.xml (Join-Path $evidence "$prefix.xml") | Out-Null
+            } catch { }
+          }
+
+          $commandPath = Join-Path $PWD 'device-control/command.json'
+          if (Test-Path $commandPath) {
+            $spec = Get-Content -Raw $commandPath | ConvertFrom-Json
+          } else {
+            $spec = [pscustomobject]@{ action = 'probe' }
+          }
+          $steps = if ($spec.steps) { @($spec.steps) } else { @($spec) }
+
+          $i = 0
+          Capture-Step $i 'initial'
+          foreach ($step in $steps) {
+            $i++
+            $action = [string]$step.action
+            switch ($action) {
+              'probe' { }
+              'wait' { Start-Sleep -Milliseconds ([int]$step.ms) }
+              'home' { & $adb -s $serial shell input keyevent KEYCODE_HOME | Out-Null }
+              'back' { & $adb -s $serial shell input keyevent KEYCODE_BACK | Out-Null }
+              'keyevent' { & $adb -s $serial shell input keyevent ([string]$step.code) | Out-Null }
+              'tap' { & $adb -s $serial shell input tap ([int]$step.x) ([int]$step.y) | Out-Null }
+              'swipe' { & $adb -s $serial shell input swipe ([int]$step.x1) ([int]$step.y1) ([int]$step.x2) ([int]$step.y2) ([int]$step.durationMs) | Out-Null }
+              'text' {
+                $text = ([string]$step.text) -replace ' ', '%s'
+                & $adb -s $serial shell input text $text | Out-Null
+              }
+              'open' {
+                $pkg = [string]$step.package
+                if (-not $pkg) { throw 'open action requires package' }
+                & $adb -s $serial shell monkey -p $pkg -c android.intent.category.LAUNCHER 1 | Out-Null
+              }
+              'force_stop' {
+                $pkg = [string]$step.package
+                if (-not $pkg) { throw 'force_stop action requires package' }
+                & $adb -s $serial shell am force-stop $pkg | Out-Null
+              }
+              'install_artifact' {
+                $artifactId = [string]$step.artifactId
+                if (-not $artifactId) { throw 'install_artifact action requires artifactId' }
+                $zipPath = Join-Path $env:RUNNER_TEMP "veltrix-artifact-$artifactId.zip"
+                $outDir = Join-Path $env:RUNNER_TEMP "veltrix-artifact-$artifactId"
+                $headers = @{
+                  Authorization = "Bearer $env:GITHUB_TOKEN"
+                  Accept = 'application/vnd.github+json'
+                  'X-GitHub-Api-Version' = '2022-11-28'
+                }
+                Invoke-WebRequest -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$artifactId/zip" -OutFile $zipPath
+                if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
+                Expand-Archive -Path $zipPath -DestinationPath $outDir -Force
+                $apk = Get-ChildItem -Path $outDir -Recurse -Filter '*.apk' | Sort-Object Length -Descending | Select-Object -First 1
+                if (-not $apk) { throw 'No APK found in requested artifact' }
+                & $adb -s $serial install -r $apk.FullName | Tee-Object -FilePath (Join-Path $evidence 'install.txt')
+                if ($LASTEXITCODE -ne 0) { throw 'adb install failed' }
+              }
+              default { throw "Unsupported physical-device action: $action" }
+            }
+            Start-Sleep -Milliseconds 700
+            Capture-Step $i $action
+          }
+
+          & $adb -s $serial shell dumpsys window | Out-File -Encoding utf8 (Join-Path $evidence 'window.txt')
+          & $adb -s $serial shell dumpsys display | Out-File -Encoding utf8 (Join-Path $evidence 'display.txt')
+          & $adb -s $serial logcat -d -t 2500 | Out-File -Encoding utf8 (Join-Path $evidence 'logcat.txt')
+          @(
+            'PHYSICAL_DEVICE=PASS'
+            "COMMAND_STEPS=$($steps.Count)"
+            "RUN_ID=$env:GITHUB_RUN_ID"
+            "TESTED_SHA=$env:GITHUB_SHA"
+          ) | Out-File -Encoding utf8 (Join-Path $evidence 'status.txt')
+
+      - name: Upload real-device evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veltrix-physical-device-${{ github.run_id }}
+          path: device-control/evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish physical-device status
+        if: always()
+        shell: powershell
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $statusPath = Join-Path $PWD 'device-control/evidence/status.txt'
+          $details = if (Test-Path $statusPath) { Get-Content -Raw $statusPath } else { 'PHYSICAL_DEVICE=NO_STATUS' }
+          & git fetch origin $env:EVIDENCE_BRANCH
+          $wt = Join-Path $env:RUNNER_TEMP "veltrix-device-evidence-$env:GITHUB_RUN_ID"
+          if (Test-Path $wt) { Remove-Item -Recurse -Force $wt }
+          & git worktree add $wt "origin/$env:EVIDENCE_BRANCH"
+          New-Item -ItemType Directory -Force -Path (Join-Path $wt 'ci-status') | Out-Null
+          @(
+            'workflow=physical-device-control'
+            "status=$env:JOB_STATUS"
+            "run_id=$env:GITHUB_RUN_ID"
+            "tested_sha=$env:GITHUB_SHA"
+            $details.Trim()
+          ) | Out-File -Encoding utf8 (Join-Path $wt 'ci-status/physical-device-latest.txt')
+          & git -C $wt config user.name 'Veltrix Device Evidence'
+          & git -C $wt config user.email 'actions@users.noreply.github.com'
+          & git -C $wt add ci-status/physical-device-latest.txt
+          & git -C $wt commit -m "evidence(device): $env:JOB_STATUS $env:GITHUB_SHA"
+          & git -C $wt push origin "HEAD:$env:EVIDENCE_BRANCH"
